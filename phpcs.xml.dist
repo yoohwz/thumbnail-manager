@@ -1,0 +1,65 @@
+<?xml version="1.0"?>
+<ruleset name="Thumbnail Manager">
+	<description>Incremental WordPress coding standards for the v1.4 job and safety layer.</description>
+
+	<arg name="basepath" value="."/>
+	<arg name="colors"/>
+	<arg value="sp"/>
+	<arg name="extensions" value="php"/>
+	<config name="testVersion" value="7.4-"/>
+	<config name="ignore_warnings_on_exit" value="1"/>
+
+	<file>thumbnail-manager.php</file>
+	<file>inc/job-storage.php</file>
+	<file>inc/handle-prune.php</file>
+	<file>inc/handle-delete.php</file>
+	<file>inc/handle-regenerate.php</file>
+	<file>inc/handle-recommendations.php</file>
+	<file>tests</file>
+
+	<exclude-pattern>tests/bootstrap.php</exclude-pattern>
+	<exclude-pattern>tests/prune-safety-smoke.php</exclude-pattern>
+
+	<rule ref="WordPress">
+		<!-- Persistent job tables intentionally use direct, uncached database queries. -->
+		<exclude name="WordPress.DB.DirectDatabaseQuery"/>
+		<exclude name="WordPress.DB.PreparedSQL.InterpolatedNotPrepared"/>
+		<exclude name="WordPress.DB.PreparedSQL.NotPrepared"/>
+		<exclude name="WordPress.DB.SlowDBQuery.slow_db_query_meta_query"/>
+	</rule>
+
+	<rule ref="PHPCompatibilityWP"/>
+
+	<rule ref="WordPress.Files.FileName.InvalidClassFileName">
+		<exclude-pattern>thumbnail-manager.php</exclude-pattern>
+	</rule>
+
+	<rule ref="Squiz.Commenting">
+		<exclude-pattern>tests/phpunit/*</exclude-pattern>
+	</rule>
+
+	<rule ref="Generic.Commenting">
+		<exclude-pattern>tests/phpunit/*</exclude-pattern>
+	</rule>
+
+	<rule ref="WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber">
+		<exclude-pattern>inc/job-storage.php</exclude-pattern>
+	</rule>
+
+	<rule ref="WordPress.PHP.NoSilencedErrors.Discouraged">
+		<exclude-pattern>tests/phpunit/*</exclude-pattern>
+	</rule>
+
+	<rule ref="WordPress.WP.AlternativeFunctions">
+		<exclude-pattern>tests/phpunit/*</exclude-pattern>
+		<exclude-pattern>tests/job-storage-smoke.php</exclude-pattern>
+	</rule>
+
+	<rule ref="WordPress.WP.I18n">
+		<properties>
+			<property name="text_domain" type="array">
+				<element value="thumbnail-manager"/>
+			</property>
+		</properties>
+	</rule>
+</ruleset>

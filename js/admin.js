@@ -1,701 +1,1149 @@
 (function($){
-  const i18n = (window.YOTM && YOTM.i18n) ? YOTM.i18n : {};
+  'use strict';
+
+  const config  = window.YOTM || {};
+  const i18n    = config.i18n || {};
+  const ajaxurl = config.ajaxurl || window.ajaxurl || '';
+  const nonce   = config.nonce || '';
+  const siteId  = config.siteId || 0;
+  const activeStatuses = ['scanning', 'running', 'awaiting_approval', 'approved', 'deleting'];
 
   function t(key, fallback) {
     return i18n[key] || fallback;
   }
 
-  function activateTab(tab) {
-    $('#yotm_tabs .yo-tab').removeClass('active');
-    $('#yotm_tabs .yo-tab').attr({'aria-selected': 'false', 'tabindex': '-1'});
-    $('#yotm_tabs .yo-tab[data-tab="' + tab + '"]').addClass('active').attr({'aria-selected': 'true', 'tabindex': '0'});
-    $('.yo-panel').removeClass('active').attr('hidden', true);
-    $('#yotm_panel_' + tab).addClass('active').removeAttr('hidden');
+  function escapeHtml(value) {
+    return $('<div>').text(value == null ? '' : String(value)).html();
   }
 
-  // Tabs
+  function responseError(response, fallback) {
+    return response && response.data && response.data.msg ? response.data.msg : fallback;
+  }
+
+  function htmlNotice(cls, message) {
+    const safeClass = String(cls || '').replace(/[^a-z0-9_\-\s]/ig, '');
+    const role = /notice-(error|warning)/.test(safeClass) ? 'alert' : 'status';
+    return '<div class="notice ' + safeClass + '" role="' + role + '"><p>' + escapeHtml(message) + '</p></div>';
+  }
+
+  function formatBytes(bytes) {
+    let value = Math.max(0, parseInt(bytes || 0, 10));
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let unit = 0;
+    while (value >= 1024 && unit < units.length - 1) {
+      value /= 1024;
+      unit += 1;
+    }
+    return (unit === 0 ? value.toFixed(0) : value.toFixed(value >= 10 ? 1 : 2)) + ' ' + units[unit];
+  }
+
+  function parseUtcDate(value) {
+    if (!value) {
+      return null;
+    }
+    const normalized = String(value).includes('T') ? String(value) : String(value).replace(' ', 'T') + 'Z';
+    const date = new Date(normalized);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  function formatDate(value) {
+    const date = parseUtcDate(value);
+    return date ? date.toLocaleString() : '—';
+  }
+
+  function formatTemplate(value, replacements) {
+    let output = String(value || '');
+    Object.keys(replacements || {}).forEach(function(key){
+      output = output.replace(key, replacements[key]);
+    });
+    return output;
+  }
+
+  function errorDetails(errors) {
+    if (!Array.isArray(errors) || !errors.length) {
+      return '';
+    }
+    let html = '<details class="yo-error-details"><summary>' + escapeHtml(t('errorsTitle', 'Error details')) + ' (' + errors.length + ')</summary><ul class="yo-error-list">';
+    errors.forEach(function(item){
+      const identity = item.path || (item.id ? '#' + item.id : item.item_key) || t('unknownPath', 'Unknown item');
+      html += '<li><code>' + escapeHtml(identity) + '</code> — ' + escapeHtml(item.error || '') + '</li>';
+    });
+    return html + '</ul></details>';
+  }
+
+  function storageKey(type) {
+    return 'yotm_job_' + siteId + '_' + type;
+  }
+
+  function rememberJob(type, token) {
+    try {
+      window.localStorage.setItem(storageKey(type), token || '');
+    } catch (error) {}
+  }
+
+  function forgetJob(type) {
+    try {
+      window.localStorage.removeItem(storageKey(type));
+    } catch (error) {}
+  }
+
+  function recallJob(type) {
+    try {
+      return window.localStorage.getItem(storageKey(type)) || '';
+    } catch (error) {
+      return '';
+    }
+  }
+
+  function cancelJob(token) {
+    return $.post(ajaxurl, {action: 'yotm_job_cancel', nonce: nonce, token: token});
+  }
+
+  function getJobStatus(token) {
+    return $.post(ajaxurl, {action: 'yotm_job_status', nonce: nonce, token: token});
+  }
+
+  function activateTab(tab) {
+    $('#yotm_tabs .yo-tab').removeClass('active').attr({'aria-selected': 'false', tabindex: '-1'});
+    $('#yotm_tabs .yo-tab[data-tab="' + tab + '"]').addClass('active').attr({'aria-selected': 'true', tabindex: '0'});
+    $('.yo-panel').removeClass('active').prop('hidden', true);
+    $('#yotm_panel_' + tab).addClass('active').prop('hidden', false);
+  }
+
   $('#yotm_tabs .yo-tab').on('click', function(){
     activateTab($(this).data('tab'));
-  });
-
-  $('#yotm_tabs .yo-tab').on('keydown', function(e){
+  }).on('keydown', function(event){
     const keys = ['ArrowLeft', 'ArrowRight', 'Home', 'End'];
-    if (!keys.includes(e.key)) {
+    if (!keys.includes(event.key)) {
       return;
     }
-
-    e.preventDefault();
+    event.preventDefault();
     const $tabs = $('#yotm_tabs .yo-tab');
     const index = $tabs.index(this);
     let next = index;
-
-    if (e.key === 'ArrowLeft') {
+    if (event.key === 'ArrowLeft') {
       next = index <= 0 ? $tabs.length - 1 : index - 1;
-    } else if (e.key === 'ArrowRight') {
+    } else if (event.key === 'ArrowRight') {
       next = index >= $tabs.length - 1 ? 0 : index + 1;
-    } else if (e.key === 'Home') {
+    } else if (event.key === 'Home') {
       next = 0;
-    } else if (e.key === 'End') {
+    } else if (event.key === 'End') {
       next = $tabs.length - 1;
     }
-
     const $next = $tabs.eq(next);
     activateTab($next.data('tab'));
     $next.trigger('focus');
   });
 
-  // Quick toggles in Sizes tab
-  const coreSet = new Set(['thumbnail','medium','large','medium_large','1536x1536','2048x2048']);
+  const coreSet = new Set(['thumbnail', 'medium', 'large', 'medium_large', '1536x1536', '2048x2048']);
 
   $('#yotm_sizes_enable_core').on('click', function(){
-    $('input[name="yotm_enable_sizes[]"]').each(function(){
-      this.checked = coreSet.has(this.value);
-    });
+    $('input[name="yotm_enable_sizes[]"]').each(function(){ this.checked = coreSet.has(this.value); });
   });
+  $('#yotm_sizes_enable_all').on('click', function(){ $('input[name="yotm_enable_sizes[]"]').prop('checked', true); });
+  $('#yotm_sizes_disable_all').on('click', function(){ $('input[name="yotm_enable_sizes[]"]').prop('checked', false); });
 
-  $('#yotm_sizes_enable_all').on('click', function(){
-    $('input[name="yotm_enable_sizes[]"]').prop('checked', true);
-  });
-
-  $('#yotm_sizes_disable_all').on('click', function(){
-    $('input[name="yotm_enable_sizes[]"]').prop('checked', false);
-  });
-
-  // Danger zone: prune thumbnails for CURRENTLY disabled sizes
   $('#yotm_sizes_prune_disabled').on('click', function(){
     const enabled = new Set();
-
-    $('input[name="yotm_enable_sizes[]"]').each(function(){
-      if (this.checked) {
-        enabled.add(this.value);
-      }
-    });
-
-    const allSizes = [];
-    $('.yotm_keep').each(function(){
-      allSizes.push(this.value);
-    });
-
+    $('input[name="yotm_enable_sizes[]"]:checked').each(function(){ enabled.add(this.value); });
+    const allSizes = $('.yotm_keep').map(function(){ return this.value; }).get();
     if (enabled.size === allSizes.length) {
-      alert(t('allSizesEnabled', 'All sizes are enabled — there are no disabled sizes to prune.'));
+      window.alert(t('allSizesEnabled', 'All sizes are enabled — there are no disabled sizes to prune.'));
       return;
     }
-
-    if (!confirm(t('confirmPruneDisabled', 'This will delete thumbnails for all currently DISABLED sizes. Proceed?'))) {
-      return;
-    }
-
     activateTab('prune');
-
-    $('.yotm_keep').each(function(){
-      this.checked = enabled.has(this.value);
-    });
-
+    $('.yotm_keep').each(function(){ this.checked = enabled.has(this.value); });
     $('#yotm_discover_orphans').prop('checked', false);
-    $('input[name="yotm_mode"][value="delete"]').prop('checked', true);
-
     $('#yotm_run').trigger('click');
   });
 
-  const ajaxurl = (window.YOTM && YOTM.ajaxurl) ? YOTM.ajaxurl : (window.ajaxurl || '');
-  const nonce   = (window.YOTM && YOTM.nonce) ? YOTM.nonce : '';
-
-  function escapeHtml(str) {
-    return $('<div>').text(str == null ? '' : String(str)).html();
+  function jobTypeLabel(type) {
+    return {
+      prune: t('jobPrune', 'Prune files'),
+      regenerate: t('jobRegenerate', 'Regenerate'),
+      recommendation: t('jobRecommendation', 'Recommendations')
+    }[type] || type;
   }
 
-  function htmlNotice(cls, txt){
-    const safeClass = String(cls || '').replace(/[^a-z0-9_\-\s]/ig, '');
-    return '<div class="notice ' + safeClass + '"><p>' + escapeHtml(txt) + '</p></div>';
+  function jobStatusLabel(status) {
+    return {
+      scanning: t('statusScanning', 'Scanning'),
+      running: t('statusRunning', 'Running'),
+      awaiting_approval: t('statusAwaitingApproval', 'Awaiting review'),
+      approved: t('statusApproved', 'Approved'),
+      deleting: t('statusDeleting', 'Deleting'),
+      completed: t('statusCompleted', 'Completed'),
+      cancelled: t('statusCancelled', 'Stopped'),
+      expired: t('statusExpired', 'Expired')
+    }[status] || status;
   }
 
-  // =========================
-  // === PRUNE JS ============
-  // =========================
-  let token = null;
-  let total = 0;
-  let deleted = 0;
-  let bytes = 0;
-  let cancelFlag = false;
+  function tabForJob(type) {
+    return type === 'recommendation' ? 'recommendations' : type;
+  }
 
-  const $bar    = $('#yotm_progress .bar');
-  const $prog   = $('#yotm_progress');
-  const $stat   = $('#yotm_status');
-  const $res    = $('#yotm_results');
-  const $run    = $('#yotm_run');
-  const $cancel = $('#yotm_cancel');
+  function jobProgress(job) {
+    if (job.status === 'completed') {
+      return 100;
+    }
+    const total = parseInt(job.total || 0, 10);
+    const processed = parseInt(job.processed || 0, 10);
+    return total > 0 ? Math.min(99.9, processed / total * 100) : 0;
+  }
 
-  function setIndeterminate(on){
-    if (on){
-      $prog.addClass('indeterminate').attr({'aria-valuenow': '0', 'aria-busy': 'true'}).show();
-      $bar.css('width', '30%');
-      $stat.show().text(t('scanning', 'Scanning…'));
+  let recentActiveJob = null;
+
+  function renderRecentJobs(jobs) {
+    const list = Array.isArray(jobs) ? jobs : [];
+    const $body = $('#yotm_recent_jobs_body').empty();
+    if (!list.length) {
+      $body.append('<tr><td colspan="4">' + escapeHtml(t('noRecentJobs', 'No recent jobs.')) + '</td></tr>');
     } else {
-      $prog.removeClass('indeterminate').removeAttr('aria-busy');
-    }
-  }
-
-  function setProgress(p, label){
-    const value = Math.max(0, Math.min(100, p));
-    $prog.show();
-    $prog.attr('aria-valuenow', value.toFixed(0));
-    $bar.css('width', Math.max(1, value) + '%');
-    $stat.show().text(label || (p.toFixed(1) + '%'));
-  }
-
-  function resetUI(opts){
-    opts = opts || {};
-
-    token = null;
-    total = 0;
-    deleted = 0;
-    bytes = 0;
-    cancelFlag = false;
-
-    if (!opts.keepResults) {
-      $res.empty();
+      list.forEach(function(job){
+        const progress = jobProgress(job);
+        const statusClass = job.status === 'completed' ? 'yo-safe' : (job.status === 'cancelled' || job.status === 'expired' ? 'yo-warning' : 'yo-review-badge');
+        $body.append('<tr><td>' + escapeHtml(jobTypeLabel(job.type)) + '</td><td><span class="yo-badge ' + statusClass + '">' + escapeHtml(jobStatusLabel(job.status)) + '</span></td><td>' + escapeHtml(job.processed || 0) + ' / ' + escapeHtml(job.total || 0) + ' (' + progress.toFixed(0) + '%)</td><td>' + escapeHtml(formatDate(job.updated_at)) + '</td></tr>');
+      });
     }
 
-    $stat.hide().text('');
-    $prog.hide().attr('aria-valuenow', '0').removeAttr('aria-busy');
-    $bar.css('width', '0');
-    $cancel.addClass('yo-hidden');
-    $run.prop('disabled', false);
+    recentActiveJob = list.find(function(job){ return activeStatuses.includes(job.status); }) || null;
+    if (!recentActiveJob) {
+      $('#yotm_active_job').addClass('yo-hidden');
+      return;
+    }
+    $('#yotm_active_job_title').text(t('activeJob', 'Active job') + ': ' + jobTypeLabel(recentActiveJob.type));
+    $('#yotm_active_job_meta').text(jobStatusLabel(recentActiveJob.status) + ' — ' + recentActiveJob.processed + ' / ' + recentActiveJob.total);
+    $('#yotm_active_job').removeClass('yo-hidden');
   }
 
-  function gatherKeep(){
-    const keep = [];
-    $('.yotm_keep:checked').each(function(){
-      keep.push(this.value);
+  function loadRecentJobs() {
+    $.post(ajaxurl, {action: 'yotm_jobs_recent', nonce: nonce}).done(function(response){
+      if (response && response.success && response.data) {
+        renderRecentJobs(response.data.jobs || []);
+        resumeDiscoveredJob(recentActiveJob);
+      }
     });
-    return keep;
   }
 
-  function renderPruneSummary(data) {
-    const keepList = (data.keep && data.keep.length) ? data.keep.map(escapeHtml).join(', ') : '(none)';
-    const removeList = (data.remove && data.remove.length) ? data.remove.map(escapeHtml).join(', ') : '(none)';
-    const matched = parseInt(data.total || 0, 10);
-
-    let summary = '<p><strong>' + escapeHtml(t('scanBase', 'Scan base:')) + '</strong> ' + escapeHtml(data.scan_base || 'uploads/') + '</p>'
-                + '<p><strong>' + escapeHtml(t('keep', 'KEEP:')) + '</strong> ' + keepList + '</p>'
-                + '<p><strong>' + escapeHtml(t('deleteNotSelected', 'DELETE (not selected):')) + '</strong> ' + removeList + '</p>'
-                + '<p><strong>' + escapeHtml(t('matchedFiles', 'Matched files:')) + '</strong> ' + matched + '</p>';
-
-    if (data.orphan_summary){
-      const os = data.orphan_summary;
-      const keepMatch = (os.kept_match && os.kept_match.length) ? os.kept_match.slice(0, 30).map(escapeHtml).join(', ') : '(none)';
-      const delDims   = (os.delete && os.delete.length) ? os.delete.slice(0, 30).map(escapeHtml).join(', ') : '(none)';
-      const skippedOriginal = parseInt(os.skipped_original || 0, 10);
-      const unmapped = parseInt(os.unmapped || 0, 10);
-      const unmappedSkipped = parseInt(os.unmapped_skipped || 0, 10);
-
-      summary += '<div class="notice notice-info"><p>'
-        + '<strong>' + escapeHtml(t('orphanDiscovery', 'Orphan discovery:')) + '</strong> '
-        + (os.found ? Object.keys(os.found).length : 0) + ' ' + escapeHtml(t('distinctDimsFound', 'distinct dims on disk/metadata.')) + '<br>'
-        + '<strong>' + escapeHtml(t('dimsKeptBySelection', 'Dims kept by selection:')) + '</strong> ' + keepMatch + '<br>'
-        + '<strong>' + escapeHtml(t('metadataOrphanDimsDelete', 'Metadata orphan dims marked for deletion:')) + '</strong> ' + delDims
-        + (os.delete && os.delete.length > 30 ? ' ...' : '')
-        + '<br><strong>' + escapeHtml(t('originalFilesProtected', 'Original files protected:')) + '</strong> ' + skippedOriginal
-        + '<br><strong>' + escapeHtml(t('unmappedDiskSkipped', 'Unmapped disk candidates skipped:')) + '</strong> ' + Math.max(unmapped, unmappedSkipped)
-        + '</p></div>';
+  $('#yotm_active_job_view').on('click', function(){
+    if (recentActiveJob) {
+      activateTab(tabForJob(recentActiveJob.type));
+      $('#yotm_panel_' + tabForJob(recentActiveJob.type)).attr('tabindex', '-1').trigger('focus');
     }
+  });
 
-    const sample = (data.sample && data.sample.length)
-      ? '<p><strong>' + escapeHtml(t('sampleMatches', 'Sample matches')) + ' (' + data.sample.length + ' ' + escapeHtml(t('shown', 'shown')) + '):</strong></p><textarea class="yo-sample" readonly>'
-        + escapeHtml(data.sample.join("\n")) + '</textarea>'
-      : '';
+  // Prune: configure -> scan -> review -> approve -> delete -> complete.
+  let pruneToken = '';
+  let pruneManifest = '';
+  let pruneTotal = 0;
+  let pruneRunning = false;
+  let pruneReviewData = null;
+  let manifestPage = 1;
+  let manifestPages = 1;
+  let manifestTimer = null;
+	let pruneControlsLocked = false;
 
-    $res.html(summary + sample);
+  const $pruneProg = $('#yotm_progress');
+  const $pruneBar = $('#yotm_progress .bar');
+  const $pruneStat = $('#yotm_status');
+  const $pruneResults = $('#yotm_results');
+  const $pruneRun = $('#yotm_run');
+  const $pruneCancel = $('#yotm_cancel');
+  const $pruneReview = $('#yotm_review_panel');
+  const $pruneApprove = $('#yotm_approve_delete');
+
+  function setPruneStep(step) {
+    const order = ['configure', 'scanning', 'review', 'deleting', 'completed'];
+    const current = order.indexOf(step);
+    $('#yotm_prune_steps li').each(function(){
+      const index = order.indexOf($(this).data('step'));
+      $(this).toggleClass('is-complete', index < current).toggleClass('is-active', index === current);
+      if (index === current) {
+        $(this).attr('aria-current', 'step');
+      } else {
+        $(this).removeAttr('aria-current');
+      }
+    });
   }
 
-  function prepare(){
-    $run.prop('disabled', true);
-    $cancel.removeClass('yo-hidden');
-    $res.empty();
-    setIndeterminate(true);
+  function lockPruneControls(locked) {
+	pruneControlsLocked = !!locked;
+    $('.yotm_keep, #yotm_discover_orphans, input[name="yotm_prune_scope"], #yotm_subpath_search, #yotm_subpath_select_visible, #yotm_subpath_clear').prop('disabled', pruneControlsLocked);
+	refreshSubpathHierarchy();
+  }
 
+  function pruneProgress(percent, label, indeterminate) {
+    const value = Math.max(0, Math.min(100, parseFloat(percent) || 0));
+    $pruneProg.show().toggleClass('indeterminate', !!indeterminate).attr('aria-valuenow', value.toFixed(0));
+    $pruneProg.attr('aria-busy', indeterminate ? 'true' : 'false');
+    $pruneBar.css('width', Math.max(1, value) + '%');
+    $pruneStat.show().text(label || value.toFixed(1) + '%');
+  }
+
+  function clearPruneJob(options) {
+    const opts = options || {};
+    pruneRunning = false;
+    if (!opts.preserveJob) {
+      pruneToken = '';
+      pruneManifest = '';
+      pruneTotal = 0;
+      pruneReviewData = null;
+      forgetJob('prune');
+      lockPruneControls(false);
+      $pruneCancel.addClass('yo-hidden').prop('disabled', false);
+    } else {
+      lockPruneControls(true);
+      $pruneCancel.removeClass('yo-hidden').prop('disabled', false);
+    }
+    $pruneRun.prop('disabled', !!opts.preserveJob);
+    if (!opts.keepReview) {
+      $pruneReview.addClass('yo-hidden');
+    }
+    if (!opts.keepProgress) {
+      $pruneProg.hide().removeClass('indeterminate').attr({'aria-valuenow': '0', 'aria-busy': 'false'});
+      $pruneBar.css('width', '0');
+      $pruneStat.hide().text('');
+    }
+    if (!opts.keepResults) {
+      $pruneResults.empty();
+    }
+  }
+
+  function gatherKeep() {
+    return $('.yotm_keep:checked').map(function(){ return this.value; }).get();
+  }
+
+	function gatherPruneSubpaths() {
+		if ($('input[name="yotm_prune_scope"]:checked').val() !== 'selected') {
+			return [];
+		}
+
+		const selected = $('.yotm_subpath_option:checked').map(function(){ return this.value; }).get();
+		selected.sort(function(left, right){
+			const leftDepth = (left.match(/\//g) || []).length;
+			const rightDepth = (right.match(/\//g) || []).length;
+			return leftDepth === rightDepth ? left.localeCompare(right) : leftDepth - rightDepth;
+		});
+
+		return selected.filter(function(path, index, paths){
+			return !paths.slice(0, index).some(function(parent){ return path.indexOf(parent + '/') === 0; });
+		});
+	}
+
+	function refreshSubpathHierarchy() {
+		$('.yotm_subpath_option[data-ancestor]').each(function(){
+			const ancestor = $(this).data('ancestor');
+			const covered = $('.yotm_subpath_option[data-kind="parent"][value="' + ancestor + '"]').is(':checked');
+			$(this).prop('disabled', pruneControlsLocked || covered).closest('.yo-subpath-option').toggleClass('is-covered', covered);
+		});
+		$('.yotm_subpath_option[data-kind="parent"]').prop('disabled', pruneControlsLocked);
+		$('#yotm_subpath_chips button').prop('disabled', pruneControlsLocked);
+	}
+
+	function updateSubpathSelection() {
+		const paths = gatherPruneSubpaths();
+		let label = t('noFolderSelected', 'Choose at least one folder or use All uploads.');
+		if (paths.length === 1) {
+			label = t('oneFolderSelected', '1 folder selected');
+		} else if (paths.length > 1) {
+			label = String(t('foldersSelected', '%s folders selected')).replace('%s', paths.length);
+		}
+
+		$('#yotm_subpath_selection_count').text(label);
+		const chips = paths.map(function(path){
+			return '<button type="button" class="yo-subpath-chip" data-path="' + escapeHtml(path) + '" aria-label="' + escapeHtml(t('removeFolder', 'Remove folder') + ' uploads/' + path) + '"><span>uploads/' + escapeHtml(path) + '/</span><span aria-hidden="true">×</span></button>';
+		});
+		$('#yotm_subpath_chips').html(chips.join(''));
+		refreshSubpathHierarchy();
+	}
+
+	function toggleSubpathPicker() {
+		const selectedMode = $('input[name="yotm_prune_scope"]:checked').val() === 'selected';
+		$('#yotm_subpath_picker').toggleClass('yo-hidden', !selectedMode);
+		if (selectedMode) {
+			updateSubpathSelection();
+		}
+	}
+
+	function filterSubpathOptions() {
+		const term = String($('#yotm_subpath_search').val() || '').trim().toLowerCase();
+		let visibleGroups = 0;
+		$('.yo-subpath-group').each(function(){
+			const $group = $(this);
+			let visibleOptions = 0;
+			$group.find('.yo-subpath-option').each(function(){
+				const matches = !term || String($(this).data('search') || '').indexOf(term) !== -1;
+				$(this).toggleClass('yo-filtered-out', !matches);
+				if (matches) {
+					visibleOptions += 1;
+				}
+			});
+			$group.toggleClass('yo-filtered-out', visibleOptions === 0).prop('open', !!term && visibleOptions > 0);
+			if (visibleOptions > 0) {
+				visibleGroups += 1;
+			}
+		});
+		$('#yotm_subpath_no_results').toggleClass('yo-hidden', visibleGroups > 0);
+	}
+
+	$('input[name="yotm_prune_scope"]').on('change', toggleSubpathPicker);
+	$('#yotm_subpath_search').on('input', filterSubpathOptions);
+	$(document).on('change', '.yotm_subpath_option', function(){
+		if ($(this).data('kind') === 'parent' && this.checked) {
+			$('.yotm_subpath_option[data-ancestor="' + this.value + '"]').prop('checked', false);
+		}
+		refreshSubpathHierarchy();
+		updateSubpathSelection();
+	});
+	$('#yotm_subpath_select_visible').on('click', function(){
+		$('.yo-subpath-group:not(.yo-filtered-out)').each(function(){
+			$(this).find('.yo-subpath-option:not(.yo-filtered-out) .yotm_subpath_option').prop('checked', true);
+		});
+		$('.yotm_subpath_option[data-kind="parent"]:checked').each(function(){
+			$('.yotm_subpath_option[data-ancestor="' + this.value + '"]').prop('checked', false);
+		});
+		updateSubpathSelection();
+	});
+	$('#yotm_subpath_clear').on('click', function(){
+		$('.yotm_subpath_option').prop('checked', false);
+		updateSubpathSelection();
+	});
+	$(document).on('click', '.yo-subpath-chip', function(){
+		$('.yotm_subpath_option[value="' + $(this).data('path') + '"]').prop('checked', false);
+		updateSubpathSelection();
+	});
+
+  function renderOrphanSummary(summary) {
+    if (!summary) {
+      return '';
+    }
+    const found = summary.found ? Object.keys(summary.found).length : 0;
+    const marked = Array.isArray(summary.delete) ? summary.delete.length : 0;
+    if (!found && !marked && !summary.unmapped && !summary.skipped_original) {
+      return '';
+    }
+    return '<div class="notice notice-info inline"><p><strong>' + escapeHtml(t('orphanDiscovery', 'Orphan discovery:')) + '</strong> ' + found + ' ' + escapeHtml(t('distinctDimsFound', 'distinct dimensions found.')) + '<br><strong>' + escapeHtml(t('metadataOrphanDimsDelete', 'Metadata orphan dimensions marked for deletion:')) + '</strong> ' + marked + '<br><strong>' + escapeHtml(t('originalFilesProtected', 'Original files protected:')) + '</strong> ' + escapeHtml(summary.skipped_original || 0) + '<br><strong>' + escapeHtml(t('unmappedDiskSkipped', 'Unmapped disk candidates skipped:')) + '</strong> ' + escapeHtml(Math.max(summary.unmapped || 0, summary.unmapped_skipped || 0)) + '</p></div>';
+  }
+
+  function loadManifest(page) {
+    if (!pruneToken) {
+      return;
+    }
+    $('#yotm_manifest_body').html('<tr><td colspan="4">' + escapeHtml(t('manifestLoading', 'Loading manifest…')) + '</td></tr>');
+    $.post(ajaxurl, {
+      action: 'yotm_job_items',
+      nonce: nonce,
+      token: pruneToken,
+      page: page || 1,
+      per_page: 25,
+      search: $('#yotm_manifest_search').val() || ''
+    }).done(function(response){
+      if (!response || !response.success || !response.data) {
+        $('#yotm_manifest_body').html('<tr><td colspan="4">' + escapeHtml(t('manifestLoadFailed', 'Could not load the manifest.')) + '</td></tr>');
+        return;
+      }
+      const data = response.data;
+      manifestPage = parseInt(data.page || 1, 10);
+      manifestPages = parseInt(data.pages || 1, 10);
+      const $body = $('#yotm_manifest_body').empty();
+      if (!Array.isArray(data.items) || !data.items.length) {
+        $body.append('<tr><td colspan="4">' + escapeHtml(t('manifestEmpty', 'No manifest items match this filter.')) + '</td></tr>');
+      } else {
+        data.items.forEach(function(item){
+          const attachment = item.attachment_id ? '#' + item.attachment_id : '—';
+          const sizeSource = [item.size, item.source].filter(Boolean).join(' / ') || '—';
+          $body.append('<tr><td><code>' + escapeHtml(item.path || t('unknownPath', 'Unknown item')) + '</code></td><td>' + escapeHtml(attachment) + '</td><td>' + escapeHtml(sizeSource) + '</td><td>' + escapeHtml(formatBytes(item.estimated_bytes || item.bytes)) + '</td></tr>');
+        });
+      }
+      $('#yotm_manifest_count').text(data.total + ' ' + t('matchedFiles', 'matched files'));
+      $('#yotm_manifest_page').text(formatTemplate(t('pageOf', 'Page %1$s of %2$s'), {'%1$s': manifestPage, '%2$s': manifestPages}));
+      $('#yotm_manifest_prev').prop('disabled', manifestPage <= 1);
+      $('#yotm_manifest_next').prop('disabled', manifestPage >= manifestPages);
+    }).fail(function(){
+      $('#yotm_manifest_body').html('<tr><td colspan="4">' + escapeHtml(t('manifestLoadFailed', 'Could not load the manifest.')) + '</td></tr>');
+    });
+  }
+
+  function renderPruneReview(data) {
+    pruneReviewData = data;
+    pruneTotal = parseInt(data.total || 0, 10);
+    pruneManifest = data.manifest_hash || '';
+    $('#yotm_review_count').text(pruneTotal.toLocaleString());
+    $('#yotm_review_size').text(data.estimated_bytes_human || formatBytes(data.estimated_bytes));
+    $('#yotm_review_scope').text(data.scan_base || (data.context && data.context.scan_base_label) || 'uploads/');
+    $('#yotm_review_expiry').text(formatDate(data.expires_at));
+    $('#yotm_review_hash').text(pruneManifest);
+    $('#yotm_review_orphans').html(renderOrphanSummary(data.orphan_summary || (data.context && data.context.orphan_summary)));
+    $('#yotm_review_confirm').prop('checked', false).prop('disabled', false);
+    $pruneApprove.text(String(t('deleteReviewedCount', 'Delete %s reviewed files')).replace('%s', pruneTotal.toLocaleString())).prop('disabled', true).removeClass('yo-hidden');
+    $('#yotm_manifest_search').val('').prop('disabled', false);
+    $('#yotm_manifest_prev, #yotm_manifest_next').prop('disabled', false);
+    $pruneReview.removeClass('yo-hidden');
+    setPruneStep('review');
+    loadManifest(1);
+    window.setTimeout(function(){ $pruneReview.trigger('focus'); }, 50);
+  }
+
+  $('#yotm_manifest_prev').on('click', function(){ if (manifestPage > 1) { loadManifest(manifestPage - 1); } });
+  $('#yotm_manifest_next').on('click', function(){ if (manifestPage < manifestPages) { loadManifest(manifestPage + 1); } });
+  $('#yotm_manifest_search').on('input', function(){
+    window.clearTimeout(manifestTimer);
+    manifestTimer = window.setTimeout(function(){ loadManifest(1); }, 250);
+  });
+  $('#yotm_review_confirm').on('change', function(){ $pruneApprove.prop('disabled', !this.checked); });
+
+  function preparePrune() {
+    if (pruneRunning || pruneToken) {
+      return;
+    }
+	const limitSubpaths = gatherPruneSubpaths();
+	if ($('input[name="yotm_prune_scope"]:checked').val() === 'selected' && !limitSubpaths.length) {
+		$pruneResults.html(htmlNotice('notice-error', t('noFolderSelected', 'Choose at least one folder or use All uploads.'))).trigger('focus');
+		return;
+	}
+    pruneRunning = true;
+    setPruneStep('scanning');
+    lockPruneControls(true);
+    $pruneRun.prop('disabled', true);
+    $pruneCancel.removeClass('yo-hidden');
+    $pruneReview.addClass('yo-hidden');
+    $pruneResults.empty();
+    pruneProgress(1, t('scanning', 'Scanning…'), true);
     $.post(ajaxurl, {
       action: 'yotm_prune_prepare',
       nonce: nonce,
       keep: gatherKeep(),
-      mode: $('input[name="yotm_mode"]:checked').val(),
-      limit_subpath: $('#yotm_limit_subpath').val() || '',
+	  limit_subpaths: limitSubpaths,
       discover_orphans: $('#yotm_discover_orphans').is(':checked') ? 1 : 0
-    }).done(function(r){
-      if (!r || !r.success){
-        $res.html(htmlNotice('notice-error', t('prepareFailed', 'Prepare failed:') + ' ' + (r && r.data && r.data.msg ? r.data.msg : t('unknownError', 'Unknown error'))));
-        resetUI();
+    }).done(function(response){
+      if (!response || !response.success || !response.data) {
+        const resumeToken = response && response.data ? response.data.resume_token : '';
+        if (resumeToken) {
+          resumePrune(resumeToken);
+          return;
+        }
+        $pruneResults.html(htmlNotice('notice-error', t('prepareFailed', 'Prepare failed:') + ' ' + responseError(response, t('unknownError', 'Unknown error'))));
+        clearPruneJob({keepResults: true});
+        setPruneStep('configure');
         return;
       }
-
-      setIndeterminate(false);
-      token = r.data.token;
-      total = 0;
-      scanBatch();
+      pruneToken = response.data.token;
+      rememberJob('prune', pruneToken);
+      scanPruneBatch();
+      loadRecentJobs();
     }).fail(function(){
-      $res.html(htmlNotice('notice-error', t('networkPrepare', 'Network error during prepare.')));
-      resetUI();
+      $pruneResults.html(htmlNotice('notice-error', t('networkPrepare', 'Network error during prepare.')));
+      clearPruneJob({keepResults: true, preserveJob: !!pruneToken});
     });
   }
 
-  function scanBatch(){
-    if (cancelFlag){
-      $res.prepend(htmlNotice('notice-warning', t('cancelled', 'Cancelled.')));
-      resetUI({ keepResults: true });
+  function scanPruneBatch() {
+    const token = pruneToken;
+    if (!token || !pruneRunning) {
       return;
     }
-
-    $.post(ajaxurl, {
-      action: 'yotm_prune_scan_batch',
-      nonce: nonce,
-      token: token,
-      batch: 100
-    }).done(function(r){
-      if (!r || !r.success || !r.data){
-        $res.html(htmlNotice('notice-error', t('scanFailed', 'Scan failed:') + ' ' + (r && r.data && r.data.msg ? r.data.msg : t('unknownError', 'Unknown error'))));
-        resetUI();
+    $.post(ajaxurl, {action: 'yotm_prune_scan_batch', nonce: nonce, token: token, batch: 100}).done(function(response){
+      if (token !== pruneToken || !pruneRunning) {
         return;
       }
-
-      const d = r.data;
-      const scanPercent = typeof d.scan_percent !== 'undefined' ? parseFloat(d.scan_percent) : 0;
-      const scanTotal = parseInt(d.scan_total_attachments || 0, 10);
-      const scanProcessed = parseInt(d.scan_processed || 0, 10);
-
-      setProgress(scanPercent, t('scanning', 'Scanning…') + ' ' + scanProcessed + ' / ' + scanTotal + ' (' + scanPercent.toFixed(1) + '%)');
-
-      if (!d.scan_done){
-        setTimeout(scanBatch, 120);
+      if (!response || !response.success || !response.data) {
+        $pruneResults.prepend(htmlNotice('notice-error', t('scanFailed', 'Scan failed:') + ' ' + responseError(response, t('unknownError', 'Unknown error'))));
+        clearPruneJob({keepResults: true, preserveJob: true});
         return;
       }
-
-      total = parseInt(d.total || 0, 10);
-      renderPruneSummary(d);
-
-      const mode = $('input[name="yotm_mode"]:checked').val();
-
-      if (mode === 'dry'){
-        $res.prepend(htmlNotice('notice-info', t('dryRunComplete', 'Dry-run complete. No deletions performed.')));
-        resetUI({ keepResults: true });
+      const data = response.data;
+      let label = t('scanning', 'Scanning…') + ' ' + data.scan_processed + ' / ' + data.scan_total_attachments;
+      let indeterminate = false;
+      if (data.scan_phase === 'disk') {
+        label = String(t('scanningDiskCount', 'Scanning uploads folders… %s entries checked')).replace('%s', data.disk_entries_processed || 0);
+        indeterminate = true;
+      } else if (data.scan_phase === 'manifest') {
+        label = t('buildingManifest', 'Building immutable manifest…');
+        indeterminate = true;
+      }
+      pruneProgress(data.scan_percent || 0, label, indeterminate);
+      if (!data.scan_done) {
+        window.setTimeout(scanPruneBatch, 120);
         return;
       }
-
-      if (total === 0){
-        $res.prepend(htmlNotice('notice-warning', t('noMatchingThumbnails', 'No matching thumbnails found. Try enabling orphan discovery or widen the folder scope.')));
-        resetUI({ keepResults: true });
+      pruneRunning = false;
+      if (!parseInt(data.total || 0, 10)) {
+        $pruneResults.html(htmlNotice('notice-warning', t('noMatchingThumbnails', 'No matching thumbnails found.')));
+        clearPruneJob({keepResults: true});
+        setPruneStep('completed');
+        loadRecentJobs();
+        $pruneResults.trigger('focus');
         return;
       }
-
-      deleted = 0;
-      bytes = 0;
-      doBatch();
+      $pruneResults.html(htmlNotice('notice-info', t('scanReadyForReview', 'Scan complete. Review the immutable manifest below; nothing has been deleted.')));
+      $pruneProg.hide();
+      $pruneStat.hide();
+      $pruneCancel.removeClass('yo-hidden');
+      renderPruneReview(data);
+      loadRecentJobs();
     }).fail(function(){
-      $res.html(htmlNotice('notice-error', t('networkScan', 'Network error during scan.')));
-      resetUI();
+      if (token !== pruneToken) {
+        return;
+      }
+      $pruneResults.prepend(htmlNotice('notice-error', t('networkScan', 'Network error during scan.') + ' ' + t('resumeAfterNetworkError', 'Reload this page to resume it.')));
+      clearPruneJob({keepResults: true, preserveJob: true});
     });
   }
 
-  function doBatch(){
-    if (cancelFlag){
-      $res.prepend(htmlNotice('notice-warning', t('cancelled', 'Cancelled.')));
-      resetUI({ keepResults: true });
+  function approvePruneManifest() {
+    if (!pruneToken || !pruneManifest || !$('#yotm_review_confirm').is(':checked')) {
       return;
     }
-
-    setProgress(total ? (deleted / total * 100) : 0, t('deleting', 'Deleting…') + ' ' + deleted + ' / ' + total);
-
+    $pruneApprove.prop('disabled', true);
+    $('#yotm_review_confirm, #yotm_manifest_search, #yotm_manifest_prev, #yotm_manifest_next').prop('disabled', true);
     $.post(ajaxurl, {
-      action: 'yotm_prune_delete_batch',
-      nonce: nonce,
-      token: token,
-      batch: 200
-    }).done(function(r){
-      if (!r || !r.success){
-        $res.prepend(htmlNotice('notice-error', t('deleteFailed', 'Delete failed:') + ' ' + (r && r.data && r.data.msg ? r.data.msg : t('unknownError', 'Unknown error'))));
-        resetUI({ keepResults: true });
+      action: 'yotm_prune_approve', nonce: nonce, token: pruneToken,
+      manifest_hash: pruneManifest, confirmed: 1
+    }).done(function(response){
+      if (!response || !response.success) {
+        $pruneResults.prepend(htmlNotice('notice-error', t('approvalFailed', 'Delete approval failed:') + ' ' + responseError(response, t('unknownError', 'Unknown error'))));
+        $('#yotm_review_confirm, #yotm_manifest_search, #yotm_manifest_prev, #yotm_manifest_next').prop('disabled', false);
+        $pruneApprove.prop('disabled', false);
         return;
       }
-
-      deleted = r.data.processed;
-      bytes   = r.data.bytes;
-      const deletedFiles = typeof r.data.deleted !== 'undefined' ? r.data.deleted : r.data.processed;
-
-      const p = r.data.percent;
-      setProgress(p, t('deleting', 'Deleting…') + ' ' + deleted + ' / ' + total + ' (' + p.toFixed(1) + '%) — Freed ' + r.data.bytes_human);
-
-      if (r.data.done){
-        $res.prepend(htmlNotice('notice-success', t('doneDeleted', 'Done. Deleted %1$s files — Freed %2$s.').replace('%1$s', deletedFiles).replace('%2$s', r.data.bytes_human)));
-        resetUI({ keepResults: true });
-        return;
-      }
-
-      setTimeout(doBatch, 120);
+      pruneRunning = true;
+      setPruneStep('deleting');
+      pruneProgress(0, t('deleting', 'Deleting…'));
+      deletePruneBatch();
+      loadRecentJobs();
     }).fail(function(){
-      $res.prepend(htmlNotice('notice-error', t('networkDelete', 'Network error during delete.')));
-      resetUI({ keepResults: true });
+      $pruneResults.prepend(htmlNotice('notice-error', t('networkApproval', 'Network error while approving the manifest.')));
+      $('#yotm_review_confirm, #yotm_manifest_search, #yotm_manifest_prev, #yotm_manifest_next').prop('disabled', false);
+      $pruneApprove.prop('disabled', false);
     });
   }
 
-  $('#yotm_run').on('click', function(){
-    prepare();
+  function deletePruneBatch() {
+    const token = pruneToken;
+    if (!token || !pruneRunning) {
+      return;
+    }
+    $.post(ajaxurl, {
+      action: 'yotm_prune_delete_batch', nonce: nonce, token: token,
+      manifest_hash: pruneManifest, batch: 100
+    }).done(function(response){
+      if (token !== pruneToken || !pruneRunning) {
+        return;
+      }
+      if (!response || !response.success || !response.data) {
+        $pruneResults.prepend(htmlNotice('notice-error', t('deleteFailed', 'Delete failed:') + ' ' + responseError(response, t('unknownError', 'Unknown error'))));
+        clearPruneJob({keepResults: true, keepReview: true, preserveJob: true});
+        return;
+      }
+      const data = response.data;
+      if (data.stopped || data.status === 'cancelled') {
+        $pruneResults.prepend(htmlNotice('notice-warning', t('jobStopped', 'Job stopped. Completed work was not rolled back.')));
+        clearPruneJob({keepResults: true});
+        setPruneStep('configure');
+        loadRecentJobs();
+        return;
+      }
+      pruneProgress(data.percent || 0, t('deleting', 'Deleting…') + ' ' + data.processed + ' / ' + pruneTotal + ' — ' + data.bytes_human);
+      if (!data.done) {
+        window.setTimeout(deletePruneBatch, 120);
+        return;
+      }
+      let message = formatTemplate(t('doneDeleted', 'Done. Deleted %1$s files — Freed %2$s.'), {'%1$s': data.deleted, '%2$s': data.bytes_human});
+      if (data.failed) {
+        message += ' ' + t('failedFiles', 'Failed files:') + ' ' + data.failed;
+      }
+      $pruneResults.html(htmlNotice(data.failed ? 'notice-warning' : 'notice-success', message) + errorDetails(data.errors));
+      clearPruneJob({keepResults: true, keepProgress: true});
+      setPruneStep('completed');
+      $pruneResults.trigger('focus');
+      loadRecentJobs();
+    }).fail(function(){
+      if (token !== pruneToken) {
+        return;
+      }
+      $pruneResults.prepend(htmlNotice('notice-error', t('networkDelete', 'Network error during delete.') + ' ' + t('resumeAfterNetworkError', 'Reload this page to resume it.')));
+      clearPruneJob({keepResults: true, keepReview: true, preserveJob: true});
+    });
+  }
+
+  function resumePrune(token) {
+    if (!token || (pruneToken === token && (pruneRunning || !$pruneReview.hasClass('yo-hidden')))) {
+      return;
+    }
+    pruneToken = token;
+    pruneRunning = true;
+    rememberJob('prune', token);
+    activateTab('prune');
+    lockPruneControls(true);
+    $pruneRun.prop('disabled', true);
+    $pruneCancel.removeClass('yo-hidden');
+    $pruneResults.html(htmlNotice('notice-info', t('resumeAvailable', 'An unfinished job was found. Resuming it now…')));
+    getJobStatus(token).done(function(response){
+      if (!response || !response.success || !response.data) {
+        clearPruneJob({keepResults: true});
+        setPruneStep('configure');
+        return;
+      }
+      const data = response.data;
+      pruneManifest = data.manifest_hash || '';
+      pruneTotal = parseInt(data.total || 0, 10);
+      if (data.status === 'approved' || data.status === 'deleting') {
+        setPruneStep('deleting');
+        pruneProgress(jobProgress(data), t('deleting', 'Deleting…'));
+        deletePruneBatch();
+      } else if (data.status === 'scanning') {
+        setPruneStep('scanning');
+        pruneProgress(jobProgress(data), t('scanning', 'Scanning…'), true);
+        scanPruneBatch();
+      } else if (data.status === 'awaiting_approval') {
+        setPruneStep('scanning');
+        scanPruneBatch();
+      } else {
+        clearPruneJob({keepResults: true});
+        setPruneStep(data.status === 'completed' ? 'completed' : 'configure');
+      }
+    }).fail(function(){ clearPruneJob({keepResults: true, preserveJob: true}); });
+  }
+
+  $pruneRun.on('click', preparePrune);
+  $pruneApprove.on('click', approvePruneManifest);
+  $pruneCancel.on('click', function(){
+    if (!pruneToken) {
+      clearPruneJob({keepResults: true});
+      return;
+    }
+    const token = pruneToken;
+    pruneRunning = false;
+    $pruneCancel.prop('disabled', true);
+    $pruneStat.show().text(t('stopping', 'Stopping after the current batch…'));
+    cancelJob(token).done(function(){
+      $pruneResults.prepend(htmlNotice('notice-warning', t('jobStopped', 'Job stopped. Completed work was not rolled back, and the audit record was retained.')));
+      clearPruneJob({keepResults: true});
+      setPruneStep('configure');
+      $pruneResults.trigger('focus');
+      loadRecentJobs();
+    }).fail(function(){
+      pruneRunning = true;
+      $pruneCancel.prop('disabled', false);
+      $pruneResults.prepend(htmlNotice('notice-error', t('unknownError', 'Unknown error')));
+    });
   });
 
-  $('#yotm_cancel').on('click', function(){
-    cancelFlag = true;
-  });
-
-  // =============================
-  // === REGENERATE JS ===========
-  // =============================
-  let regenToken = null;
+  // Persistent regeneration jobs.
+  let regenToken = '';
   let regenRunning = false;
-  let regenCancelled = false;
-
-  const $regenBar    = $('#yotm_regen_progress .bar');
-  const $regenProg   = $('#yotm_regen_progress');
-  const $regenStat   = $('#yotm_regen_status');
-  const $regenRes    = $('#yotm_regen_results');
-  const $regenRun    = $('#yotm_regen_run');
+  const $regenProg = $('#yotm_regen_progress');
+  const $regenBar = $('#yotm_regen_progress .bar');
+  const $regenStat = $('#yotm_regen_status');
+  const $regenResults = $('#yotm_regen_results');
+  const $regenRun = $('#yotm_regen_run');
   const $regenCancel = $('#yotm_regen_cancel');
 
-  function yotmToggleRegenScopeFields(){
+  function toggleRegenScopeFields() {
     const scope = $('#yotm_regen_scope').val();
     $('#yotm_regen_subpath_wrap').toggleClass('yo-hidden', scope !== 'subpath');
     $('#yotm_regen_ids_wrap').toggleClass('yo-hidden', scope !== 'ids');
   }
 
-  function regenSetProgress(p, label){
-    const value = Math.max(0, Math.min(100, p));
-    $regenProg.show();
-    $regenProg.attr('aria-valuenow', value.toFixed(0));
+  function toggleRegenModeNote() {
+    $('#yotm_regen_force_note').toggleClass('yo-hidden', $('input[name="yotm_regen_mode"]:checked').val() !== 'force');
+  }
+
+  function lockRegenControls(locked) {
+    $('#yotm_regen_scope, #yotm_regen_subpath, #yotm_regen_attachment_ids, input[name="yotm_regen_mode"]').prop('disabled', !!locked);
+  }
+
+  function regenProgress(percent, label) {
+    const value = Math.max(0, Math.min(100, parseFloat(percent) || 0));
+    $regenProg.show().attr('aria-valuenow', value.toFixed(0));
     $regenBar.css('width', Math.max(1, value) + '%');
-    $regenStat.show().text(label || (p.toFixed(1) + '%'));
+    $regenStat.show().text(label || value.toFixed(1) + '%');
   }
 
-  function regenResetUI(opts){
-    opts = opts || {};
-
-    regenToken = null;
+  function clearRegenJob(options) {
+    const opts = options || {};
     regenRunning = false;
-    regenCancelled = false;
-
-    if (!opts.keepResults) {
-      $regenRes.empty();
+    if (!opts.preserveJob) {
+      regenToken = '';
+      forgetJob('regenerate');
+      lockRegenControls(false);
+      $regenCancel.addClass('yo-hidden').prop('disabled', false);
+    } else {
+      lockRegenControls(true);
+      $regenCancel.removeClass('yo-hidden').prop('disabled', false);
     }
-
-    $regenStat.hide().text('');
-    $regenProg.hide().attr('aria-valuenow', '0').removeAttr('aria-busy');
-    $regenBar.css('width', '0');
-    $regenCancel.addClass('yo-hidden');
-    $regenRun.prop('disabled', false);
+    $regenRun.prop('disabled', !!opts.preserveJob);
+    if (!opts.keepProgress) {
+      $regenProg.hide().attr('aria-valuenow', '0');
+      $regenBar.css('width', '0');
+      $regenStat.hide().text('');
+    }
+    if (!opts.keepResults) {
+      $regenResults.empty();
+    }
   }
 
-  function regenBatch(){
-    if (regenCancelled){
-      $regenRes.prepend(htmlNotice('notice-warning', t('regenerationCancelled', 'Regeneration cancelled.')));
-      regenResetUI({ keepResults: true });
+  function renderRegenState(data) {
+    $regenResults.html('<p><strong>' + escapeHtml(t('scope', 'Scope:')) + '</strong> ' + escapeHtml(data.scope_label || 'All media') + '</p><p><strong>' + escapeHtml(t('processed', 'Processed:')) + '</strong> ' + escapeHtml(data.processed) + ' / ' + escapeHtml(data.total) + '</p><p><strong>' + escapeHtml(t('regenerated', 'Regenerated:')) + '</strong> ' + escapeHtml(data.regenerated) + '</p><p><strong>' + escapeHtml(t('skipped', 'Skipped:')) + '</strong> ' + escapeHtml(data.skipped) + '</p><p><strong>' + escapeHtml(t('failed', 'Failed:')) + '</strong> ' + escapeHtml(data.failed) + '</p>');
+  }
+
+  function regenerateBatch() {
+    const token = regenToken;
+    if (!token || !regenRunning) {
       return;
     }
-
-    $.post(ajaxurl, {
-      action: 'yotm_regenerate_batch',
-      nonce: nonce,
-      token: regenToken,
-      batch: 20
-    }).done(function(r){
-      if (!r || !r.success || !r.data){
-        $regenRes.prepend(htmlNotice('notice-error', t('batchFailed', 'Batch failed:') + ' ' + (r && r.data && r.data.msg ? r.data.msg : t('unknownError', 'Unknown error'))));
-        regenResetUI({ keepResults: true });
+    $.post(ajaxurl, {action: 'yotm_regenerate_batch', nonce: nonce, token: token, batch: 20}).done(function(response){
+      if (token !== regenToken || !regenRunning) {
         return;
       }
-
-      const d = r.data;
-      const percent = typeof d.percent !== 'undefined' ? parseFloat(d.percent) : 0;
-
-      regenSetProgress(
-        percent,
-        t('processing', 'Processing…') + ' ' + d.processed + ' / ' + d.total + ' (' + percent.toFixed(1) + '%)'
-      );
-
-      $regenRes.html(
-        '<p><strong>' + escapeHtml(t('scope', 'Scope:')) + '</strong> ' + escapeHtml(d.scope_label || 'All media') + '</p>' +
-        '<p><strong>' + escapeHtml(t('processed', 'Processed:')) + '</strong> ' + escapeHtml(d.processed) + ' / ' + escapeHtml(d.total) + '</p>' +
-        '<p><strong>' + escapeHtml(t('regenerated', 'Regenerated:')) + '</strong> ' + escapeHtml(d.regenerated) + '</p>' +
-        '<p><strong>' + escapeHtml(t('skipped', 'Skipped:')) + '</strong> ' + escapeHtml(d.skipped) + '</p>' +
-        '<p><strong>' + escapeHtml(t('failed', 'Failed:')) + '</strong> ' + escapeHtml(d.failed) + '</p>'
-      );
-
-      if (d.done){
-        $regenRes.prepend(
-	          htmlNotice(
-	            'notice-success',
-	            t('doneRegenerated', 'Done. Regenerated %1$s attachments, skipped %2$s, failed %3$s.')
-	              .replace('%1$s', d.regenerated)
-	              .replace('%2$s', d.skipped)
-	              .replace('%3$s', d.failed)
-	          )
-	        );
-        regenResetUI({ keepResults: true });
+      if (!response || !response.success || !response.data) {
+        $regenResults.prepend(htmlNotice('notice-error', t('batchFailed', 'Batch failed:') + ' ' + responseError(response, t('unknownError', 'Unknown error'))));
+        clearRegenJob({keepResults: true, preserveJob: true});
         return;
       }
-
-      setTimeout(regenBatch, 120);
+      const data = response.data;
+      if (data.stopped || data.status === 'cancelled') {
+        $regenResults.prepend(htmlNotice('notice-warning', t('jobStopped', 'Job stopped.')));
+        clearRegenJob({keepResults: true});
+        loadRecentJobs();
+        return;
+      }
+      regenProgress(data.percent || 0, t('processing', 'Processing…') + ' ' + data.processed + ' / ' + data.total);
+      renderRegenState(data);
+      if (!data.done) {
+        window.setTimeout(regenerateBatch, 120);
+        return;
+      }
+      $regenResults.prepend(htmlNotice(data.failed ? 'notice-warning' : 'notice-success', formatTemplate(t('doneRegenerated', 'Done. Regenerated %1$s attachments, skipped %2$s, failed %3$s.'), {'%1$s': data.regenerated, '%2$s': data.skipped, '%3$s': data.failed})) + errorDetails(data.errors));
+      clearRegenJob({keepResults: true, keepProgress: true});
+      $regenResults.trigger('focus');
+      loadRecentJobs();
     }).fail(function(){
-      $regenRes.prepend(htmlNotice('notice-error', t('networkRegenerateBatch', 'Network error during regenerate batch.')));
-      regenResetUI({ keepResults: true });
+      if (token !== regenToken) {
+        return;
+      }
+      $regenResults.prepend(htmlNotice('notice-error', t('networkRegenerateBatch', 'Network error during regenerate batch.') + ' ' + t('resumeAfterNetworkError', 'Reload this page to resume it.')));
+      clearRegenJob({keepResults: true, preserveJob: true});
     });
   }
 
-  function regenPrepare(opts){
-    opts = opts || {};
-
-    if (regenRunning) {
+  function prepareRegenerate(options) {
+    const opts = options || {};
+    if (regenRunning || regenToken) {
       return;
     }
-
     if (opts.activateTab) {
       activateTab('regenerate');
     }
-
     regenRunning = true;
-    regenCancelled = false;
-
+    lockRegenControls(true);
     $regenRun.prop('disabled', true);
     $regenCancel.removeClass('yo-hidden');
-    $regenRes.empty();
-    regenSetProgress(1, t('preparingRegenerationQueue', 'Preparing regeneration queue…'));
-
+    $regenResults.empty();
+    regenProgress(1, t('preparingRegenerationQueue', 'Preparing regeneration queue…'));
+    const mode = $('input[name="yotm_regen_mode"]:checked').val() || 'missing';
     $.post(ajaxurl, {
-      action: 'yotm_regenerate_prepare',
-      nonce: nonce,
+      action: 'yotm_regenerate_prepare', nonce: nonce,
       scope: $('#yotm_regen_scope').val() || 'all',
       subpath: $('#yotm_regen_subpath').val() || '',
       attachment_ids: $('#yotm_regen_attachment_ids').val() || '',
-      only_missing: $('#yotm_regen_only_missing').is(':checked') ? 1 : 0,
-      force_all: $('#yotm_regen_force_all').is(':checked') ? 1 : 0
-    }).done(function(r){
-      if (!r || !r.success || !r.data){
-        $regenRes.html(htmlNotice('notice-error', t('prepareFailed', 'Prepare failed:') + ' ' + (r && r.data && r.data.msg ? r.data.msg : t('unknownError', 'Unknown error'))));
-        regenResetUI();
+      only_missing: mode === 'missing' ? 1 : 0,
+      force_all: mode === 'force' ? 1 : 0
+    }).done(function(response){
+      if (!response || !response.success || !response.data) {
+        const resumeToken = response && response.data ? response.data.resume_token : '';
+        if (resumeToken) {
+          resumeRegenerate(resumeToken);
+          return;
+        }
+        $regenResults.html(htmlNotice('notice-error', t('prepareFailed', 'Prepare failed:') + ' ' + responseError(response, t('unknownError', 'Unknown error'))));
+        clearRegenJob({keepResults: true});
         return;
       }
-
-      regenToken = r.data.token;
-
-      if (!r.data.total){
-        $regenRes.html(htmlNotice('notice-warning', t('noImageAttachments', 'No image attachments found.')));
-        regenSetProgress(100, t('noItemsToProcess', 'No items to process.'));
-        regenResetUI({ keepResults: true });
+      regenToken = response.data.token;
+      rememberJob('regenerate', regenToken);
+      if (!response.data.total) {
+        $regenResults.html(htmlNotice('notice-warning', t('noImageAttachments', 'No image attachments found.')));
+        cancelJob(regenToken).always(function(){ clearRegenJob({keepResults: true}); loadRecentJobs(); });
         return;
       }
-
-      $regenRes.html(
-        '<p><strong>' + escapeHtml(t('scope', 'Scope:')) + '</strong> ' + escapeHtml(r.data.scope_label || 'All media') + '</p>' +
-        '<p><strong>' + escapeHtml(t('attachmentsFound', 'Attachments found:')) + '</strong> ' + escapeHtml(r.data.total) + '</p>' +
-        '<p><strong>' + escapeHtml(t('onlyGenerateMissing', 'Only generate missing:')) + '</strong> ' + (r.data.only_missing ? escapeHtml(t('yes', 'Yes')) : escapeHtml(t('no', 'No'))) + '</p>' +
-        '<p><strong>' + escapeHtml(t('forceRegenerateAll', 'Force regenerate all:')) + '</strong> ' + (r.data.force_all ? escapeHtml(t('yes', 'Yes')) : escapeHtml(t('no', 'No'))) + '</p>'
-      );
-
-      regenSetProgress(1, t('starting', 'Starting…') + ' 0 / ' + r.data.total);
-      regenBatch();
+      renderRegenState(response.data);
+      regenerateBatch();
+      loadRecentJobs();
     }).fail(function(){
-      $regenRes.html(htmlNotice('notice-error', t('networkRegeneratePrepare', 'Network error during regenerate prepare.')));
-      regenResetUI();
+      $regenResults.html(htmlNotice('notice-error', t('networkRegeneratePrepare', 'Network error during regenerate prepare.')));
+      clearRegenJob({keepResults: true, preserveJob: !!regenToken});
     });
   }
 
-  $(document).on('change', '#yotm_regen_scope', function(){
-    yotmToggleRegenScopeFields();
+  function resumeRegenerate(token) {
+    if (!token || (regenToken === token && regenRunning)) {
+      return;
+    }
+    regenToken = token;
+    regenRunning = true;
+    rememberJob('regenerate', token);
+    activateTab('regenerate');
+    lockRegenControls(true);
+    $regenRun.prop('disabled', true);
+    $regenCancel.removeClass('yo-hidden');
+    $regenResults.html(htmlNotice('notice-info', t('resumeAvailable', 'An unfinished job was found. Resuming it now…')));
+    getJobStatus(token).done(function(response){
+      if (response && response.success && response.data && response.data.status === 'running') {
+        regenerateBatch();
+      } else {
+        clearRegenJob({keepResults: true});
+      }
+    }).fail(function(){ clearRegenJob({keepResults: true, preserveJob: true}); });
+  }
+
+  $('#yotm_regen_scope').on('change', toggleRegenScopeFields);
+  $('input[name="yotm_regen_mode"]').on('change', toggleRegenModeNote);
+  $regenRun.on('click', function(){ prepareRegenerate(); });
+  $regenCancel.on('click', function(){
+    if (!regenToken) {
+      clearRegenJob({keepResults: true});
+      return;
+    }
+    const token = regenToken;
+    regenRunning = false;
+    $regenCancel.prop('disabled', true);
+    $regenStat.show().text(t('stopping', 'Stopping after the current batch…'));
+    cancelJob(token).done(function(){
+      $regenResults.prepend(htmlNotice('notice-warning', t('jobStopped', 'Job stopped. Completed work was not rolled back, and the audit record was retained.')));
+      clearRegenJob({keepResults: true});
+      $regenResults.trigger('focus');
+      loadRecentJobs();
+    }).fail(function(){ regenRunning = true; $regenCancel.prop('disabled', false); });
   });
 
-  $('#yotm_regen_run').on('click', function(){
-    regenPrepare();
-  });
-
-  $('#yotm_regen_cancel').on('click', function(){
-    regenCancelled = true;
-  });
-
-  // Save changes and run regenerate now
   $(document).on('click', 'button[name="yotm_save_and_regenerate"]', function(){
     const $form = $(this).closest('form');
-
     if (!$form.length) {
       return;
     }
-
-    if (!$form.find('input[name="yotm_save_and_regenerate"]').length) {
-      $('<input>', {
-        type: 'hidden',
-        name: 'yotm_save_and_regenerate',
-        value: '1'
-      }).appendTo($form);
-    } else {
-      $form.find('input[name="yotm_save_and_regenerate"]').val('1');
+    let $hidden = $form.find('input[type="hidden"][name="yotm_save_and_regenerate"]');
+    if (!$hidden.length) {
+      $hidden = $('<input>', {type: 'hidden', name: 'yotm_save_and_regenerate'}).appendTo($form);
     }
+    $hidden.val('1');
   });
 
-  yotmToggleRegenScopeFields();
+  // Batched recommendation jobs.
+  let recommendToken = '';
+  let recommendRunning = false;
+  const $recommendProg = $('#yotm_recommend_progress');
+  const $recommendBar = $('#yotm_recommend_progress .bar');
+  const $recommendStat = $('#yotm_recommend_status');
+  const $recommendResults = $('#yotm_recommend_results');
+  const $recommendRun = $('#yotm_recommend_scan');
+  const $recommendCancel = $('#yotm_recommend_cancel');
 
-  if (window.YOTM_RUN_REGENERATE_AFTER_SAVE) {
-    activateTab('regenerate');
-    setTimeout(function(){
-      regenPrepare();
-    }, 250);
+  function recommendationProgress(percent, label) {
+    const value = Math.max(0, Math.min(100, parseFloat(percent) || 0));
+    $recommendProg.show().attr('aria-valuenow', value.toFixed(0));
+    $recommendBar.css('width', Math.max(1, value) + '%');
+    $recommendStat.show().text(label);
   }
 
-  // ==================================
-  // === SMART RECOMMENDATIONS ========
-  // ==================================
-
-  const $recommendProgress = $('#yotm_recommend_progress');
-  const $recommendBar      = $('#yotm_recommend_progress .bar');
-  const $recommendStatus   = $('#yotm_recommend_status');
-  const $recommendResults  = $('#yotm_recommend_results');
+  function clearRecommendation(options) {
+    const opts = options || {};
+    recommendRunning = false;
+    if (!opts.preserveJob) {
+      recommendToken = '';
+      forgetJob('recommendation');
+      $recommendCancel.addClass('yo-hidden').prop('disabled', false);
+    } else {
+      $recommendCancel.removeClass('yo-hidden').prop('disabled', false);
+    }
+    $recommendRun.prop('disabled', !!opts.preserveJob);
+    if (!opts.keepProgress) {
+      $recommendProg.hide().attr('aria-valuenow', '0');
+      $recommendBar.css('width', '0');
+      $recommendStat.hide().text('');
+    }
+  }
 
   function renderRecommendationTable(items) {
-
     if (!Array.isArray(items) || !items.length) {
-      return '<div class="notice notice-warning"><p>' + escapeHtml(t('noRecommendationData', 'No recommendation data found.')) + '</p></div>';
+      return htmlNotice('notice-warning', t('noRecommendationData', 'No recommendation data found.'));
     }
-
-    let html = '';
-
-    html += '<table class="widefat striped">';
-    html += '<thead>';
-    html += '<tr>';
-    html += '<th>' + escapeHtml(t('size', 'Size')) + '</th>';
-    html += '<th>' + escapeHtml(t('dimensions', 'Dimensions')) + '</th>';
-    html += '<th>' + escapeHtml(t('status', 'Status')) + '</th>';
-    html += '<th>' + escapeHtml(t('reason', 'Reason')) + '</th>';
-    html += '<th>' + escapeHtml(t('recommendation', 'Recommendation')) + '</th>';
-    html += '</tr>';
-    html += '</thead>';
-    html += '<tbody>';
-
+    let html = '<div class="yo-table-scroll"><table class="widefat striped"><thead><tr><th>' + escapeHtml(t('size', 'Size')) + '</th><th>' + escapeHtml(t('dimensions', 'Dimensions')) + '</th><th>' + escapeHtml(t('status', 'Status')) + '</th><th>' + escapeHtml(t('reason', 'Reason')) + '</th><th>' + escapeHtml(t('recommendation', 'Recommendation')) + '</th></tr></thead><tbody>';
     items.forEach(function(item){
-
-      let badgeClass = 'yo-warning';
-
-      if (item.status === 'used') {
-        badgeClass = 'yo-safe';
-      } else if (item.status === 'protected') {
-        badgeClass = 'yo-safe';
-      } else if (item.status === 'danger') {
-        badgeClass = 'yo-danger';
-      }
-
-      html += '<tr>';
-
-      html += '<td><strong>' + escapeHtml(item.name || '') + '</strong></td>';
-
-      html += '<td>' + escapeHtml(item.dimensions || '—') + '</td>';
-
-      html += '<td>';
-      html += '<span class="yo-badge ' + badgeClass + '">';
-      html += escapeHtml(item.label || item.status || t('unknown', 'Unknown'));
-      html += '</span>';
-      html += '</td>';
-
-      html += '<td>' + escapeHtml(item.reason || '') + '</td>';
-
-      html += '<td>' + escapeHtml(item.recommendation || '') + '</td>';
-
-      html += '</tr>';
-
+      const badgeClass = item.status === 'used' || item.status === 'protected' ? 'yo-safe' : (item.status === 'danger' ? 'yo-danger' : 'yo-warning');
+      html += '<tr><td><strong>' + escapeHtml(item.name || '') + '</strong></td><td>' + escapeHtml(item.dimensions || '—') + '</td><td><span class="yo-badge ' + badgeClass + '">' + escapeHtml(item.label || item.status || t('unknown', 'Unknown')) + '</span></td><td>' + escapeHtml(item.reason || '') + '</td><td>' + escapeHtml(item.recommendation || '') + '</td></tr>';
     });
-
-    html += '</tbody>';
-    html += '</table>';
-
-    return html;
+    return html + '</tbody></table></div>';
   }
 
-  $('#yotm_recommend_scan').on('click', function(){
+  function renderRecommendationResult(result) {
+    const data = result || {};
+    $('#yotm_recommend_keep_count').text(data.keep_count || 0);
+    $('#yotm_recommend_unused_count').text(data.unused_count || 0);
+    $('#yotm_recommend_protected_count').text(data.protected_count || 0);
+    $('#yotm_recommend_savings').text(data.savings || '—');
+    window.YOTM_RECOMMENDED_KEEP = data.recommended_keep || [];
+    $recommendResults.html(renderRecommendationTable(data.items || []));
+    $('#yotm_apply_recommendations, #yotm_recommend_go_prune').removeClass('yo-hidden');
+    $recommendStat.text(t('recommendationScanCompleted', 'Scan completed.'));
+  }
 
-    $recommendResults.empty();
-
-    $recommendProgress.show().attr('aria-valuenow', '20');
-    $recommendBar.css('width', '20%');
-
-    $recommendStatus
-      .show()
-      .text(t('scanningMediaUsage', 'Scanning media usage…'));
-
-    $.post(ajaxurl, {
-      action: 'yotm_recommend_scan',
-      nonce: nonce
-    }).done(function(r){
-
-      if (!r || !r.success || !r.data) {
-
-        $recommendResults.html(
-          htmlNotice(
-            'notice-error',
-            t('recommendationScanFailed', 'Recommendation scan failed.')
-          )
-        );
-
-        $recommendProgress.hide().attr('aria-valuenow', '0');
-
+  function recommendationBatch() {
+    const token = recommendToken;
+    if (!token || !recommendRunning) {
+      return;
+    }
+    $.post(ajaxurl, {action: 'yotm_recommend_batch', nonce: nonce, token: token, batch: 100}).done(function(response){
+      if (token !== recommendToken || !recommendRunning) {
         return;
       }
-
-      $recommendBar.css('width', '100%');
-      $recommendProgress.attr('aria-valuenow', '100');
-
-      $('#yotm_recommend_keep_count').text(r.data.keep_count || 0);
-      $('#yotm_recommend_unused_count').text(r.data.unused_count || 0);
-      $('#yotm_recommend_protected_count').text(r.data.protected_count || 0);
-      $('#yotm_recommend_savings').text(r.data.savings || '—');
-      
-      window.YOTM_RECOMMENDED_KEEP = r.data.recommended_keep || [];
-
-      $recommendResults.html(
-        renderRecommendationTable(r.data.items || [])
-      );
-
-      $('#yotm_apply_recommendations').removeClass('yo-hidden');
-      $('#yotm_recommend_go_prune').removeClass('yo-hidden');
-
-      $recommendStatus.text(t('recommendationScanCompleted', 'Scan completed.'));
-
+      if (!response || !response.success || !response.data) {
+        $recommendResults.html(htmlNotice('notice-error', t('recommendationScanFailed', 'Recommendation scan failed.') + ' ' + responseError(response, '')));
+        clearRecommendation({preserveJob: true});
+        return;
+      }
+      const data = response.data;
+	  if (data.stopped || data.status === 'cancelled') {
+		$recommendResults.prepend(htmlNotice('notice-warning', t('jobStopped', 'Job stopped.')));
+		clearRecommendation();
+		loadRecentJobs();
+		return;
+	  }
+      const label = data.phase === 'content' ? t('scanningContentReferences', 'Scanning content references…') : t('scanningAttachmentMetadata', 'Scanning attachment metadata…');
+      recommendationProgress(data.percent || 0, label + ' ' + data.processed + ' / ' + data.total);
+      if (!data.done) {
+        window.setTimeout(recommendationBatch, 120);
+        return;
+      }
+      renderRecommendationResult(data.result || {});
+      clearRecommendation({keepProgress: true});
+      $recommendResults.trigger('focus');
+      loadRecentJobs();
     }).fail(function(){
-
-      $recommendResults.html(
-        htmlNotice(
-          'notice-error',
-          t('networkRecommendationScan', 'Network error during recommendation scan.')
-        )
-      );
-
-      $recommendProgress.hide().attr('aria-valuenow', '0');
-
+      if (token !== recommendToken) {
+        return;
+      }
+      $recommendResults.html(htmlNotice('notice-error', t('networkRecommendationScan', 'Network error during recommendation scan.') + ' ' + t('resumeAfterNetworkError', 'Reload this page to resume it.')));
+      clearRecommendation({preserveJob: true});
     });
+  }
 
+  function prepareRecommendation() {
+    if (recommendRunning || recommendToken) {
+      return;
+    }
+    recommendRunning = true;
+    $recommendRun.prop('disabled', true);
+    $recommendCancel.removeClass('yo-hidden');
+    $recommendResults.empty();
+    recommendationProgress(1, t('scanningMediaUsage', 'Scanning media usage…'));
+    $.post(ajaxurl, {action: 'yotm_recommend_prepare', nonce: nonce}).done(function(response){
+      if (!response || !response.success || !response.data) {
+        const resumeToken = response && response.data ? response.data.resume_token : '';
+        if (resumeToken) {
+          resumeRecommendation(resumeToken);
+          return;
+        }
+        $recommendResults.html(htmlNotice('notice-error', t('recommendationScanFailed', 'Recommendation scan failed.') + ' ' + responseError(response, '')));
+        clearRecommendation();
+        return;
+      }
+      recommendToken = response.data.token;
+      rememberJob('recommendation', recommendToken);
+      recommendationBatch();
+      loadRecentJobs();
+    }).fail(function(){
+      $recommendResults.html(htmlNotice('notice-error', t('networkRecommendationScan', 'Network error during recommendation scan.')));
+      clearRecommendation({preserveJob: !!recommendToken});
+    });
+  }
+
+  function resumeRecommendation(token) {
+    if (!token || (recommendToken === token && recommendRunning)) {
+      return;
+    }
+    recommendToken = token;
+    recommendRunning = true;
+    rememberJob('recommendation', token);
+    $recommendRun.prop('disabled', true);
+    $recommendCancel.removeClass('yo-hidden');
+    getJobStatus(token).done(function(response){
+      if (!response || !response.success || !response.data) {
+        clearRecommendation();
+      } else if (response.data.status === 'completed' && response.data.context && response.data.context.result) {
+        renderRecommendationResult(response.data.context.result);
+        clearRecommendation({keepProgress: true});
+      } else if (response.data.status === 'scanning') {
+        recommendationBatch();
+      } else {
+        clearRecommendation();
+      }
+    }).fail(function(){ clearRecommendation({preserveJob: true}); });
+  }
+
+  $recommendRun.on('click', prepareRecommendation);
+  $recommendCancel.on('click', function(){
+    if (!recommendToken) {
+      clearRecommendation();
+      return;
+    }
+    const token = recommendToken;
+    recommendRunning = false;
+    $recommendCancel.prop('disabled', true);
+    $recommendStat.show().text(t('stopping', 'Stopping after the current batch…'));
+    cancelJob(token).done(function(){
+      $recommendResults.prepend(htmlNotice('notice-warning', t('jobStopped', 'Job stopped. Completed work was not rolled back, and the audit record was retained.')));
+      clearRecommendation();
+      $recommendResults.trigger('focus');
+      loadRecentJobs();
+    }).fail(function(){ recommendRunning = true; $recommendCancel.prop('disabled', false); });
   });
 
   $('#yotm_apply_recommendations').on('click', function(){
-
     if (!window.YOTM_RECOMMENDED_KEEP) {
       return;
     }
-
-    $('input[name="yotm_enable_sizes[]"]').prop('checked', false);
-
-    $('input[name="yotm_enable_sizes[]"]').each(function(){
-
+    $('input[name="yotm_enable_sizes[]"]').prop('checked', false).each(function(){
       if (window.YOTM_RECOMMENDED_KEEP.includes(this.value)) {
         this.checked = true;
       }
-
     });
-
     activateTab('sizes');
-
   });
+  $('#yotm_recommend_go_prune').on('click', function(){ activateTab('prune'); });
 
-  $('#yotm_recommend_go_prune').on('click', function(){
-    activateTab('prune');
-  });
+  function resumeDiscoveredJob(job) {
+    if (!job) {
+      return;
+    }
+    if (job.type === 'prune' && !pruneToken) {
+      resumePrune(job.token);
+    } else if (job.type === 'regenerate' && !regenToken) {
+      resumeRegenerate(job.token);
+    } else if (job.type === 'recommendation' && !recommendToken) {
+      resumeRecommendation(job.token);
+    }
+  }
+
+  toggleRegenScopeFields();
+  toggleRegenModeNote();
+	toggleSubpathPicker();
+	filterSubpathOptions();
+
+  const storedPrune = recallJob('prune');
+  const storedRegen = recallJob('regenerate');
+  const storedRecommend = recallJob('recommendation');
+  if (storedPrune) {
+    resumePrune(storedPrune);
+  } else if (storedRegen) {
+    resumeRegenerate(storedRegen);
+  }
+  if (storedRecommend) {
+    resumeRecommendation(storedRecommend);
+  }
+  if (window.YOTM_RUN_REGENERATE_AFTER_SAVE && !storedPrune && !storedRegen) {
+    activateTab('regenerate');
+    window.setTimeout(function(){ prepareRegenerate(); }, 250);
+  }
+  loadRecentJobs();
 })(jQuery);

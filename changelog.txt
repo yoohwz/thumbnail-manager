@@ -1,0 +1,46 @@
+=== Thumbnail Manager Changelog ===
+
+This file contains the complete release history for Thumbnail Manager.
+
+== Changelog ==
+
+= 1.4.0 (Jul 17, 2026) =
+* Added persistent job and job-item database storage with ownership, expiry, cancellation, cleanup, locking, resume, and per-item errors
+* Split Prune Files into scan, immutable hashed manifest review, explicit approval, and resumable deletion
+* Added a five-step prune workflow, paginated manifest review, active and recent jobs, inline delete approval, and responsive layouts
+* Added a searchable, grouped multi-folder picker for limiting Prune scans to several upload years or months
+* Limited attachment queries and disk orphan scans to the selected upload folders
+* Made UI accents inherit the administrator's WordPress profile Color Scheme
+* Changed Stop to retain cancelled job and item audit records and prevent late batches from overwriting that state
+* Batched disk orphan discovery and recommendation scans with persisted cursors
+* Updated force regeneration to prefer the original image source and preserve existing metadata
+* Added PHPUnit safety and storage tests, WordPress Coding Standards, PHP compatibility checks, Plugin Check, and a PHP/WordPress CI matrix
+
+= 1.3 (Jun 12, 2026) =
+* Hardened prune and delete safety checks for tokens, scan completion, uploads path validation, and original image protection
+* Refactored prune into a metadata-aware cursor scan instead of filesystem-wide regex deletion
+* Updated delete batches to remove stale attachment size metadata after thumbnail files are deleted
+* Added disk-only orphan reporting while keeping unmapped files out of the delete queue by default
+* Escaped dynamic admin JavaScript output, localized admin strings, and improved ARIA states
+* Added asset versioning and WP-CLI prune safety smoke tests
+
+= 1.2 (May 9, 2026) =
+* Added the Recommendations tab for safer thumbnail cleanup decisions
+* Added WooCommerce-aware size recommendations and a one-click apply workflow
+* Added scoped regeneration, force regeneration, and only-missing modes
+* Improved regeneration batching and admin progress handling
+
+= 1.1 (Mar 19, 2026) =
+* Added Regenerate Thumbnails with batch processing
+* Improved the Thumbnail Sizes, Regenerate, and Prune workflows
+
+= 1.0.1 (Dec 3, 2025) =
+* Added translation support
+* Improved UI labels and formatting
+* Added accessibility improvements
+
+= 1.0 (Oct 5, 2025) =
+* Initial release
+* Added Prune Files with dry-run scanning and batch deletion
+* Added orphan detection
+* Added controls for future thumbnail generation

@@ -1,0 +1,1099 @@
+# Copyright (C) 2026 YoOhw.com
+# This file is distributed under the GPL v2 or later.
+msgid ""
+msgstr ""
+"Project-Id-Version: Thumbnail Manager 1.4.0\n"
+"Report-Msgid-Bugs-To: https://wordpress.org/support/plugin/thumbnail-manager\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"POT-Creation-Date: 2026-07-17T02:48:40+00:00\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"X-Generator: WP-CLI 2.9.0\n"
+"X-Domain: thumbnail-manager\n"
+
+#. Plugin Name of the plugin
+msgid "Thumbnail Manager"
+msgstr ""
+
+#. Plugin URI of the plugin
+msgid "https://wordpress.org/plugins/thumbnail-manager"
+msgstr ""
+
+#. Description of the plugin
+msgid "Clean, control, and regenerate thumbnails with precision - remove unused sizes, prevent bloat, and rebuild what matters."
+msgstr ""
+
+#. Author of the plugin
+msgid "YoOhw.com"
+msgstr ""
+
+#. Author URI of the plugin
+msgid "https://yoohw.com"
+msgstr ""
+
+#: inc/admin-menu.php:49
+msgid "All sizes are enabled — there are no disabled sizes to prune."
+msgstr ""
+
+#: inc/admin-menu.php:50
+msgid "Scanning…"
+msgstr ""
+
+#: inc/admin-menu.php:51
+msgid "Deleting…"
+msgstr ""
+
+#: inc/admin-menu.php:52
+msgid "Processing…"
+msgstr ""
+
+#: inc/admin-menu.php:53
+msgid "Scan failed:"
+msgstr ""
+
+#: inc/admin-menu.php:54
+msgid "Prepare failed:"
+msgstr ""
+
+#: inc/admin-menu.php:55
+msgid "Delete failed:"
+msgstr ""
+
+#: inc/admin-menu.php:56
+msgid "Unknown error"
+msgstr ""
+
+#: inc/admin-menu.php:57
+msgid "Network error during prepare."
+msgstr ""
+
+#: inc/admin-menu.php:58
+msgid "Network error during scan."
+msgstr ""
+
+#: inc/admin-menu.php:59
+msgid "Network error during delete."
+msgstr ""
+
+#: inc/admin-menu.php:60
+msgid "Cancelled."
+msgstr ""
+
+#: inc/admin-menu.php:61
+msgid "An unfinished job was found. Resuming it now…"
+msgstr ""
+
+#: inc/admin-menu.php:62
+msgid "The job is still saved. Reload this page to resume it."
+msgstr ""
+
+#: inc/admin-menu.php:63
+msgid "Scan complete. Review the immutable manifest below; nothing has been deleted."
+msgstr ""
+
+#: inc/admin-menu.php:64
+msgid "Delete approval failed:"
+msgstr ""
+
+#: inc/admin-menu.php:65
+msgid "Network error while approving the manifest."
+msgstr ""
+
+#: inc/admin-menu.php:66
+msgid "Manifest:"
+msgstr ""
+
+#: inc/admin-menu.php:67
+msgid "Scanning uploads folders…"
+msgstr ""
+
+#: inc/admin-menu.php:68
+msgid "Building immutable manifest…"
+msgstr ""
+
+#: inc/admin-menu.php:69
+msgid "Failed files:"
+msgstr ""
+
+#: inc/admin-menu.php:70
+msgid "No matching thumbnails found. Try enabling orphan discovery or widen the folder scope."
+msgstr ""
+
+#. translators: 1: deleted file count, 2: formatted bytes freed.
+#: inc/admin-menu.php:72
+msgid "Done. Deleted %1$s files — Freed %2$s."
+msgstr ""
+
+#: inc/admin-menu.php:73
+msgid "Regeneration cancelled."
+msgstr ""
+
+#: inc/admin-menu.php:74
+msgid "Preparing regeneration queue…"
+msgstr ""
+
+#: inc/admin-menu.php:75
+msgid "Starting…"
+msgstr ""
+
+#. translators: 1: regenerated count, 2: skipped count, 3: failed count.
+#: inc/admin-menu.php:77
+msgid "Done. Regenerated %1$s attachments, skipped %2$s, failed %3$s."
+msgstr ""
+
+#: inc/admin-menu.php:78
+msgid "Batch failed:"
+msgstr ""
+
+#: inc/admin-menu.php:79
+msgid "Network error during regenerate batch."
+msgstr ""
+
+#: inc/admin-menu.php:80
+msgid "Network error during regenerate prepare."
+msgstr ""
+
+#: inc/admin-menu.php:81
+msgid "No image attachments found."
+msgstr ""
+
+#: inc/admin-menu.php:82
+msgid "No items to process."
+msgstr ""
+
+#: inc/admin-menu.php:83
+msgid "Recommendation scan failed."
+msgstr ""
+
+#: inc/admin-menu.php:84
+msgid "Network error during recommendation scan."
+msgstr ""
+
+#: inc/admin-menu.php:85
+msgid "Scan completed."
+msgstr ""
+
+#: inc/admin-menu.php:86
+msgid "Scan base:"
+msgstr ""
+
+#: inc/admin-menu.php:87
+msgid "KEEP:"
+msgstr ""
+
+#: inc/admin-menu.php:88
+msgid "DELETE (not selected):"
+msgstr ""
+
+#: inc/admin-menu.php:89
+msgid "Matched files:"
+msgstr ""
+
+#: inc/admin-menu.php:90
+msgid "Orphan discovery:"
+msgstr ""
+
+#: inc/admin-menu.php:91
+msgid "distinct dims on disk/metadata."
+msgstr ""
+
+#: inc/admin-menu.php:92
+msgid "Dims kept by selection:"
+msgstr ""
+
+#: inc/admin-menu.php:93
+msgid "Metadata orphan dims marked for deletion:"
+msgstr ""
+
+#: inc/admin-menu.php:94
+msgid "Original files protected:"
+msgstr ""
+
+#: inc/admin-menu.php:95
+msgid "Unmapped disk candidates skipped:"
+msgstr ""
+
+#: inc/admin-menu.php:96
+msgid "Sample matches"
+msgstr ""
+
+#: inc/admin-menu.php:97
+msgid "shown"
+msgstr ""
+
+#: inc/admin-menu.php:98
+msgid "Scope:"
+msgstr ""
+
+#: inc/admin-menu.php:99
+msgid "Processed:"
+msgstr ""
+
+#: inc/admin-menu.php:100
+msgid "Regenerated:"
+msgstr ""
+
+#: inc/admin-menu.php:101
+msgid "Skipped:"
+msgstr ""
+
+#: inc/admin-menu.php:102
+msgid "Failed:"
+msgstr ""
+
+#: inc/admin-menu.php:103
+msgid "Attachments found:"
+msgstr ""
+
+#: inc/admin-menu.php:104
+msgid "Only generate missing:"
+msgstr ""
+
+#: inc/admin-menu.php:105
+msgid "Force regenerate all:"
+msgstr ""
+
+#: inc/admin-menu.php:106
+#: inc/admin-menu.php:609
+#: inc/admin-menu.php:776
+msgid "Yes"
+msgstr ""
+
+#: inc/admin-menu.php:107
+#: inc/admin-menu.php:609
+#: inc/admin-menu.php:776
+msgid "No"
+msgstr ""
+
+#: inc/admin-menu.php:108
+msgid "No recommendation data found."
+msgstr ""
+
+#: inc/admin-menu.php:109
+msgid "Unknown"
+msgstr ""
+
+#: inc/admin-menu.php:110
+msgid "Size"
+msgstr ""
+
+#: inc/admin-menu.php:111
+msgid "Dimensions"
+msgstr ""
+
+#: inc/admin-menu.php:112
+#: inc/admin-menu.php:286
+#: inc/admin-menu.php:581
+msgid "Status"
+msgstr ""
+
+#: inc/admin-menu.php:113
+msgid "Reason"
+msgstr ""
+
+#: inc/admin-menu.php:114
+msgid "Recommendation"
+msgstr ""
+
+#: inc/admin-menu.php:115
+msgid "Scanning media usage…"
+msgstr ""
+
+#: inc/admin-menu.php:116
+msgid "Scanning attachment metadata…"
+msgstr ""
+
+#: inc/admin-menu.php:117
+msgid "Scanning content references…"
+msgstr ""
+
+#: inc/admin-menu.php:118
+msgid "Job stopped. Completed work was not rolled back, and the audit record was retained."
+msgstr ""
+
+#: inc/admin-menu.php:119
+msgid "Stopping after the current batch…"
+msgstr ""
+
+#: inc/admin-menu.php:120
+#: inc/admin-menu.php:274
+msgid "Active job"
+msgstr ""
+
+#: inc/admin-menu.php:121
+#: inc/admin-menu.php:277
+msgid "View job"
+msgstr ""
+
+#: inc/admin-menu.php:122
+msgid "No recent jobs."
+msgstr ""
+
+#: inc/admin-menu.php:123
+msgid "Prune files"
+msgstr ""
+
+#: inc/admin-menu.php:124
+#: inc/admin-menu.php:299
+msgid "Regenerate"
+msgstr ""
+
+#: inc/admin-menu.php:125
+#: inc/admin-menu.php:302
+#: inc/admin-menu.php:414
+msgid "Recommendations"
+msgstr ""
+
+#: inc/admin-menu.php:126
+msgid "Scanning"
+msgstr ""
+
+#: inc/admin-menu.php:127
+msgid "Running"
+msgstr ""
+
+#: inc/admin-menu.php:128
+msgid "Awaiting review"
+msgstr ""
+
+#: inc/admin-menu.php:129
+msgid "Approved"
+msgstr ""
+
+#: inc/admin-menu.php:130
+msgid "Deleting"
+msgstr ""
+
+#: inc/admin-menu.php:131
+msgid "Completed"
+msgstr ""
+
+#: inc/admin-menu.php:132
+msgid "Stopped"
+msgstr ""
+
+#: inc/admin-menu.php:133
+msgid "Expired"
+msgstr ""
+
+#: inc/admin-menu.php:134
+msgid "No manifest items match this filter."
+msgstr ""
+
+#: inc/admin-menu.php:135
+msgid "Loading manifest…"
+msgstr ""
+
+#: inc/admin-menu.php:136
+msgid "Could not load the manifest."
+msgstr ""
+
+#. translators: 1: current manifest page, 2: total manifest pages.
+#: inc/admin-menu.php:138
+msgid "Page %1$s of %2$s"
+msgstr ""
+
+#. translators: %s: number of reviewed files.
+#: inc/admin-menu.php:140
+msgid "Delete %s reviewed files"
+msgstr ""
+
+#: inc/admin-menu.php:141
+msgid "Error details"
+msgstr ""
+
+#. translators: %s: number of upload directory entries checked.
+#: inc/admin-menu.php:143
+msgid "Scanning uploads folders… %s entries checked"
+msgstr ""
+
+#: inc/admin-menu.php:144
+msgid "Approval window: 30 minutes after confirmation"
+msgstr ""
+
+#: inc/admin-menu.php:145
+msgid "Unknown item"
+msgstr ""
+
+#: inc/admin-menu.php:146
+#: inc/admin-menu.php:505
+msgid "All uploads"
+msgstr ""
+
+#. translators: %s: number of selected uploads folders.
+#: inc/admin-menu.php:148
+msgid "%s folders selected"
+msgstr ""
+
+#: inc/admin-menu.php:149
+msgid "1 folder selected"
+msgstr ""
+
+#: inc/admin-menu.php:150
+msgid "Choose at least one folder or use All uploads."
+msgstr ""
+
+#: inc/admin-menu.php:151
+msgid "Remove folder"
+msgstr ""
+
+#: inc/admin-menu.php:159
+#: inc/admin-menu.php:160
+msgid "Thumbnails"
+msgstr ""
+
+#: inc/admin-menu.php:170
+msgid "Insufficient permissions."
+msgstr ""
+
+#. translators: 1: number of enabled sizes. 2: number of disabled sizes.
+#: inc/admin-menu.php:192
+msgid "Saved. %1$d size(s) enabled, %2$d disabled. These apply to future uploads."
+msgstr ""
+
+#: inc/admin-menu.php:255
+msgid "Thumbnail Management"
+msgstr ""
+
+#: inc/admin-menu.php:271
+msgid "Job activity"
+msgstr ""
+
+#: inc/admin-menu.php:280
+msgid "Recent jobs"
+msgstr ""
+
+#: inc/admin-menu.php:285
+msgid "Type"
+msgstr ""
+
+#: inc/admin-menu.php:287
+msgid "Progress"
+msgstr ""
+
+#: inc/admin-menu.php:288
+msgid "Updated"
+msgstr ""
+
+#: inc/admin-menu.php:305
+msgid "Prune Files"
+msgstr ""
+
+#: inc/admin-menu.php:308
+msgid "Thumbnail Sizes"
+msgstr ""
+
+#: inc/admin-menu.php:317
+msgid "Regenerate thumbnails for existing image attachments in your Media Library. This uses the sizes that are currently <strong>enabled</strong> in the <em>Thumbnail Sizes</em> tab."
+msgstr ""
+
+#: inc/admin-menu.php:330
+msgid "Recommended after changing thumbnail size settings or after enabling new sizes."
+msgstr ""
+
+#: inc/admin-menu.php:335
+#: inc/admin-menu.php:672
+msgid "Scope"
+msgstr ""
+
+#: inc/admin-menu.php:338
+#: inc/handle-regenerate.php:35
+#: inc/handle-regenerate.php:468
+msgid "All media"
+msgstr ""
+
+#: inc/admin-menu.php:339
+msgid "Current year only"
+msgstr ""
+
+#: inc/admin-menu.php:340
+msgid "Specific uploads folder"
+msgstr ""
+
+#: inc/admin-menu.php:341
+#: inc/handle-regenerate.php:82
+msgid "Specific attachment IDs"
+msgstr ""
+
+#: inc/admin-menu.php:349
+msgid "Choose subfolder inside <code>uploads/</code>:"
+msgstr ""
+
+#: inc/admin-menu.php:365
+msgid "Attachment IDs"
+msgstr ""
+
+#: inc/admin-menu.php:371
+msgid "Example: 123, 456, 789"
+msgstr ""
+
+#: inc/admin-menu.php:374
+msgid "Enter one or more Media Library attachment IDs separated by commas or spaces."
+msgstr ""
+
+#: inc/admin-menu.php:379
+msgid "Regeneration mode"
+msgstr ""
+
+#: inc/admin-menu.php:382
+msgid "Generate missing sizes only"
+msgstr ""
+
+#: inc/admin-menu.php:382
+msgid "Faster and recommended for routine maintenance."
+msgstr ""
+
+#: inc/admin-menu.php:386
+msgid "Force regenerate all selected images"
+msgstr ""
+
+#: inc/admin-menu.php:386
+msgid "Rebuilds metadata from the original image and removes obsolete generated files."
+msgstr ""
+
+#: inc/admin-menu.php:391
+msgid "Force mode is slower and may replace existing thumbnail files. Originals remain protected."
+msgstr ""
+
+#: inc/admin-menu.php:396
+msgid "Run regenerate"
+msgstr ""
+
+#: inc/admin-menu.php:399
+#: inc/admin-menu.php:426
+#: inc/admin-menu.php:651
+msgid "Stop job"
+msgstr ""
+
+#: inc/admin-menu.php:418
+msgid "These suggestions combine protected size names, generated thumbnail metadata, and content references. They are still heuristic, so always review the manifest before approving deletion."
+msgstr ""
+
+#: inc/admin-menu.php:423
+msgid "Scan media usage"
+msgstr ""
+
+#: inc/admin-menu.php:439
+msgid "Recommended Keep"
+msgstr ""
+
+#: inc/admin-menu.php:444
+msgid "Likely Unused"
+msgstr ""
+
+#: inc/admin-menu.php:449
+msgid "Protected"
+msgstr ""
+
+#: inc/admin-menu.php:454
+msgid "Potential Savings"
+msgstr ""
+
+#: inc/admin-menu.php:465
+msgid "Apply recommended sizes"
+msgstr ""
+
+#: inc/admin-menu.php:469
+msgid "Review in Prune Files"
+msgstr ""
+
+#: inc/admin-menu.php:481
+msgid "Choose which registered image sizes to <strong>KEEP</strong>, then scan. The scan only builds a reviewable manifest; deletion requires a separate explicit approval after the scan completes."
+msgstr ""
+
+#: inc/admin-menu.php:493
+msgid "Prune progress"
+msgstr ""
+
+#: inc/admin-menu.php:494
+msgid "Configure"
+msgstr ""
+
+#: inc/admin-menu.php:495
+msgid "Scan"
+msgstr ""
+
+#: inc/admin-menu.php:496
+msgid "Review"
+msgstr ""
+
+#: inc/admin-menu.php:497
+msgid "Delete"
+msgstr ""
+
+#: inc/admin-menu.php:498
+msgid "Complete"
+msgstr ""
+
+#: inc/admin-menu.php:502
+msgid "Uploads scope"
+msgstr ""
+
+#: inc/admin-menu.php:505
+msgid "Scan the complete uploads directory."
+msgstr ""
+
+#: inc/admin-menu.php:509
+msgid "Selected folders"
+msgstr ""
+
+#: inc/admin-menu.php:509
+msgid "Choose multiple years or months to reduce scan time."
+msgstr ""
+
+#: inc/admin-menu.php:514
+msgid "Search uploads folders"
+msgstr ""
+
+#: inc/admin-menu.php:515
+msgid "Search year or folder, e.g. 2024/08…"
+msgstr ""
+
+#: inc/admin-menu.php:517
+msgid "Select visible"
+msgstr ""
+
+#: inc/admin-menu.php:518
+msgid "Clear"
+msgstr ""
+
+#: inc/admin-menu.php:522
+msgid "Available uploads folders"
+msgstr ""
+
+#. translators: %s: localized number of month/subfolder options.
+#: inc/admin-menu.php:540
+msgid "%s folder"
+msgid_plural "%s folders"
+msgstr[0] ""
+msgstr[1] ""
+
+#: inc/admin-menu.php:549
+msgid "Entire folder"
+msgstr ""
+
+#: inc/admin-menu.php:561
+msgid "No folders match this search."
+msgstr ""
+
+#: inc/admin-menu.php:565
+msgid "No folders selected"
+msgstr ""
+
+#: inc/admin-menu.php:576
+#: inc/handle-recommendations.php:288
+#: inc/handle-recommendations.php:305
+msgid "Keep"
+msgstr ""
+
+#: inc/admin-menu.php:577
+#: inc/admin-menu.php:740
+msgid "Size name"
+msgstr ""
+
+#: inc/admin-menu.php:578
+#: inc/admin-menu.php:741
+msgid "Target (WxH)"
+msgstr ""
+
+#: inc/admin-menu.php:579
+#: inc/admin-menu.php:742
+msgid "Crop"
+msgstr ""
+
+#: inc/admin-menu.php:580
+msgid "File variants"
+msgstr ""
+
+#: inc/admin-menu.php:594
+msgid "Uses attachment metadata, plus @2x / -1 / .webp / .bak variants when present"
+msgstr ""
+
+#: inc/admin-menu.php:614
+msgid "Disabled for new uploads"
+msgstr ""
+
+#: inc/admin-menu.php:616
+#: inc/admin-menu.php:780
+msgid "Enabled"
+msgstr ""
+
+#: inc/admin-menu.php:631
+msgid "Also include orphan sizes found in attachment metadata and report unmapped disk matches"
+msgstr ""
+
+#: inc/admin-menu.php:642
+msgid "Disk-only orphan reporting scans the selected uploads folder and never deletes unmapped files by default. Choose a smaller folder first on very large sites."
+msgstr ""
+
+#: inc/admin-menu.php:648
+msgid "Scan and review"
+msgstr ""
+
+#: inc/admin-menu.php:663
+msgid "Review deletion manifest"
+msgstr ""
+
+#: inc/admin-menu.php:664
+msgid "This manifest is immutable. Nothing will be deleted until you explicitly approve it below."
+msgstr ""
+
+#: inc/admin-menu.php:666
+msgid "Awaiting approval"
+msgstr ""
+
+#: inc/admin-menu.php:670
+msgid "Files"
+msgstr ""
+
+#: inc/admin-menu.php:671
+#: inc/admin-menu.php:692
+msgid "Estimated size"
+msgstr ""
+
+#: inc/admin-menu.php:673
+msgid "Review expires"
+msgstr ""
+
+#: inc/admin-menu.php:676
+msgid "Manifest hash"
+msgstr ""
+
+#: inc/admin-menu.php:680
+msgid "Filter manifest"
+msgstr ""
+
+#: inc/admin-menu.php:681
+msgid "Filter by path or size…"
+msgstr ""
+
+#: inc/admin-menu.php:689
+msgid "File path"
+msgstr ""
+
+#: inc/admin-menu.php:690
+msgid "Attachment"
+msgstr ""
+
+#: inc/admin-menu.php:691
+msgid "Size / source"
+msgstr ""
+
+#: inc/admin-menu.php:700
+msgid "Previous"
+msgstr ""
+
+#: inc/admin-menu.php:701
+msgid "Page 1 of 1"
+msgstr ""
+
+#: inc/admin-menu.php:702
+msgid "Next"
+msgstr ""
+
+#: inc/admin-menu.php:708
+msgid "I reviewed this manifest and understand that only these files will be permanently deleted."
+msgstr ""
+
+#: inc/admin-menu.php:710
+msgid "Approval is bound to your user, this site, and the manifest hash. It expires 30 minutes after confirmation."
+msgstr ""
+
+#: inc/admin-menu.php:711
+msgid "Delete reviewed files"
+msgstr ""
+
+#: inc/admin-menu.php:721
+msgid "Choose which sizes to <strong>generate for future uploads</strong>. Sizes you uncheck will be disabled at upload time.  To remove files that already exist for disabled sizes, use the <em>Prune Files</em> tab."
+msgstr ""
+
+#: inc/admin-menu.php:739
+msgid "Generate"
+msgstr ""
+
+#: inc/admin-menu.php:743
+msgid "Notes"
+msgstr ""
+
+#: inc/admin-menu.php:771
+#: inc/handle-recommendations.php:493
+msgid "Core"
+msgstr ""
+
+#: inc/admin-menu.php:781
+msgid "Disabled (won’t be generated)"
+msgstr ""
+
+#: inc/admin-menu.php:792
+msgid "Save changes"
+msgstr ""
+
+#: inc/admin-menu.php:795
+msgid "Save changes and run regenerate"
+msgstr ""
+
+#: inc/admin-menu.php:798
+msgid "Enable core only"
+msgstr ""
+
+#: inc/admin-menu.php:801
+msgid "Enable all"
+msgstr ""
+
+#: inc/admin-menu.php:804
+msgid "Disable all"
+msgstr ""
+
+#: inc/admin-menu.php:811
+msgid "Changes above affect <strong>future uploads</strong>. Use the button below to remove existing thumbnails for disabled sizes."
+msgstr ""
+
+#: inc/admin-menu.php:823
+msgid "Danger zone"
+msgstr ""
+
+#: inc/admin-menu.php:827
+msgid "This will delete all thumbnails for sizes that are <em>disabled</em> below. It won’t affect originals."
+msgstr ""
+
+#: inc/admin-menu.php:838
+msgid "Delete thumbnails of disabled sizes"
+msgstr ""
+
+#: inc/handle-delete.php:20
+#: inc/handle-delete.php:66
+#: inc/handle-prune.php:18
+#: inc/handle-prune.php:103
+#: inc/handle-recommendations.php:20
+#: inc/handle-recommendations.php:84
+#: inc/handle-regenerate.php:20
+#: inc/handle-regenerate.php:136
+#: inc/job-storage.php:1000
+#: inc/job-storage.php:1020
+#: inc/job-storage.php:1049
+#: inc/job-storage.php:1062
+msgid "No permission."
+msgstr ""
+
+#: inc/handle-delete.php:117
+msgid "Could not delete the file."
+msgstr ""
+
+#: inc/handle-delete.php:176
+msgid "The prune scan is not ready for approval."
+msgstr ""
+
+#: inc/handle-delete.php:180
+msgid "Explicit delete confirmation is required."
+msgstr ""
+
+#: inc/handle-delete.php:184
+msgid "The reviewed manifest does not match this job. Run the scan again."
+msgstr ""
+
+#: inc/handle-delete.php:188
+msgid "There are no files in this manifest."
+msgstr ""
+
+#: inc/handle-delete.php:203
+msgid "This job has not been approved for deletion."
+msgstr ""
+
+#: inc/handle-delete.php:207
+msgid "The delete manifest does not match the reviewed scan."
+msgstr ""
+
+#: inc/handle-delete.php:211
+msgid "The delete approval has expired. Run and review a new scan."
+msgstr ""
+
+#: inc/handle-delete.php:225
+msgid "This token was not prepared for deletion."
+msgstr ""
+
+#: inc/handle-delete.php:229
+msgid "Scan is still running."
+msgstr ""
+
+#: inc/handle-delete.php:270
+msgid "File path is outside uploads."
+msgstr ""
+
+#: inc/handle-delete.php:281
+msgid "File was already missing; metadata was reconciled."
+msgstr ""
+
+#: inc/handle-delete.php:345
+msgid "File does not exist."
+msgstr ""
+
+#: inc/handle-delete.php:354
+msgid "File is not readable."
+msgstr ""
+
+#: inc/handle-delete.php:367
+msgid "WordPress could not delete the file."
+msgstr ""
+
+#: inc/handle-prune.php:117
+msgid "Invalid prune job."
+msgstr ""
+
+#: inc/handle-prune.php:125
+msgid "This prune job is not scannable."
+msgstr ""
+
+#: inc/handle-recommendations.php:98
+msgid "Invalid recommendation job."
+msgstr ""
+
+#: inc/handle-recommendations.php:106
+msgid "This recommendation job is not scannable."
+msgstr ""
+
+#: inc/handle-recommendations.php:280
+msgid "No files"
+msgstr ""
+
+#: inc/handle-recommendations.php:281
+msgid "No generated files or content references were detected."
+msgstr ""
+
+#: inc/handle-recommendations.php:282
+msgid "Disable if not needed"
+msgstr ""
+
+#: inc/handle-recommendations.php:287
+msgid "Protected because this is a core or integration-defined image size."
+msgstr ""
+
+#: inc/handle-recommendations.php:293
+msgid "Referenced"
+msgstr ""
+
+#. translators: 1: content reference count, 2: generated file count.
+#: inc/handle-recommendations.php:296
+msgid "Found %1$d content reference and %2$d generated file."
+msgid_plural "Found %1$d content references and %2$d generated files."
+msgstr[0] ""
+msgstr[1] ""
+
+#: inc/handle-recommendations.php:309
+msgid "Generated"
+msgstr ""
+
+#. translators: 1: generated file count, 2: formatted disk usage.
+#: inc/handle-recommendations.php:312
+msgid "Found %1$d generated file using about %2$s, but no content reference."
+msgid_plural "Found %1$d generated files using about %2$s, but no content reference."
+msgstr[0] ""
+msgstr[1] ""
+
+#: inc/handle-recommendations.php:321
+msgid "Review before pruning"
+msgstr ""
+
+#: inc/handle-recommendations.php:498
+msgid "WooCommerce"
+msgstr ""
+
+#: inc/handle-regenerate.php:41
+msgid "Current year"
+msgstr ""
+
+#: inc/handle-regenerate.php:47
+msgid "Please choose an uploads folder."
+msgstr ""
+
+#: inc/handle-regenerate.php:78
+msgid "Please enter at least one valid image attachment ID."
+msgstr ""
+
+#: inc/handle-regenerate.php:150
+msgid "Invalid regeneration job."
+msgstr ""
+
+#: inc/handle-regenerate.php:158
+msgid "This regeneration job is not runnable."
+msgstr ""
+
+#: inc/handle-regenerate.php:296
+msgid "Attached image file is missing."
+msgstr ""
+
+#: inc/handle-regenerate.php:303
+msgid "Attachment is not a raster image."
+msgstr ""
+
+#: inc/handle-regenerate.php:313
+msgid "No image sizes are missing."
+msgstr ""
+
+#: inc/handle-regenerate.php:340
+msgid "WordPress returned empty image metadata."
+msgstr ""
+
+#: inc/handle-regenerate.php:355
+msgid "Could not update attachment metadata."
+msgstr ""
+
+#: inc/helper.php:95
+msgid "Uploads folder not found."
+msgstr ""
+
+#: inc/helper.php:104
+msgid "Subfolder not found."
+msgstr ""
+
+#: inc/helper.php:110
+msgid "Subfolder must be inside uploads."
+msgstr ""
+
+#. translators: 1: uploads subfolder, 2: validation error.
+#: inc/helper.php:196
+msgid "Could not use uploads/%1$s: %2$s"
+msgstr ""
+
+#. translators: 1: first selected uploads folders, 2: number of additional folders.
+#: inc/helper.php:298
+msgid "%1$s and %2$d more"
+msgstr ""
+
+#: inc/job-storage.php:84
+msgid "Could not install the persistent job tables."
+msgstr ""
+
+#: inc/job-storage.php:227
+msgid "Job not found or it belongs to another user."
+msgstr ""
+
+#: inc/job-storage.php:239
+msgid "This job has expired. Please start a new scan."
+msgstr ""
+
+#: inc/job-storage.php:299
+msgid "An unfinished job of this type already exists. Resume or cancel it before starting another."
+msgstr ""
+
+#: inc/job-storage.php:313
+msgid "Could not acquire the media maintenance lock. Please try again."
+msgstr ""
+
+#: inc/job-storage.php:320
+msgid "A media maintenance job is already active. Resume or cancel it before starting another."
+msgstr ""
+
+#: inc/job-storage.php:321
+msgid "Another administrator is already running media maintenance on this site."
+msgstr ""
+
+#: inc/job-storage.php:369
+msgid "Could not create the persistent job."
+msgstr ""
+
+#: inc/job-storage.php:1032
+msgid "Manifest items are only available for prune jobs."
+msgstr ""

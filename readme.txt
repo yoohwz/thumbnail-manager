@@ -1,175 +1,185 @@
 === Thumbnail Manager ===
 Contributors: yoohw
-Tags: thumbnails, regenerate, media-library, image-sizes, cleanup
+Tags: thumbnails, regenerate thumbnails, media library, image sizes, cleanup
 Requires at least: 6.3
 Tested up to: 7.0
 Requires PHP: 7.4
-Stable tag: 1.3
+Stable tag: 1.4.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Regenerate WordPress thumbnails, disable image sizes, and safely clean unused media library thumbnails with dry-run previews.
+Regenerate WordPress thumbnails, control image sizes, and safely clean unused Media Library files with resumable, review-first jobs.
 
 == Description ==
 
-Thumbnail Manager helps you control WordPress thumbnail generation, regenerate image sizes, and clean unused thumbnail files from the Media Library.
+Thumbnail Manager is a WordPress thumbnail management plugin for regenerating image sizes, preventing thumbnail bloat, and safely cleaning unused generated files from the Media Library.
 
-Use it after changing themes, installing WooCommerce, disabling custom image sizes, or cleaning up years of generated media files. The plugin focuses on predictable thumbnail management: choose which image sizes should stay enabled, rebuild the thumbnails you need, preview cleanup results, then delete only reviewed generated files.
+Use it after changing themes, updating WooCommerce image settings, adjusting registered image sizes, migrating a site, or discovering years of old thumbnail files. Thumbnail Manager lets you decide which sizes WordPress should generate, rebuild missing thumbnails, inspect cleanup candidates, and delete only an explicitly approved manifest.
 
-Cleanup is metadata-aware and safety-focused. Thumbnail Manager validates uploads paths, protects original full-size images, runs prune/delete actions in batches, and updates attachment metadata after deleted thumbnail sizes are removed.
+The plugin is designed for both new sites and large, long-running Media Libraries. Persistent cursor-based jobs process work in batches, survive page reloads or network interruptions, and can be limited to multiple upload years or months.
 
 = Key Features =
 
 * Regenerate WordPress thumbnails for existing image attachments
-* Generate only missing thumbnails or force-regenerate all selected images
+* Generate only missing image sizes or force-regenerate selected media
 * Disable unwanted registered image sizes for future uploads
-* Prune unused thumbnails while keeping selected sizes
-* Run Dry-run previews before deleting generated thumbnail files
+* Review recommendations before changing thumbnail settings
+* Prune unused thumbnails while preserving the sizes you choose to keep
+* Scan first, review an immutable hashed manifest, then approve deletion separately
+* Search and select multiple upload years or month folders in one Prune job
+* Filter and paginate large deletion manifests with estimated storage totals
 * Detect legacy thumbnail sizes stored in attachment metadata
-* Report disk-only orphan matches without deleting unmapped files by default
-* Scan recommendations based on protected sizes, WooCommerce-related sizes, generated metadata, and common content references
-* Process large Media Libraries with cursor-based AJAX queues and folder scoping
-* Manage everything from Tools > Thumbnail Manager
+* Report unmapped disk-only orphan files without deleting them by default
+* Resume regeneration, recommendation, scan, and delete jobs after interruption
+* Review active and recent jobs with retained audit information
+* Use responsive admin screens that inherit the user's WordPress Color Scheme
 
-= Common Use Cases =
+= Safe WordPress Thumbnail Cleanup =
 
-* Clean WordPress thumbnail bloat after theme or page builder changes
-* Regenerate thumbnails after changing Media Settings or custom image sizes
-* Reduce WooCommerce image storage by reviewing generated product thumbnails
-* Disable image sizes that should no longer be created for new uploads
-* Rebuild missing thumbnails after migration, restore, or failed image processing
-* Audit legacy thumbnail sizes left behind by old themes and plugins
+Prune Files uses a review-first workflow instead of deleting files immediately:
 
-= Safety First =
+1. Choose the registered image sizes to keep.
+2. Scan all uploads or select multiple year and month folders.
+3. Review the immutable manifest and estimated storage total.
+4. Confirm the reviewed manifest explicitly.
+5. Delete approved generated files in resumable batches.
 
-Thumbnail Manager is designed for controlled cleanup, not blind filesystem deletion.
+Original full-size uploads are protected. Paths are validated inside the WordPress uploads directory, and attachment metadata is updated when generated size files are removed.
 
-* Original full-size images are not deleted
-* Delete mode requires a fresh delete token and a completed scan
-* Dry-run mode never deletes files
-* Cleanup targets files from attachment metadata
-* Disk-only orphan matches are reported, not deleted by default
-* Paths are validated under the WordPress uploads directory before deletion
-* Attachment metadata is updated after generated thumbnail sizes are removed
+= Built for Large Media Libraries =
 
-= What It Does Not Do =
+Thumbnail Manager avoids a single long-running request for large operations. Persistent jobs, cursor-based attachment queries, bounded AJAX batches, folder-limited scans, operation locks, and per-item errors make long media maintenance tasks easier to monitor and resume.
 
-* It does not compress or optimize image quality
-* It does not replace image optimization or CDN plugins
-* It does not automatically delete media without confirmation
-* It does not delete original uploaded images
-* It does not unregister image sizes from themes or plugins
+The Prune folder picker groups upload directories by year, supports search and bulk selection, and automatically removes overlapping month selections when an entire year is selected.
+
+= WooCommerce and Theme Changes =
+
+Thumbnail Manager recognizes WooCommerce-related image sizes in Recommendations and helps you review them before disabling, regenerating, or pruning files. It is also useful after switching themes or removing plugins that registered custom image sizes.
+
+= What Thumbnail Manager Does Not Do =
+
+* It does not compress or change image quality.
+* It does not replace an image optimization, WebP, CDN, or offload plugin.
+* It does not delete original uploaded images.
+* It does not automatically delete files without manifest review and approval.
+* It does not unregister image sizes from the theme or plugin that registered them.
 
 == Installation ==
 
-1. Upload the plugin to `/wp-content/plugins/thumbnail-manager/` or install it from WordPress.org.
-2. Activate the plugin in WordPress.
+1. Upload the plugin to `/wp-content/plugins/thumbnail-manager/`, or install it through the WordPress Plugins screen.
+2. Activate Thumbnail Manager.
 3. Go to Tools > Thumbnail Manager.
+4. Review Recommendations before changing image size settings or cleaning a production site.
 
 == Usage ==
 
 = Recommended Workflow =
 
 1. Open Tools > Thumbnail Manager.
-2. Scan Recommendations to review likely keep/remove sizes.
-3. Apply recommended sizes if they match your site.
-4. Open Thumbnail Sizes and save the sizes you want generated for future uploads.
-5. Run Regenerate to rebuild missing or selected thumbnails.
-6. Open Prune Files and run Dry-run before any deletion.
-7. Review matched files, then switch to Delete only when the preview is correct.
+2. Run Recommendations and review which sizes appear necessary.
+3. Open Thumbnail Sizes and save the sizes WordPress should generate for future uploads.
+4. Run Regenerate to rebuild missing or selected thumbnails.
+5. Open Prune Files and choose the sizes to keep.
+6. Select All uploads or choose multiple upload folders.
+7. Scan, review the manifest, and approve deletion only when the result is correct.
 
 = Regenerate Thumbnails =
 
-Use Regenerate when you need to rebuild WordPress image sizes for existing attachments. You can process all media, the current year, a specific uploads folder, or specific attachment IDs.
+Use Regenerate after changing image dimensions, switching themes, changing WooCommerce image settings, migrating media, or restoring missing thumbnail files. Process all image attachments, the current year, a selected uploads folder, or specific attachment IDs.
 
-= Prune Files =
-
-Use Prune Files to clean generated thumbnails for sizes you no longer want to keep. Always run Dry-run first. If orphan discovery is enabled, metadata-backed legacy sizes can be included, while unmapped disk-only matches are reported for review.
+Only Missing generates absent sub-sizes. Force Regenerate rebuilds metadata and selected sub-sizes from the original image path when WordPress provides one.
 
 = Thumbnail Sizes =
 
-Use Thumbnail Sizes to control which registered image sizes WordPress should generate for future uploads. This setting does not remove existing files until you run Prune Files.
+Use Thumbnail Sizes to control which registered image sizes WordPress should generate for future uploads. Disabling a size does not remove existing files; use Prune Files when you are ready to scan and review old generated thumbnails.
+
+= Recommendations =
+
+Recommendations reviews registered sizes against protected WordPress sizes, WooCommerce-related sizes, attachment metadata, and common content references. Treat the result as an informed starting point and review it for your theme and site before applying changes.
+
+= Prune Files =
+
+Choose the image sizes to keep, decide whether to scan all uploads or selected year/month folders, and start Scan. Scanning builds a manifest only. Nothing is deleted until the scan finishes, the manifest is displayed, and an administrator explicitly approves it.
+
+Optional orphan discovery includes metadata-backed legacy sizes in the review. Unmapped disk-only filename matches are reported and skipped by default.
 
 == Frequently Asked Questions ==
 
-= Can I regenerate WordPress thumbnails after changing image sizes? =
+= Can I regenerate thumbnails after changing WordPress image sizes? =
 
-Yes. Use the Regenerate tab after changing Media Settings, switching themes, enabling WooCommerce image sizes, or saving different thumbnail size settings.
+Yes. Save the desired Thumbnail Sizes, then run Regenerate. Only Missing rebuilds absent files, while Force Regenerate rebuilds the selected attachments more comprehensively.
 
-= Can this clean unused thumbnails from the Media Library? =
+= Can Thumbnail Manager clean unused thumbnails? =
 
-Yes. Use Prune Files to select the sizes you want to keep, run Dry-run, review the matched generated files, and then delete the reviewed thumbnail files in batches.
+Yes. Prune Files scans generated files for sizes you no longer want to keep, presents a reviewable manifest, and deletes only after explicit approval.
 
-= Will Thumbnail Manager delete original images? =
+= Will it delete original images? =
 
-No. Original full-size attachment files are protected. The plugin targets generated thumbnail files from attachment metadata and validates paths before deletion.
+No. Original full-size attachment files are protected. Cleanup candidates are validated under the uploads directory and checked against attachment metadata before deletion.
 
-= Does orphan discovery delete files that are not in WordPress metadata? =
+= Can I limit a Prune scan to several folders? =
 
-No. Disk-only `-WxH` matches that cannot be mapped to attachment metadata are reported and skipped by default. Metadata-backed legacy sizes can be cleaned after review.
+Yes. Choose Selected folders, search by year or path such as `2024/08`, and select multiple years or months. Selecting an entire year automatically covers its month folders.
 
-= Is it safe for WooCommerce sites? =
+= Is it suitable for a large or long-running Media Library? =
 
-Thumbnail Manager detects WooCommerce-related thumbnail sizes in recommendations and lets you review them before disabling, regenerating, or pruning. Always run Dry-run before deleting thumbnails on a live store.
+Yes. Regeneration, recommendations, pruning, orphan discovery, manifest creation, and deletion use persistent jobs and bounded batches. Interrupted jobs can resume after a page reload or network error.
 
-= Is it safe for large Media Libraries? =
+= What happens if I stop or close the page during a job? =
 
-Regenerate and prune scans use cursor-based queues, AJAX batches, progress tracking, and optional folder scoping. Disk-only orphan reporting still depends on the size of the selected uploads folder, so start with a smaller folder on very large sites.
+The job state is stored persistently. Reload the admin page to resume unfinished work. Using Stop cancels future batches while retaining the audit record for review.
 
-= Does it optimize or compress images? =
+= Does orphan discovery delete files missing from attachment metadata? =
 
-No. Thumbnail Manager controls image sizes, regeneration, and cleanup. Use a dedicated image optimization plugin for compression, WebP conversion, CDN, or quality changes.
+No. Disk-only `-WxH` filename matches that cannot be mapped to attachment metadata are reported and skipped by default. Metadata-backed legacy sizes can be included in the reviewed manifest.
 
-= Does it unregister image sizes from themes or plugins? =
+= Is Thumbnail Manager safe for WooCommerce sites? =
 
-No. It prevents selected sizes from being generated for future uploads through WordPress filters. The theme or plugin that registered the size remains unchanged.
+It detects WooCommerce-related sizes in Recommendations and lets you review every cleanup manifest. Because product image requirements vary by theme and store setup, verify the sizes your storefront uses before disabling or pruning them.
+
+= Does it optimize, compress, or convert images to WebP? =
+
+No. Thumbnail Manager controls image sizes, regeneration, and cleanup. Use a dedicated optimization or CDN plugin for compression, WebP/AVIF conversion, quality settings, or media offloading.
+
+= Does disabling a size unregister it from my theme or plugin? =
+
+No. Thumbnail Manager filters which registered sizes are generated for future uploads. The theme or plugin that originally registered the size remains unchanged.
 
 == Technical Notes ==
 
 * Uses `intermediate_image_sizes_advanced` to control future thumbnail generation
-* Uses cursor-based AJAX queues for regenerate and prune scans
-* Uses attachment metadata for prune candidates
-* Validates filesystem paths under the uploads directory before deletion
+* Uses dedicated persistent job and job-item tables instead of storing full queues in transients
+* Uses cursor-based AJAX queues for regeneration, recommendations, pruning, orphan discovery, manifest creation, and deletion
+* Separates scan, immutable manifest review, explicit approval, and deletion
+* Binds expiring job tokens and manifests to the current site and user
+* Supports resume, server-side cancellation, operation locking, cleanup, and per-item error tracking
+* Uses attachment metadata as the primary source for prune candidates
+* Validates filesystem paths under the WordPress uploads directory
 * Updates attachment metadata after generated thumbnail files are removed
+* Prefers the original image path during force regeneration when WordPress provides one
 * Requires the `manage_options` capability
-* Works per site on multisite installations
+* Runs per site on WordPress multisite
 
 == Changelog ==
 
-= 1.3 (Jun 12, 2026) =
-* Hardened prune/delete safety checks for tokens, scan completion, uploads path validation, and original image protection
-* Refactored prune into a metadata-aware cursor scan instead of filesystem-wide regex deletion
-* Updated delete batches to remove stale attachment size metadata after thumbnail files are deleted
-* Added disk-only orphan reporting while keeping unmapped files out of the delete queue by default
-* Escaped dynamic admin JavaScript output, localized admin strings, and improved ARIA states
-* Added asset versioning and WP-CLI prune safety smoke tests
+= 1.4.0 (Jul 17, 2026) =
+* Added persistent job and job-item storage with ownership, expiry, cancellation, locking, resume, and per-item errors
+* Split Prune Files into scan, immutable manifest review, explicit approval, and resumable deletion
+* Added a five-step prune workflow, paginated manifest review, active and recent jobs, and responsive layouts
+* Added searchable multi-folder selection for upload years and months
+* Limited attachment and disk scans to the selected upload folders
+* Made UI accents inherit the administrator's WordPress profile Color Scheme
+* Batched orphan discovery and Recommendations with persisted cursors
+* Updated Force Regenerate to prefer the original image source and preserve existing metadata
+* Added automated safety, storage, coding standards, compatibility, Plugin Check, and CI coverage
 
-= 1.2 (May 9, 2026) =
-* Added Recommendations tab for safer thumbnail cleanup decisions
-* Added WooCommerce-aware size recommendations and one-click apply workflow
-* Added scoped regenerate processing, force regenerate, and only-missing options
-* Improved regenerate batching and admin progress handling
-
-= 1.1 (Mar 19, 2026) =
-* Added Regenerate Thumbnails with batch processing
-* Improved the Sizes, Regenerate, and Prune workflow
-
-= 1.0.1 (Dec 3, 2025) =
-* Added translation support
-* Improved UI labels and formatting
-* Added accessibility improvements
-
-= 1.0 (Oct 5, 2025) =
-* Initial release
-* Added Prune Files with Dry-run and batch deletion
-* Added orphan detection
-* Added controls for future thumbnail generation
+See `changelog.txt` for the complete release history.
 
 == Upgrade Notice ==
 
-= 1.3 =
-Safety release with metadata-aware prune scanning, stricter delete guards, stale metadata cleanup, admin JS escaping, accessibility improvements, and prune safety smoke tests.
+= 1.4.0 =
+Persistent resumable jobs, explicit manifest approval, folder-limited scans, and a safer responsive workflow make large Media Library maintenance more reliable.
 
 == Privacy ==
 
-Thumbnail Manager does not collect, store, or transmit personal data. All thumbnail scans, regeneration actions, and cleanup actions run locally on your WordPress site.
+Thumbnail Manager does not collect, store, or transmit personal data to external services. All thumbnail scans, regeneration, recommendations, and cleanup operations run locally on your WordPress site.

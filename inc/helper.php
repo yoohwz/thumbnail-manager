@@ -113,6 +113,194 @@ function yotm_resolve_upload_scan_base( $base, $subpath ) {
     return trailingslashit( $scan_real );
 }
 
+/**
+ * Normalize selected uploads subpaths and remove descendants already covered
+ * by a selected parent directory.
+ *
+ * An empty result means the entire uploads directory.
+ *
+ * @param string|string[] $subpaths Selected relative uploads paths.
+ * @return string[]
+ */
+function yotm_normalize_upload_subpaths( $subpaths ) {
+	$subpaths = is_array( $subpaths ) ? $subpaths : array( $subpaths );
+	$cleaned  = array();
+
+	foreach ( $subpaths as $subpath ) {
+		$subpath = yotm_clean_upload_subpath( $subpath );
+
+		if ( '' === $subpath ) {
+			return array();
+		}
+
+		$cleaned[ $subpath ] = $subpath;
+	}
+
+	$cleaned = array_values( $cleaned );
+	usort(
+		$cleaned,
+		static function ( $left, $right ) {
+			$left_depth  = substr_count( $left, '/' );
+			$right_depth = substr_count( $right, '/' );
+
+			if ( $left_depth === $right_depth ) {
+				return strcmp( $left, $right );
+			}
+
+			return $left_depth <=> $right_depth;
+		}
+	);
+
+	$normalized = array();
+	foreach ( $cleaned as $candidate ) {
+		$covered = false;
+		foreach ( $normalized as $parent ) {
+			if ( 0 === strpos( $candidate, trailingslashit( $parent ) ) ) {
+				$covered = true;
+				break;
+			}
+		}
+
+		if ( ! $covered ) {
+			$normalized[] = $candidate;
+		}
+	}
+
+	return $normalized;
+}
+
+/**
+ * Resolve multiple user-selected uploads subpaths to disjoint real paths.
+ *
+ * @param string          $base Uploads base directory.
+ * @param string|string[] $subpaths Relative uploads paths; empty means all uploads.
+ * @return string[]|WP_Error
+ */
+function yotm_resolve_upload_scan_bases( $base, $subpaths ) {
+	$subpaths = yotm_normalize_upload_subpaths( $subpaths );
+
+	if ( empty( $subpaths ) ) {
+		$resolved = yotm_resolve_upload_scan_base( $base, '' );
+
+		return is_wp_error( $resolved ) ? $resolved : array( $resolved );
+	}
+
+	$resolved = array();
+	foreach ( $subpaths as $subpath ) {
+		$scan_base = yotm_resolve_upload_scan_base( $base, $subpath );
+		if ( is_wp_error( $scan_base ) ) {
+			return new WP_Error(
+				$scan_base->get_error_code(),
+				sprintf(
+					/* translators: 1: uploads subfolder, 2: validation error. */
+					__( 'Could not use uploads/%1$s: %2$s', 'thumbnail-manager' ),
+					$subpath,
+					$scan_base->get_error_message()
+				)
+			);
+		}
+
+		$resolved[] = $scan_base;
+	}
+
+	return $resolved;
+}
+
+/**
+ * Return whether a path is inside any selected scan directory.
+ *
+ * @param string          $path Path to test.
+ * @param string|string[] $scan_bases Selected scan directories.
+ * @return bool
+ */
+function yotm_is_path_inside_any_dir( $path, $scan_bases ) {
+	foreach ( (array) $scan_bases as $scan_base ) {
+		if ( yotm_is_path_inside_dir( $path, $scan_base ) ) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+/**
+ * Find the selected scan root that contains a path.
+ *
+ * @param string          $path Path to test.
+ * @param string|string[] $scan_bases Selected scan directories.
+ * @return string
+ */
+function yotm_find_scan_root_for_path( $path, $scan_bases ) {
+	$path = yotm_normalize_filesystem_path( $path );
+
+	foreach ( (array) $scan_bases as $scan_base ) {
+		$scan_base = trailingslashit( yotm_normalize_filesystem_path( $scan_base ) );
+		if ( untrailingslashit( $scan_base ) === $path || yotm_is_path_inside_dir( $path, $scan_base ) ) {
+			return $scan_base;
+		}
+	}
+
+	return '';
+}
+
+/**
+ * Build one indexed attachment-meta condition for all selected subpaths.
+ *
+ * @param string[] $subpaths Normalized uploads subpaths.
+ * @return array
+ */
+function yotm_attachment_query_args_for_upload_subpaths( $subpaths ) {
+	$subpaths = yotm_normalize_upload_subpaths( $subpaths );
+
+	if ( empty( $subpaths ) ) {
+		return array();
+	}
+
+	$patterns = array_map(
+		static function ( $subpath ) {
+			return preg_quote( $subpath );
+		},
+		$subpaths
+	);
+
+	return array(
+		'meta_query' => array(
+			array(
+				'key'     => '_wp_attached_file',
+				'value'   => '^(' . implode( '|', $patterns ) . ')/',
+				'compare' => 'REGEXP',
+			),
+		),
+	);
+}
+
+/**
+ * Build a compact, readable label for one or more selected uploads roots.
+ *
+ * @param string   $base Uploads base directory.
+ * @param string[] $paths Resolved scan roots.
+ * @return string
+ */
+function yotm_uploads_scope_label( $base, $paths ) {
+	$labels = array_map(
+		static function ( $path ) use ( $base ) {
+			return yotm_uploads_relative_label( $base, $path );
+		},
+		(array) $paths
+	);
+
+	if ( count( $labels ) <= 3 ) {
+		return implode( ', ', $labels );
+	}
+
+	return sprintf(
+		/* translators: 1: first selected uploads folders, 2: number of additional folders. */
+		__( '%1$s and %2$d more', 'thumbnail-manager' ),
+		implode( ', ', array_slice( $labels, 0, 3 ) ),
+		count( $labels ) - 3
+	);
+}
+
 function yotm_uploads_relative_label( $base, $path ) {
     $base = yotm_normalize_filesystem_path( $base );
     $path = yotm_normalize_filesystem_path( $path );

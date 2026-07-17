@@ -1,0 +1,25 @@
+{
+  "name": "yoohw/thumbnail-manager",
+  "description": "Development tooling and tests for Thumbnail Manager.",
+  "type": "wordpress-plugin",
+  "license": "GPL-2.0-or-later",
+  "require-dev": {
+    "dealerdirect/phpcodesniffer-composer-installer": "^1.0",
+    "phpcompatibility/phpcompatibility-wp": "^2.1",
+    "phpunit/phpunit": "^9.6",
+    "squizlabs/php_codesniffer": "^3.13",
+    "wp-coding-standards/wpcs": "^3.2",
+    "yoast/phpunit-polyfills": "^1.1 || ^2.0"
+  },
+  "config": {
+    "allow-plugins": {
+      "dealerdirect/phpcodesniffer-composer-installer": true
+    },
+    "sort-packages": true
+  },
+  "scripts": {
+    "test": "phpunit",
+    "phpcs": "phpcs",
+    "phpcbf": "phpcbf"
+  }
+}

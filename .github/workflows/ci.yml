@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  coding-standards:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          coverage: none
+          tools: composer:v2
+      - run: composer install --no-interaction --prefer-dist
+      - run: composer phpcs
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --check js/admin.js
+
+  phpunit:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping --silent"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['7.4', '8.2', '8.4']
+        wordpress: ['6.3', 'latest']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+          tools: composer:v2
+      - run: composer install --no-interaction --prefer-dist
+      - run: bash bin/install-wp-tests.sh wordpress_test root root 127.0.0.1 ${{ matrix.wordpress }}
+      - run: composer test
+        env:
+          WP_TESTS_DIR: /tmp/wordpress-tests-lib
+
+  plugin-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: wordpress/plugin-check-action@v1
+        with:
+          build-dir: './'
+          exclude-directories: |
+            vendor
+            node_modules
+            .git
+            .github
+            bin
+            tests
+          exclude-files: |
+            .DS_Store
+            .gitignore
+            composer.json
+            composer.lock
+            phpcs.xml.dist
+            phpunit.xml.dist

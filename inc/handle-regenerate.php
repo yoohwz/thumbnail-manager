@@ -1,4 +1,9 @@
 <?php
+/**
+ * Persistent thumbnail regeneration jobs.
+ *
+ * @package Thumbnail_Manager
+ */
 
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
@@ -8,17 +13,17 @@ add_action( 'wp_ajax_yotm_regenerate_prepare', 'yotm_regenerate_prepare' );
 add_action( 'wp_ajax_yotm_regenerate_batch', 'yotm_regenerate_batch' );
 
 /**
- * Prepare regeneration queue.
+ * Prepare a persistent regeneration job.
  */
 function yotm_regenerate_prepare() {
 	if ( ! current_user_can( 'manage_options' ) ) {
-		wp_send_json_error( [ 'msg' => 'No permission' ], 403 );
+		wp_send_json_error( array( 'msg' => __( 'No permission.', 'thumbnail-manager' ) ), 403 );
 	}
 
 	check_ajax_referer( 'yotm_prune_nonce', 'nonce' );
-
 	$scope = sanitize_text_field( wp_unslash( $_POST['scope'] ?? 'all' ) );
-	if ( ! in_array( $scope, [ 'all', 'year', 'subpath', 'ids' ], true ) ) {
+
+	if ( ! in_array( $scope, array( 'all', 'year', 'subpath', 'ids' ), true ) ) {
 		$scope = 'all';
 	}
 
@@ -26,92 +31,62 @@ function yotm_regenerate_prepare() {
 	$ids_raw      = isset( $_POST['attachment_ids'] ) ? sanitize_textarea_field( wp_unslash( $_POST['attachment_ids'] ) ) : '';
 	$force_all    = ! empty( $_POST['force_all'] );
 	$only_missing = ! empty( $_POST['only_missing'] ) && ! $force_all;
-
-	$query_args  = [];
-	$scope_label = 'All media';
-	$cursor_mode = true;
-	$ids         = [];
-	$total       = 0;
+	$query_args   = array();
+	$scope_label  = __( 'All media', 'thumbnail-manager' );
+	$cursor_mode  = true;
+	$ids          = array();
 
 	if ( 'year' === $scope ) {
-		$query_args['date_query'] = [
-			[
-				'year' => (int) current_time( 'Y' ),
-			],
-		];
-		$scope_label = 'Current year';
+		$query_args['date_query'] = array( array( 'year' => (int) current_time( 'Y' ) ) );
+		$scope_label              = __( 'Current year', 'thumbnail-manager' );
 	} elseif ( 'subpath' === $scope ) {
 		$uploads = wp_get_upload_dir();
 		$base    = trailingslashit( yotm_normalize_filesystem_path( $uploads['basedir'] ) );
 
 		if ( '' === $subpath ) {
-			wp_send_json_error( [ 'msg' => 'Please choose an uploads folder.' ], 400 );
+			wp_send_json_error( array( 'msg' => __( 'Please choose an uploads folder.', 'thumbnail-manager' ) ), 400 );
 		}
 
 		$target_dir = yotm_resolve_upload_scan_base( $base, $subpath );
 		if ( is_wp_error( $target_dir ) ) {
-			wp_send_json_error( [ 'msg' => $target_dir->get_error_message() ], 400 );
+			wp_send_json_error( array( 'msg' => $target_dir->get_error_message() ), 400 );
 		}
 
-		$cursor_mode = false;
-		$ids         = yotm_get_image_attachment_ids_paged(
-			$query_args,
-			static function ( $attachment_id ) use ( $target_dir ) {
-				$file = get_attached_file( $attachment_id );
-
-				return $file && yotm_is_path_inside_dir( $file, $target_dir );
-			}
+		$query_args['meta_query'] = array(
+			array(
+				'key'     => '_wp_attached_file',
+				'value'   => '^' . $subpath . '/',
+				'compare' => 'REGEXP',
+			),
 		);
-		$total       = count( $ids );
-		$scope_label = yotm_uploads_relative_label( $base, $target_dir );
+		$scope_label              = yotm_uploads_relative_label( $base, $target_dir );
 	} elseif ( 'ids' === $scope ) {
 		preg_match_all( '/\d+/', $ids_raw, $matches );
-		$raw_ids = isset( $matches[0] ) ? array_map( 'absint', $matches[0] ) : [];
+		$raw_ids = isset( $matches[0] ) ? array_map( 'absint', $matches[0] ) : array();
 		$raw_ids = array_values( array_filter( array_unique( $raw_ids ) ) );
-
-		if ( empty( $raw_ids ) ) {
-			wp_send_json_error( [ 'msg' => 'Please enter at least one valid attachment ID.' ], 400 );
-		}
 
 		foreach ( $raw_ids as $attachment_id ) {
 			$post = get_post( $attachment_id );
 			$mime = get_post_mime_type( $attachment_id );
 
-			if (
-				$post
-				&& 'attachment' === $post->post_type
-				&& is_string( $mime )
-				&& 0 === strpos( $mime, 'image/' )
-			) {
+			if ( $post && 'attachment' === $post->post_type && is_string( $mime ) && 0 === strpos( $mime, 'image/' ) ) {
 				$ids[] = $attachment_id;
 			}
 		}
 
+		if ( empty( $ids ) ) {
+			wp_send_json_error( array( 'msg' => __( 'Please enter at least one valid image attachment ID.', 'thumbnail-manager' ) ), 400 );
+		}
+
 		$cursor_mode = false;
-		$total       = count( $ids );
-		$scope_label = 'Specific attachment IDs';
-	}
+		$scope_label = __( 'Specific attachment IDs', 'thumbnail-manager' );
+	}//end if
 
-	if ( $cursor_mode ) {
-		$total = yotm_count_image_attachments( $query_args );
-		$max_id = yotm_get_max_image_attachment_id( $query_args );
-	} else {
-		$max_id = 0;
-	}
-
-	$ids = array_values( array_map( 'absint', $ids ) );
-
-	$token = wp_generate_uuid4();
-
-	yotm_store_regen_list(
-		$token,
-		$ids,
-		[
-			'total'        => $total,
-			'processed'    => 0,
-			'regenerated'  => 0,
-			'skipped'      => 0,
-			'failed'       => 0,
+	$total  = $cursor_mode ? yotm_count_image_attachments( $query_args ) : count( $ids );
+	$max_id = $cursor_mode ? yotm_get_max_image_attachment_id( $query_args ) : 0;
+	$job    = yotm_job_create(
+		'regenerate',
+		array(
 			'only_missing' => $only_missing ? 1 : 0,
 			'force_all'    => $force_all ? 1 : 0,
 			'scope'        => $scope,
@@ -119,180 +94,380 @@ function yotm_regenerate_prepare() {
 			'subpath'      => $subpath,
 			'cursor_mode'  => $cursor_mode ? 1 : 0,
 			'query_args'   => $query_args,
-			'last_id'      => 0,
-			'max_id'       => $max_id,
-		]
+		),
+		array(
+			'status' => 'running',
+			'phase'  => 'regenerate',
+			'total'  => $total,
+			'max_id' => $max_id,
+			'ttl'    => DAY_IN_SECONDS,
+		)
 	);
 
-	wp_send_json_success(
-		[
-			'token'        => $token,
-			'total'        => $total,
-			'scope'        => $scope,
-			'scope_label'  => $scope_label,
-			'only_missing' => $only_missing ? 1 : 0,
-			'force_all'    => $force_all ? 1 : 0,
-		]
-	);
+	if ( is_wp_error( $job ) ) {
+		$data = $job->get_error_data();
+		wp_send_json_error(
+			array(
+				'msg'          => $job->get_error_message(),
+				'resume_token' => is_array( $data ) ? ( $data['token'] ?? '' ) : '',
+			),
+			409
+		);
+	}
+
+	if ( ! $cursor_mode ) {
+		foreach ( $ids as $attachment_id ) {
+			yotm_job_add_item(
+				$job['id'],
+				hash( 'sha256', 'attachment:' . $attachment_id ),
+				array( 'attachment_id' => $attachment_id )
+			);
+		}
+	}
+
+	wp_send_json_success( yotm_build_regenerate_response( yotm_job_get_by_id( $job['id'] ), false ) );
 }
 
 /**
- * Process regeneration in batches.
+ * Process a persistent regeneration job in batches.
  */
 function yotm_regenerate_batch() {
 	if ( ! current_user_can( 'manage_options' ) ) {
-		wp_send_json_error( [ 'msg' => 'No permission' ], 403 );
+		wp_send_json_error( array( 'msg' => __( 'No permission.', 'thumbnail-manager' ) ), 403 );
 	}
 
 	check_ajax_referer( 'yotm_prune_nonce', 'nonce' );
-
 	$token = sanitize_text_field( wp_unslash( $_POST['token'] ?? '' ) );
 	$batch = isset( $_POST['batch'] ) ? absint( wp_unslash( $_POST['batch'] ) ) : 20;
-	$batch = max( 1, min( 200, $batch ) );
+	$batch = max( 1, min( 100, $batch ) );
+	$job   = yotm_job_get( $token );
 
-	$list = yotm_fetch_regen_list( $token );
-	$meta = yotm_fetch_regen_meta( $token );
-
-	if ( false === $list || false === $meta || ! is_array( $list ) || ! is_array( $meta ) ) {
-		wp_send_json_error( [ 'msg' => 'State expired. Please run again.' ], 400 );
+	if ( is_wp_error( $job ) ) {
+		wp_send_json_error( array( 'msg' => $job->get_error_message() ), 400 );
 	}
 
-	$cursor_mode = ! empty( $meta['cursor_mode'] );
+	if ( 'regenerate' !== $job['type'] ) {
+		wp_send_json_error( array( 'msg' => __( 'Invalid regeneration job.', 'thumbnail-manager' ) ), 400 );
+	}
+
+	if ( 'completed' === $job['status'] ) {
+		wp_send_json_success( yotm_build_regenerate_response( $job, true ) );
+	}
+
+	if ( 'running' !== $job['status'] ) {
+		wp_send_json_error( array( 'msg' => __( 'This regeneration job is not runnable.', 'thumbnail-manager' ) ), 409 );
+	}
+
+	$payload     = $job['payload'];
+	$cursor_mode = ! empty( $payload['cursor_mode'] );
+	$items       = array();
 
 	if ( $cursor_mode ) {
-		$chunk = yotm_get_image_attachment_ids_after(
-			isset( $meta['query_args'] ) && is_array( $meta['query_args'] ) ? $meta['query_args'] : [],
-			(int) ( $meta['last_id'] ?? 0 ),
+		$ids = yotm_get_image_attachment_ids_after(
+			is_array( $payload['query_args'] ?? null ) ? $payload['query_args'] : array(),
+			$job['cursor'],
 			$batch,
-			(int) ( $meta['max_id'] ?? 0 )
+			$job['max_id']
 		);
+		foreach ( $ids as $attachment_id ) {
+			$items[] = array(
+				'id'      => 0,
+				'payload' => array( 'attachment_id' => $attachment_id ),
+			);
+		}
 	} else {
-		$chunk = array_splice( $list, 0, $batch );
-	}
-
-	if ( empty( $chunk ) ) {
-		yotm_delete_regen_state( $token );
-		wp_send_json_success(
-			[
-				'processed'   => (int) $meta['processed'],
-				'total'       => (int) $meta['total'],
-				'regenerated' => (int) $meta['regenerated'],
-				'skipped'     => (int) $meta['skipped'],
-				'failed'      => (int) $meta['failed'],
-				'remaining'   => 0,
-				'percent'     => 100,
-				'done'        => true,
-				'scope_label' => isset( $meta['scope_label'] ) ? $meta['scope_label'] : 'All media',
-			]
+		$items = yotm_job_get_items( $job['id'], array( 'queued', 'processing' ), $batch );
+		$ids   = array_map(
+			static function ( $item ) {
+				return absint( $item['payload']['attachment_id'] ?? 0 );
+			},
+			$items
 		);
+	}//end if
+
+	if ( empty( $items ) ) {
+		$current = yotm_job_get_by_id( $job['id'] );
+		if ( is_array( $current ) && 'cancelled' === $current['status'] ) {
+			wp_send_json_success( yotm_build_regenerate_response( $current, false ) );
+		}
+
+		yotm_job_update(
+			$job['id'],
+			array(
+				'status'     => 'completed',
+				'phase'      => 'completed',
+				'expires_at' => gmdate( 'Y-m-d H:i:s', time() + 7 * DAY_IN_SECONDS ),
+			)
+		);
+		wp_send_json_success( yotm_build_regenerate_response( yotm_job_get_by_id( $job['id'] ), true ) );
 	}
 
 	$processed_now   = 0;
 	$regenerated_now = 0;
 	$skipped_now     = 0;
 	$failed_now      = 0;
+	$last_id         = $job['cursor'];
 
-	foreach ( $chunk as $attachment_id ) {
-		$attachment_id = absint( $attachment_id );
+	foreach ( $items as $item ) {
+		$attachment_id = absint( $item['payload']['attachment_id'] ?? 0 );
+
 		if ( ! $attachment_id ) {
 			continue;
 		}
 
-		if ( $cursor_mode && $attachment_id > (int) ( $meta['last_id'] ?? 0 ) ) {
-			$meta['last_id'] = $attachment_id;
+		if ( ! empty( $item['id'] ) ) {
+			yotm_job_update_item( $item['id'], 'processing' );
 		}
 
-		$processed_now++;
+		$last_id = max( $last_id, $attachment_id );
+		$result  = yotm_regenerate_attachment( $attachment_id, ! empty( $payload['only_missing'] ), ! empty( $payload['force_all'] ) );
+		++$processed_now;
 
-		$file = get_attached_file( $attachment_id );
-		if ( ! $file || ! file_exists( $file ) ) {
-			$failed_now++;
-			continue;
-		}
-
-		$mime = get_post_mime_type( $attachment_id );
-		if ( ! is_string( $mime ) || 0 !== strpos( $mime, 'image/' ) ) {
-			$skipped_now++;
-			continue;
-		}
-
-		if ( 'image/svg+xml' === $mime ) {
-			$skipped_now++;
-			continue;
-		}
-
-		$only_missing = ! empty( $meta['only_missing'] );
-		$force_all    = ! empty( $meta['force_all'] );
-
-		if (
-			$only_missing
-			&& ! $force_all
-			&& function_exists( 'wp_get_missing_image_subsizes' )
-			&& function_exists( 'wp_update_image_subsizes' )
-		) {
-			$missing = wp_get_missing_image_subsizes( $attachment_id );
-
-			if ( empty( $missing ) ) {
-				$skipped_now++;
-				continue;
+		if ( 'regenerated' === $result['status'] ) {
+			++$regenerated_now;
+			if ( ! empty( $item['id'] ) ) {
+				yotm_job_update_item( $item['id'], 'done' );
 			}
-
-			$result = wp_update_image_subsizes( $attachment_id );
-
-			if ( is_wp_error( $result ) ) {
-				$failed_now++;
-			} else {
-				$regenerated_now++;
+		} elseif ( 'skipped' === $result['status'] ) {
+			++$skipped_now;
+			if ( ! empty( $item['id'] ) ) {
+				yotm_job_update_item( $item['id'], 'skipped', (string) $result['message'] );
 			}
 		} else {
-			$metadata = wp_generate_attachment_metadata( $attachment_id, $file );
-
-			if ( is_wp_error( $metadata ) || empty( $metadata ) ) {
-				$failed_now++;
-				continue;
-			}
-
-			$updated = wp_update_attachment_metadata( $attachment_id, $metadata );
-
-			if ( false === $updated ) {
-				$failed_now++;
+			++$failed_now;
+			if ( ! empty( $item['id'] ) ) {
+				yotm_job_update_item( $item['id'], 'failed', (string) $result['message'] );
 			} else {
-				$regenerated_now++;
+				$failure_key = hash( 'sha256', 'regenerate-failure:' . $attachment_id );
+				yotm_job_add_item( $job['id'], $failure_key, array( 'attachment_id' => $attachment_id ), 'failed' );
+				$failure_item = yotm_job_get_item_by_key( $job['id'], $failure_key );
+				if ( $failure_item ) {
+					yotm_job_update_item( $failure_item['id'], 'failed', (string) $result['message'] );
+				}
 			}
+		}//end if
+	}//end foreach
+
+	$processed   = $job['processed'] + $processed_now;
+	$regenerated = $job['succeeded'] + $regenerated_now;
+	$failed      = $job['failed'] + $failed_now;
+	$fields      = array(
+		'processed' => $processed,
+		'succeeded' => $regenerated,
+		'failed'    => $failed,
+	);
+
+	if ( $cursor_mode ) {
+		$fields['cursor'] = $last_id;
+	}
+
+	$remaining = $cursor_mode
+		? max( 0, $job['total'] - $processed )
+		: yotm_job_count_items( $job['id'], 'queued' ) + yotm_job_count_items( $job['id'], 'processing' );
+	$done      = 0 === $remaining || ( $cursor_mode && $processed >= $job['total'] );
+	$current   = yotm_job_get_by_id( $job['id'] );
+	$stopped   = is_array( $current ) && 'cancelled' === $current['status'];
+
+	if ( $done && ! $stopped ) {
+		$fields['status']     = 'completed';
+		$fields['phase']      = 'completed';
+		$fields['expires_at'] = gmdate( 'Y-m-d H:i:s', time() + 7 * DAY_IN_SECONDS );
+	}
+
+	yotm_job_update( $job['id'], $fields );
+	wp_send_json_success( yotm_build_regenerate_response( yotm_job_get_by_id( $job['id'] ), $done && ! $stopped ) );
+}
+
+/**
+ * Regenerate one attachment with an original-image source for force mode.
+ *
+ * @param int  $attachment_id Attachment ID.
+ * @param bool $only_missing Only create missing sizes.
+ * @param bool $force_all Force full metadata regeneration.
+ * @return array{status:string,message:string}
+ */
+function yotm_regenerate_attachment( $attachment_id, $only_missing, $force_all ) {
+	$file = get_attached_file( $attachment_id );
+	$mime = get_post_mime_type( $attachment_id );
+
+	if ( ! $file || ! file_exists( $file ) ) {
+		return array(
+			'status'  => 'failed',
+			'message' => __( 'Attached image file is missing.', 'thumbnail-manager' ),
+		);
+	}
+
+	if ( ! is_string( $mime ) || 0 !== strpos( $mime, 'image/' ) || 'image/svg+xml' === $mime ) {
+		return array(
+			'status'  => 'skipped',
+			'message' => __( 'Attachment is not a raster image.', 'thumbnail-manager' ),
+		);
+	}
+
+	if ( $only_missing && ! $force_all && function_exists( 'wp_get_missing_image_subsizes' ) && function_exists( 'wp_update_image_subsizes' ) ) {
+		$missing = wp_get_missing_image_subsizes( $attachment_id );
+
+		if ( empty( $missing ) ) {
+			return array(
+				'status'  => 'skipped',
+				'message' => __( 'No image sizes are missing.', 'thumbnail-manager' ),
+			);
+		}
+
+		$result = wp_update_image_subsizes( $attachment_id );
+
+		return is_wp_error( $result )
+			? array(
+				'status'  => 'failed',
+				'message' => $result->get_error_message(),
+			)
+			: array(
+				'status'  => 'regenerated',
+				'message' => '',
+			);
+	}//end if
+
+	$old_metadata = wp_get_attachment_metadata( $attachment_id );
+	$source_file  = function_exists( 'wp_get_original_image_path' ) ? wp_get_original_image_path( $attachment_id ) : $file;
+
+	if ( ! is_string( $source_file ) || ! file_exists( $source_file ) ) {
+		$source_file = $file;
+	}
+
+	$metadata = wp_generate_attachment_metadata( $attachment_id, $source_file );
+
+	if ( is_wp_error( $metadata ) || empty( $metadata ) || ! is_array( $metadata ) ) {
+		$message = is_wp_error( $metadata ) ? $metadata->get_error_message() : __( 'WordPress returned empty image metadata.', 'thumbnail-manager' );
+
+		return array(
+			'status'  => 'failed',
+			'message' => $message,
+		);
+	}
+
+	if ( is_array( $old_metadata ) ) {
+		$metadata = array_merge( $old_metadata, $metadata );
+	}
+
+	if ( false === wp_update_attachment_metadata( $attachment_id, $metadata ) ) {
+		return array(
+			'status'  => 'failed',
+			'message' => __( 'Could not update attachment metadata.', 'thumbnail-manager' ),
+		);
+	}
+
+	if ( $force_all && is_array( $old_metadata ) ) {
+		yotm_cleanup_obsolete_generated_files( $file, $source_file, $old_metadata, $metadata );
+	}
+
+	return array(
+		'status'  => 'regenerated',
+		'message' => '',
+	);
+}
+
+/**
+ * Build normalized generated-file paths from attachment metadata.
+ *
+ * @param string $attached_file Current attached file path.
+ * @param array  $metadata Attachment metadata.
+ * @return array<string,string>
+ */
+function yotm_regenerate_metadata_file_map( $attached_file, $metadata ) {
+	$paths = array();
+
+	if ( ! is_string( $attached_file ) || '' === $attached_file || empty( $metadata['sizes'] ) || ! is_array( $metadata['sizes'] ) ) {
+		return $paths;
+	}
+
+	$directory = trailingslashit( dirname( yotm_normalize_filesystem_path( $attached_file ) ) );
+
+	foreach ( $metadata['sizes'] as $size_data ) {
+		if ( ! is_array( $size_data ) ) {
+			continue;
+		}
+
+		$filename = $size_data['file'] ?? ( $size_data['filename'] ?? '' );
+		if ( ! is_string( $filename ) || '' === $filename ) {
+			continue;
+		}
+
+		$path           = yotm_normalize_filesystem_path( $directory . wp_basename( $filename ) );
+		$paths[ $path ] = $path;
+	}
+
+	return $paths;
+}
+
+/**
+ * Delete stale generated files after replacement metadata has been saved.
+ *
+ * Files still referenced by the new metadata and all original/attached paths
+ * remain protected.
+ *
+ * @param string $attached_file Current attached file path.
+ * @param string $source_file Original source used to regenerate metadata.
+ * @param array  $old_metadata Previous attachment metadata.
+ * @param array  $new_metadata Replacement attachment metadata.
+ */
+function yotm_cleanup_obsolete_generated_files( $attached_file, $source_file, $old_metadata, $new_metadata ) {
+	$uploads = wp_get_upload_dir();
+	$base    = (string) ( $uploads['basedir'] ?? '' );
+
+	if ( '' === $base ) {
+		return;
+	}
+
+	$old_paths = yotm_regenerate_metadata_file_map( $attached_file, $old_metadata );
+	$new_paths = yotm_regenerate_metadata_file_map( $attached_file, $new_metadata );
+	$protected = array();
+
+	foreach ( array( $attached_file, $source_file ) as $path ) {
+		if ( is_string( $path ) && '' !== $path ) {
+			$protected[ yotm_normalize_filesystem_path( $path ) ] = true;
 		}
 	}
 
-	$meta['processed']   = (int) $meta['processed'] + $processed_now;
-	$meta['regenerated'] = (int) $meta['regenerated'] + $regenerated_now;
-	$meta['skipped']     = (int) $meta['skipped'] + $skipped_now;
-	$meta['failed']      = (int) $meta['failed'] + $failed_now;
+	foreach ( array_diff_key( $old_paths, $new_paths ) as $path ) {
+		if ( isset( $protected[ $path ] ) || ! yotm_is_path_inside_dir( $path, $base ) || ! is_file( $path ) ) {
+			continue;
+		}
 
-	if ( ! $cursor_mode ) {
-		yotm_update_regen_list( $token, $list );
+		wp_delete_file( $path );
 	}
-	yotm_update_regen_meta( $token, $meta );
+}
 
-	$total     = max( 1, (int) $meta['total'] );
-	$processed = (int) $meta['processed'];
-	$remaining = $cursor_mode ? max( 0, (int) $meta['total'] - $processed ) : count( $list );
-	$percent   = min( 100, ( $processed / $total ) * 100 );
+/**
+ * Build a regeneration response from a persisted job.
+ *
+ * @param array $job Job row.
+ * @param bool  $done Whether complete.
+ * @return array
+ */
+function yotm_build_regenerate_response( $job, $done ) {
+	$payload   = $job['payload'];
+	$total     = (int) $job['total'];
+	$processed = (int) $job['processed'];
+	$failed    = (int) $job['failed'];
+	$skipped   = max( 0, $processed - (int) $job['succeeded'] - $failed );
+	$percent   = $done ? 100 : ( $total > 0 ? min( 99.9, ( $processed / $total ) * 100 ) : 100 );
 
-	$resp = [
-		'processed'   => $processed,
-		'total'       => (int) $meta['total'],
-		'regenerated' => (int) $meta['regenerated'],
-		'skipped'     => (int) $meta['skipped'],
-		'failed'      => (int) $meta['failed'],
-		'remaining'   => $remaining,
-		'percent'     => $percent,
-		'done'        => false,
-		'scope_label' => isset( $meta['scope_label'] ) ? $meta['scope_label'] : 'All media',
-	];
-
-	if ( 0 === $remaining || ( $cursor_mode && $processed >= (int) $meta['total'] ) ) {
-		yotm_delete_regen_state( $token );
-		$resp['done'] = true;
-	}
-
-	wp_send_json_success( $resp );
+	return array(
+		'token'        => $job['token'],
+		'status'       => $job['status'],
+		'processed'    => $processed,
+		'total'        => $total,
+		'regenerated'  => (int) $job['succeeded'],
+		'skipped'      => $skipped,
+		'failed'       => $failed,
+		'remaining'    => max( 0, $total - $processed ),
+		'percent'      => $percent,
+		'done'         => (bool) $done,
+		'stopped'      => 'cancelled' === $job['status'],
+		'scope'        => (string) ( $payload['scope'] ?? 'all' ),
+		'scope_label'  => (string) ( $payload['scope_label'] ?? __( 'All media', 'thumbnail-manager' ) ),
+		'only_missing' => ! empty( $payload['only_missing'] ) ? 1 : 0,
+		'force_all'    => ! empty( $payload['force_all'] ) ? 1 : 0,
+		'errors'       => yotm_job_get_error_sample( $job['id'] ),
+	);
 }

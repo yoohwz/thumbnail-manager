@@ -43,10 +43,10 @@ add_action( 'admin_enqueue_scripts', function( $hook ) {
         'YOTM',
 	        [
 	            'ajaxurl' => admin_url( 'admin-ajax.php' ),
-	            'nonce'   => wp_create_nonce( 'yotm_prune_nonce' ),
+		            'nonce'   => wp_create_nonce( 'yotm_prune_nonce' ),
+		            'siteId'  => get_current_blog_id(),
 	            'i18n'    => [
 	                'allSizesEnabled'              => __( 'All sizes are enabled — there are no disabled sizes to prune.', 'thumbnail-manager' ),
-	                'confirmPruneDisabled'         => __( 'This will delete thumbnails for all currently DISABLED sizes. Proceed?', 'thumbnail-manager' ),
 	                'scanning'                     => __( 'Scanning…', 'thumbnail-manager' ),
 	                'deleting'                     => __( 'Deleting…', 'thumbnail-manager' ),
 	                'processing'                   => __( 'Processing…', 'thumbnail-manager' ),
@@ -54,17 +54,27 @@ add_action( 'admin_enqueue_scripts', function( $hook ) {
 	                'prepareFailed'                => __( 'Prepare failed:', 'thumbnail-manager' ),
 	                'deleteFailed'                 => __( 'Delete failed:', 'thumbnail-manager' ),
 	                'unknownError'                 => __( 'Unknown error', 'thumbnail-manager' ),
-	                'dryRunComplete'               => __( 'Dry-run complete. No deletions performed.', 'thumbnail-manager' ),
 	                'networkPrepare'               => __( 'Network error during prepare.', 'thumbnail-manager' ),
 	                'networkScan'                  => __( 'Network error during scan.', 'thumbnail-manager' ),
 	                'networkDelete'                => __( 'Network error during delete.', 'thumbnail-manager' ),
-	                'cancelled'                    => __( 'Cancelled.', 'thumbnail-manager' ),
+		                'cancelled'                    => __( 'Cancelled.', 'thumbnail-manager' ),
+		                'resumeAvailable'              => __( 'An unfinished job was found. Resuming it now…', 'thumbnail-manager' ),
+		                'resumeAfterNetworkError'      => __( 'The job is still saved. Reload this page to resume it.', 'thumbnail-manager' ),
+		                'scanReadyForReview'           => __( 'Scan complete. Review the immutable manifest below; nothing has been deleted.', 'thumbnail-manager' ),
+		                'approvalFailed'               => __( 'Delete approval failed:', 'thumbnail-manager' ),
+		                'networkApproval'              => __( 'Network error while approving the manifest.', 'thumbnail-manager' ),
+		                'manifestHash'                 => __( 'Manifest:', 'thumbnail-manager' ),
+		                'scanningDisk'                 => __( 'Scanning uploads folders…', 'thumbnail-manager' ),
+		                'buildingManifest'             => __( 'Building immutable manifest…', 'thumbnail-manager' ),
+		                'failedFiles'                  => __( 'Failed files:', 'thumbnail-manager' ),
 	                'noMatchingThumbnails'         => __( 'No matching thumbnails found. Try enabling orphan discovery or widen the folder scope.', 'thumbnail-manager' ),
-	                'doneDeleted'                  => __( 'Done. Deleted %1$s files — Freed %2$s.', 'thumbnail-manager' ),
+			                /* translators: 1: deleted file count, 2: formatted bytes freed. */
+			                'doneDeleted'                  => __( 'Done. Deleted %1$s files — Freed %2$s.', 'thumbnail-manager' ),
 	                'regenerationCancelled'        => __( 'Regeneration cancelled.', 'thumbnail-manager' ),
 	                'preparingRegenerationQueue'   => __( 'Preparing regeneration queue…', 'thumbnail-manager' ),
 	                'starting'                     => __( 'Starting…', 'thumbnail-manager' ),
-	                'doneRegenerated'              => __( 'Done. Regenerated %1$s attachments, skipped %2$s, failed %3$s.', 'thumbnail-manager' ),
+			                /* translators: 1: regenerated count, 2: skipped count, 3: failed count. */
+			                'doneRegenerated'              => __( 'Done. Regenerated %1$s attachments, skipped %2$s, failed %3$s.', 'thumbnail-manager' ),
 	                'batchFailed'                  => __( 'Batch failed:', 'thumbnail-manager' ),
 	                'networkRegenerateBatch'       => __( 'Network error during regenerate batch.', 'thumbnail-manager' ),
 	                'networkRegeneratePrepare'     => __( 'Network error during regenerate prepare.', 'thumbnail-manager' ),
@@ -102,8 +112,44 @@ add_action( 'admin_enqueue_scripts', function( $hook ) {
 	                'status'                       => __( 'Status', 'thumbnail-manager' ),
 	                'reason'                       => __( 'Reason', 'thumbnail-manager' ),
 	                'recommendation'               => __( 'Recommendation', 'thumbnail-manager' ),
-	                'scanningMediaUsage'           => __( 'Scanning media usage…', 'thumbnail-manager' ),
-	            ],
+		                'scanningMediaUsage'           => __( 'Scanning media usage…', 'thumbnail-manager' ),
+		                'scanningAttachmentMetadata'   => __( 'Scanning attachment metadata…', 'thumbnail-manager' ),
+		                'scanningContentReferences'    => __( 'Scanning content references…', 'thumbnail-manager' ),
+		                'jobStopped'                   => __( 'Job stopped. Completed work was not rolled back, and the audit record was retained.', 'thumbnail-manager' ),
+		                'stopping'                     => __( 'Stopping after the current batch…', 'thumbnail-manager' ),
+		                'activeJob'                    => __( 'Active job', 'thumbnail-manager' ),
+		                'viewJob'                      => __( 'View job', 'thumbnail-manager' ),
+		                'noRecentJobs'                 => __( 'No recent jobs.', 'thumbnail-manager' ),
+		                'jobPrune'                     => __( 'Prune files', 'thumbnail-manager' ),
+		                'jobRegenerate'                => __( 'Regenerate', 'thumbnail-manager' ),
+		                'jobRecommendation'            => __( 'Recommendations', 'thumbnail-manager' ),
+		                'statusScanning'               => __( 'Scanning', 'thumbnail-manager' ),
+		                'statusRunning'                => __( 'Running', 'thumbnail-manager' ),
+		                'statusAwaitingApproval'       => __( 'Awaiting review', 'thumbnail-manager' ),
+		                'statusApproved'               => __( 'Approved', 'thumbnail-manager' ),
+		                'statusDeleting'               => __( 'Deleting', 'thumbnail-manager' ),
+		                'statusCompleted'              => __( 'Completed', 'thumbnail-manager' ),
+		                'statusCancelled'              => __( 'Stopped', 'thumbnail-manager' ),
+		                'statusExpired'                => __( 'Expired', 'thumbnail-manager' ),
+		                'manifestEmpty'                => __( 'No manifest items match this filter.', 'thumbnail-manager' ),
+		                'manifestLoading'              => __( 'Loading manifest…', 'thumbnail-manager' ),
+		                'manifestLoadFailed'           => __( 'Could not load the manifest.', 'thumbnail-manager' ),
+		                /* translators: 1: current manifest page, 2: total manifest pages. */
+		                'pageOf'                       => __( 'Page %1$s of %2$s', 'thumbnail-manager' ),
+		                /* translators: %s: number of reviewed files. */
+		                'deleteReviewedCount'          => __( 'Delete %s reviewed files', 'thumbnail-manager' ),
+		                'errorsTitle'                  => __( 'Error details', 'thumbnail-manager' ),
+		                /* translators: %s: number of upload directory entries checked. */
+		                'scanningDiskCount'            => __( 'Scanning uploads folders… %s entries checked', 'thumbnail-manager' ),
+		                'expiresIn'                    => __( 'Approval window: 30 minutes after confirmation', 'thumbnail-manager' ),
+		                'unknownPath'                  => __( 'Unknown item', 'thumbnail-manager' ),
+		                'allUploads'                   => __( 'All uploads', 'thumbnail-manager' ),
+		                /* translators: %s: number of selected uploads folders. */
+		                'foldersSelected'              => __( '%s folders selected', 'thumbnail-manager' ),
+		                'oneFolderSelected'            => __( '1 folder selected', 'thumbnail-manager' ),
+		                'noFolderSelected'             => __( 'Choose at least one folder or use All uploads.', 'thumbnail-manager' ),
+		                'removeFolder'                 => __( 'Remove folder', 'thumbnail-manager' ),
+		            ],
 	        ]
 	    );
 	} );
@@ -155,6 +201,24 @@ function yotm_manage_thumbnails_page() {
     $base     = trailingslashit( $uploads['basedir'] );
     $sizes    = yotm_get_registered_sizes();
     $subpaths = yotm_list_upload_subpaths( $base );
+	$prune_subpath_groups = array();
+
+	foreach ( $subpaths as $subpath => $subpath_label ) {
+		if ( '' === $subpath ) {
+			continue;
+		}
+
+		$parts = explode( '/', $subpath, 2 );
+		$group = $parts[0];
+		if ( ! isset( $prune_subpath_groups[ $group ] ) ) {
+			$prune_subpath_groups[ $group ] = array(
+				'label' => isset( $subpaths[ $group ] ) ? $subpaths[ $group ] : $group,
+				'items' => array(),
+			);
+		}
+
+		$prune_subpath_groups[ $group ]['items'][ $subpath ] = $subpath_label;
+	}
 
     // Get disabled sizes and detect if the option exists
     $disabled_now  = get_option( 'yotm_disabled_sizes', null );
@@ -187,7 +251,7 @@ function yotm_manage_thumbnails_page() {
         );
     }
     ?>
-    <div class="wrap">
+    <div class="wrap yotm-wrap">
         <h1><?php echo esc_html__( 'Thumbnail Management', 'thumbnail-manager' ); ?></h1>
         <p><span class="dashicons dashicons-open-folder"></span> <code><?php echo esc_html( $base ); ?></code></p>
 
@@ -203,19 +267,46 @@ function yotm_manage_thumbnails_page() {
             </script>
         <?php endif; ?>
 
+		<section class="yo-job-center" aria-labelledby="yotm_job_center_title">
+			<h2 id="yotm_job_center_title" class="screen-reader-text"><?php echo esc_html__( 'Job activity', 'thumbnail-manager' ); ?></h2>
+			<div id="yotm_active_job" class="yo-active-job yo-hidden" role="status" aria-live="polite">
+				<div>
+					<strong id="yotm_active_job_title"><?php echo esc_html__( 'Active job', 'thumbnail-manager' ); ?></strong>
+					<span id="yotm_active_job_meta"></span>
+				</div>
+				<button type="button" id="yotm_active_job_view" class="button"><?php echo esc_html__( 'View job', 'thumbnail-manager' ); ?></button>
+			</div>
+			<details id="yotm_recent_jobs" class="yo-recent-jobs">
+				<summary><?php echo esc_html__( 'Recent jobs', 'thumbnail-manager' ); ?></summary>
+				<div class="yo-table-scroll">
+					<table class="widefat striped">
+						<thead>
+							<tr>
+								<th><?php echo esc_html__( 'Type', 'thumbnail-manager' ); ?></th>
+								<th><?php echo esc_html__( 'Status', 'thumbnail-manager' ); ?></th>
+								<th><?php echo esc_html__( 'Progress', 'thumbnail-manager' ); ?></th>
+								<th><?php echo esc_html__( 'Updated', 'thumbnail-manager' ); ?></th>
+							</tr>
+						</thead>
+						<tbody id="yotm_recent_jobs_body"></tbody>
+					</table>
+				</div>
+			</details>
+		</section>
+
 	        <div class="yo-tabs" id="yotm_tabs" role="tablist">
-	            <div class="yo-tab active" data-tab="regenerate" id="yotm_tab_regenerate" role="tab" tabindex="0" aria-controls="yotm_panel_regenerate" aria-selected="true">
+	            <button type="button" class="yo-tab active" data-tab="regenerate" id="yotm_tab_regenerate" role="tab" tabindex="0" aria-controls="yotm_panel_regenerate" aria-selected="true">
 	                <?php echo esc_html__( 'Regenerate', 'thumbnail-manager' ); ?>
-	            </div>
-	            <div class="yo-tab" data-tab="recommendations" id="yotm_tab_recommendations" role="tab" tabindex="-1" aria-controls="yotm_panel_recommendations" aria-selected="false">
+	            </button>
+	            <button type="button" class="yo-tab" data-tab="recommendations" id="yotm_tab_recommendations" role="tab" tabindex="-1" aria-controls="yotm_panel_recommendations" aria-selected="false">
 	                <?php echo esc_html__( 'Recommendations', 'thumbnail-manager' ); ?>
-	            </div>
-	            <div class="yo-tab" data-tab="prune" id="yotm_tab_prune" role="tab" tabindex="-1" aria-controls="yotm_panel_prune" aria-selected="false">
+	            </button>
+	            <button type="button" class="yo-tab" data-tab="prune" id="yotm_tab_prune" role="tab" tabindex="-1" aria-controls="yotm_panel_prune" aria-selected="false">
 	                <?php echo esc_html__( 'Prune Files', 'thumbnail-manager' ); ?>
-	            </div>
-	            <div class="yo-tab" data-tab="sizes" id="yotm_tab_sizes" role="tab" tabindex="-1" aria-controls="yotm_panel_sizes" aria-selected="false">
+	            </button>
+	            <button type="button" class="yo-tab" data-tab="sizes" id="yotm_tab_sizes" role="tab" tabindex="-1" aria-controls="yotm_panel_sizes" aria-selected="false">
 	                <?php echo esc_html__( 'Thumbnail Sizes', 'thumbnail-manager' ); ?>
-	            </div>
+	            </button>
 	        </div>
 
         <!-- TAB 1: REGENERATE -->
@@ -284,28 +375,28 @@ function yotm_manage_thumbnails_page() {
                 </p>
             </div>
 
-            <div class="yo-row">
-                <label>
-                    <input type="checkbox" id="yotm_regen_only_missing" value="1" checked>
-                    <?php echo esc_html__( 'Only generate missing thumbnails', 'thumbnail-manager' ); ?>
-                </label>
-                <br>
-                <label>
-                    <input type="checkbox" id="yotm_regen_force_all" value="1">
-                    <?php echo esc_html__( 'Force regenerate all selected items', 'thumbnail-manager' ); ?>
-                </label>
+            <fieldset class="yo-row yo-radio-group" id="yotm_regen_mode_group">
+				<legend><strong><?php echo esc_html__( 'Regeneration mode', 'thumbnail-manager' ); ?></strong></legend>
+				<label class="yo-radio-option">
+					<input type="radio" name="yotm_regen_mode" value="missing" checked>
+					<span><strong><?php echo esc_html__( 'Generate missing sizes only', 'thumbnail-manager' ); ?></strong><small><?php echo esc_html__( 'Faster and recommended for routine maintenance.', 'thumbnail-manager' ); ?></small></span>
+				</label>
+				<label class="yo-radio-option">
+					<input type="radio" name="yotm_regen_mode" value="force">
+					<span><strong><?php echo esc_html__( 'Force regenerate all selected images', 'thumbnail-manager' ); ?></strong><small><?php echo esc_html__( 'Rebuilds metadata from the original image and removes obsolete generated files.', 'thumbnail-manager' ); ?></small></span>
+				</label>
+            </fieldset>
+
+            <div id="yotm_regen_force_note" class="notice notice-warning inline yo-hidden" role="alert">
+				<p><?php echo esc_html__( 'Force mode is slower and may replace existing thumbnail files. Originals remain protected.', 'thumbnail-manager' ); ?></p>
             </div>
 
-            <p class="description">
-                <?php echo esc_html__( 'Force regenerate ignores the “only missing” optimization and rebuilds metadata for the selected attachments.', 'thumbnail-manager' ); ?>
-            </p>
-
             <p class="yo-row">
-                <button id="yotm_regen_run" class="button button-primary">
+                <button type="button" id="yotm_regen_run" class="button button-primary">
                     <?php echo esc_html__( 'Run regenerate', 'thumbnail-manager' ); ?>
                 </button>
                 <button id="yotm_regen_cancel" type="button" class="button yo-hidden">
-                    <?php echo esc_html__( 'Cancel', 'thumbnail-manager' ); ?>
+                    <?php echo esc_html__( 'Stop job', 'thumbnail-manager' ); ?>
                 </button>
             </p>
 
@@ -313,7 +404,7 @@ function yotm_manage_thumbnails_page() {
 	                <div class="bar"></div>
 	            </div>
 	            <div id="yotm_regen_status" class="yo-status" aria-live="polite"></div>
-            <div id="yotm_regen_results"></div>
+            <div id="yotm_regen_results" tabindex="-1" aria-live="polite"></div>
         </div>
 
         <!-- TAB: RECOMMENDATIONS -->
@@ -324,14 +415,17 @@ function yotm_manage_thumbnails_page() {
             </h2>
 
             <p>
-                <?php echo esc_html__( 'These suggestions combine protected size names, generated thumbnail metadata, and content references. They are still heuristic, so always run Dry-run before pruning.', 'thumbnail-manager' ); ?>
+                <?php echo esc_html__( 'These suggestions combine protected size names, generated thumbnail metadata, and content references. They are still heuristic, so always review the manifest before approving deletion.', 'thumbnail-manager' ); ?>
             </p>
 
-            <div class="yo-row">
-                <button id="yotm_recommend_scan" class="button button-primary">
-                    <?php echo esc_html__( 'Scan media usage', 'thumbnail-manager' ); ?>
-                </button>
-            </div>
+	            <div class="yo-row">
+	                <button type="button" id="yotm_recommend_scan" class="button button-primary">
+	                    <?php echo esc_html__( 'Scan media usage', 'thumbnail-manager' ); ?>
+	                </button>
+	                <button id="yotm_recommend_cancel" type="button" class="button yo-hidden">
+	                    <?php echo esc_html__( 'Stop job', 'thumbnail-manager' ); ?>
+	                </button>
+	            </div>
 
 	            <div id="yotm_recommend_progress" class="yo-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
 	                <div class="bar"></div>
@@ -363,15 +457,15 @@ function yotm_manage_thumbnails_page() {
 
             </div>
 
-            <div id="yotm_recommend_results"></div>
+            <div id="yotm_recommend_results" tabindex="-1" aria-live="polite"></div>
 
             <div class="yo-row">
 
-                <button id="yotm_apply_recommendations" class="button button-primary yo-hidden">
+                <button type="button" id="yotm_apply_recommendations" class="button button-primary yo-hidden">
                     <?php echo esc_html__( 'Apply recommended sizes', 'thumbnail-manager' ); ?>
                 </button>
 
-                <button id="yotm_recommend_go_prune" class="button yo-hidden">
+                <button type="button" id="yotm_recommend_go_prune" class="button yo-hidden">
                     <?php echo esc_html__( 'Review in Prune Files', 'thumbnail-manager' ); ?>
                 </button>
 
@@ -385,7 +479,7 @@ function yotm_manage_thumbnails_page() {
                 <?php
                 echo wp_kses(
                     __(
-                        'Choose which registered image sizes to <strong>KEEP</strong>. All <em>non-selected</em> sizes will be scanned and (if Delete selected) removed in batches with a progress bar.',
+	                        'Choose which registered image sizes to <strong>KEEP</strong>, then scan. The scan only builds a reviewable manifest; deletion requires a separate explicit approval after the scan completes.',
                         'thumbnail-manager'
                     ),
                     [
@@ -393,34 +487,90 @@ function yotm_manage_thumbnails_page() {
                         'em'     => [],
                     ]
                 );
-                ?>
-            </p>
+	                ?>
+	            </p>
 
-            <div class="yo-row">
-                <label>
-                    <?php
-                    echo wp_kses(
-                        __(
-                            'Limit to subfolder inside <code>uploads/</code>:',
-                            'thumbnail-manager'
-                        ),
-                        [
-                            'code' => [],
-                        ]
-                    );
-                    ?>
-                </label><br>
-                <select id="yotm_limit_subpath">
-                    <?php foreach ( $subpaths as $val => $label ) : ?>
-                        <option value="<?php echo esc_attr( $val ); ?>">
-                            <?php echo esc_html( $label ); ?>
-                        </option>
-                    <?php endforeach; ?>
-                </select>
-            </div>
+			<ol id="yotm_prune_steps" class="yo-stepper" aria-label="<?php echo esc_attr__( 'Prune progress', 'thumbnail-manager' ); ?>">
+				<li data-step="configure" class="is-active" aria-current="step"><span>1</span><?php echo esc_html__( 'Configure', 'thumbnail-manager' ); ?></li>
+				<li data-step="scanning"><span>2</span><?php echo esc_html__( 'Scan', 'thumbnail-manager' ); ?></li>
+				<li data-step="review"><span>3</span><?php echo esc_html__( 'Review', 'thumbnail-manager' ); ?></li>
+				<li data-step="deleting"><span>4</span><?php echo esc_html__( 'Delete', 'thumbnail-manager' ); ?></li>
+				<li data-step="completed"><span>5</span><?php echo esc_html__( 'Complete', 'thumbnail-manager' ); ?></li>
+			</ol>
 
-            <form id="yotm_form" onsubmit="return false;">
-                <table class="widefat striped yo-sizes" style="max-width:980px;">
+			<fieldset class="yo-row yo-scope-picker" id="yotm_prune_scope_picker">
+				<legend><strong><?php echo esc_html__( 'Uploads scope', 'thumbnail-manager' ); ?></strong></legend>
+				<label class="yo-scope-mode">
+					<input type="radio" name="yotm_prune_scope" value="all" checked>
+					<span><strong><?php echo esc_html__( 'All uploads', 'thumbnail-manager' ); ?></strong><small><?php echo esc_html__( 'Scan the complete uploads directory.', 'thumbnail-manager' ); ?></small></span>
+				</label>
+				<label class="yo-scope-mode">
+					<input type="radio" name="yotm_prune_scope" value="selected">
+					<span><strong><?php echo esc_html__( 'Selected folders', 'thumbnail-manager' ); ?></strong><small><?php echo esc_html__( 'Choose multiple years or months to reduce scan time.', 'thumbnail-manager' ); ?></small></span>
+				</label>
+
+				<div id="yotm_subpath_picker" class="yo-subpath-picker yo-hidden">
+					<div class="yo-subpath-toolbar">
+						<label for="yotm_subpath_search" class="screen-reader-text"><?php echo esc_html__( 'Search uploads folders', 'thumbnail-manager' ); ?></label>
+						<input type="search" id="yotm_subpath_search" placeholder="<?php echo esc_attr__( 'Search year or folder, e.g. 2024/08…', 'thumbnail-manager' ); ?>" autocomplete="off">
+						<div class="yo-subpath-actions">
+							<button type="button" class="button button-small" id="yotm_subpath_select_visible"><?php echo esc_html__( 'Select visible', 'thumbnail-manager' ); ?></button>
+							<button type="button" class="button button-small" id="yotm_subpath_clear"><?php echo esc_html__( 'Clear', 'thumbnail-manager' ); ?></button>
+						</div>
+					</div>
+
+					<div id="yotm_subpath_options" class="yo-subpath-options" role="group" aria-label="<?php echo esc_attr__( 'Available uploads folders', 'thumbnail-manager' ); ?>">
+						<?php foreach ( $prune_subpath_groups as $group_name => $group_data ) :
+							$child_items = array_filter(
+								$group_data['items'],
+								static function ( $item_path ) use ( $group_name ) {
+									return $item_path !== $group_name;
+								},
+								ARRAY_FILTER_USE_KEY
+							);
+							$folder_count = max( 1, count( $child_items ) );
+							?>
+							<details class="yo-subpath-group" data-search="<?php echo esc_attr( strtolower( $group_name . ' ' . implode( ' ', array_keys( $group_data['items'] ) ) ) ); ?>">
+								<summary>
+									<span><?php echo esc_html( $group_name ); ?></span>
+									<small>
+										<?php
+										printf(
+											/* translators: %s: localized number of month/subfolder options. */
+											esc_html( _n( '%s folder', '%s folders', $folder_count, 'thumbnail-manager' ) ),
+											esc_html( number_format_i18n( $folder_count ) )
+										);
+										?>
+									</small>
+								</summary>
+								<div class="yo-subpath-group-items">
+									<label class="yo-subpath-option yo-subpath-parent" data-search="<?php echo esc_attr( strtolower( $group_name ) ); ?>">
+										<input type="checkbox" class="yotm_subpath_option" value="<?php echo esc_attr( $group_name ); ?>" data-kind="parent">
+										<span><strong><?php echo esc_html( 'uploads/' . $group_name . '/' ); ?></strong><small><?php echo esc_html__( 'Entire folder', 'thumbnail-manager' ); ?></small></span>
+									</label>
+
+									<?php foreach ( $child_items as $item_path => $item_label ) : ?>
+										<label class="yo-subpath-option" data-search="<?php echo esc_attr( strtolower( $item_path . ' ' . $item_label ) ); ?>">
+											<input type="checkbox" class="yotm_subpath_option" value="<?php echo esc_attr( $item_path ); ?>" data-ancestor="<?php echo esc_attr( $group_name ); ?>">
+											<span><?php echo esc_html( 'uploads/' . $item_path . '/' ); ?></span>
+										</label>
+									<?php endforeach; ?>
+								</div>
+							</details>
+						<?php endforeach; ?>
+						<p id="yotm_subpath_no_results" class="description yo-hidden"><?php echo esc_html__( 'No folders match this search.', 'thumbnail-manager' ); ?></p>
+					</div>
+
+					<div class="yo-subpath-selection" aria-live="polite">
+						<strong id="yotm_subpath_selection_count"><?php echo esc_html__( 'No folders selected', 'thumbnail-manager' ); ?></strong>
+						<div id="yotm_subpath_chips" class="yo-subpath-chips"></div>
+					</div>
+				</div>
+			</fieldset>
+
+	            <form id="yotm_form" onsubmit="return false;">
+				<div class="yo-table-scroll">
+	                <table class="widefat striped yo-sizes" style="max-width:980px;">
                     <thead>
                         <tr>
                             <th style="width:4ch;"><?php echo esc_html__( 'Keep', 'thumbnail-manager' ); ?></th>
@@ -469,19 +619,9 @@ function yotm_manage_thumbnails_page() {
                             </td>
                         </tr>
                     <?php endforeach; ?>
-                    </tbody>
-                </table>
-
-                <p class="yo-row" style="margin-top:12px;">
-                    <label>
-                        <input type="radio" name="yotm_mode" value="dry" checked>
-                        <?php echo esc_html__( 'Dry-run (no deletion)', 'thumbnail-manager' ); ?>
-                    </label><br>
-                    <label>
-                        <input type="radio" name="yotm_mode" value="delete">
-                        <?php echo esc_html__( 'Delete matching thumbnails', 'thumbnail-manager' ); ?>
-                    </label>
-                </p>
+	                    </tbody>
+	                </table>
+				</div>
 
 	                <p class="yo-row">
 	                    <label>
@@ -503,20 +643,75 @@ function yotm_manage_thumbnails_page() {
                     </span>
                 </p>
 
-                <p class="yo-row">
-                    <button id="yotm_run" class="button button-primary">
-                        <?php echo esc_html__( 'Run', 'thumbnail-manager' ); ?>
-                    </button>
-                    <button id="yotm_cancel" type="button" class="button yo-hidden">
-                        <?php echo esc_html__( 'Cancel', 'thumbnail-manager' ); ?>
-                    </button>
-                </p>
+		                <p class="yo-row yo-actions">
+		                    <button type="button" id="yotm_run" class="button button-primary">
+		                        <?php echo esc_html__( 'Scan and review', 'thumbnail-manager' ); ?>
+		                    </button>
+		                    <button id="yotm_cancel" type="button" class="button yo-hidden">
+	                        <?php echo esc_html__( 'Stop job', 'thumbnail-manager' ); ?>
+	                    </button>
+	                </p>
             </form>
 
 	            <div id="yotm_progress" class="yo-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="bar"></div></div>
 	            <div id="yotm_status" class="yo-status" aria-live="polite"></div>
-            <div id="yotm_results"></div>
-        </div>
+	            <div id="yotm_results" tabindex="-1" aria-live="polite"></div>
+
+			<section id="yotm_review_panel" class="yo-review-panel yo-hidden" tabindex="-1" aria-labelledby="yotm_review_title">
+				<div class="yo-review-heading">
+					<div>
+						<h2 id="yotm_review_title"><?php echo esc_html__( 'Review deletion manifest', 'thumbnail-manager' ); ?></h2>
+						<p><?php echo esc_html__( 'This manifest is immutable. Nothing will be deleted until you explicitly approve it below.', 'thumbnail-manager' ); ?></p>
+					</div>
+					<span class="yo-badge yo-review-badge"><?php echo esc_html__( 'Awaiting approval', 'thumbnail-manager' ); ?></span>
+				</div>
+
+				<div class="yo-review-summary">
+					<div><span><?php echo esc_html__( 'Files', 'thumbnail-manager' ); ?></span><strong id="yotm_review_count">0</strong></div>
+					<div><span><?php echo esc_html__( 'Estimated size', 'thumbnail-manager' ); ?></span><strong id="yotm_review_size">0 B</strong></div>
+					<div><span><?php echo esc_html__( 'Scope', 'thumbnail-manager' ); ?></span><strong id="yotm_review_scope">uploads/</strong></div>
+					<div><span><?php echo esc_html__( 'Review expires', 'thumbnail-manager' ); ?></span><strong id="yotm_review_expiry">—</strong></div>
+				</div>
+
+				<p class="yo-manifest-hash"><strong><?php echo esc_html__( 'Manifest hash', 'thumbnail-manager' ); ?></strong> <code id="yotm_review_hash"></code></p>
+				<div id="yotm_review_orphans"></div>
+
+				<div class="yo-manifest-tools">
+					<label for="yotm_manifest_search" class="screen-reader-text"><?php echo esc_html__( 'Filter manifest', 'thumbnail-manager' ); ?></label>
+					<input type="search" id="yotm_manifest_search" placeholder="<?php echo esc_attr__( 'Filter by path or size…', 'thumbnail-manager' ); ?>">
+					<span id="yotm_manifest_count" aria-live="polite"></span>
+				</div>
+
+				<div class="yo-table-scroll">
+					<table class="widefat striped yo-manifest-table">
+						<thead>
+							<tr>
+								<th><?php echo esc_html__( 'File path', 'thumbnail-manager' ); ?></th>
+								<th><?php echo esc_html__( 'Attachment', 'thumbnail-manager' ); ?></th>
+								<th><?php echo esc_html__( 'Size / source', 'thumbnail-manager' ); ?></th>
+								<th><?php echo esc_html__( 'Estimated size', 'thumbnail-manager' ); ?></th>
+							</tr>
+						</thead>
+						<tbody id="yotm_manifest_body"></tbody>
+					</table>
+				</div>
+
+				<div class="yo-pagination">
+					<button type="button" id="yotm_manifest_prev" class="button"><?php echo esc_html__( 'Previous', 'thumbnail-manager' ); ?></button>
+					<span id="yotm_manifest_page"><?php echo esc_html__( 'Page 1 of 1', 'thumbnail-manager' ); ?></span>
+					<button type="button" id="yotm_manifest_next" class="button"><?php echo esc_html__( 'Next', 'thumbnail-manager' ); ?></button>
+				</div>
+
+				<div class="yo-delete-approval">
+					<label>
+						<input type="checkbox" id="yotm_review_confirm">
+						<span><?php echo esc_html__( 'I reviewed this manifest and understand that only these files will be permanently deleted.', 'thumbnail-manager' ); ?></span>
+					</label>
+					<p class="description"><?php echo esc_html__( 'Approval is bound to your user, this site, and the manifest hash. It expires 30 minutes after confirmation.', 'thumbnail-manager' ); ?></p>
+					<button type="button" id="yotm_approve_delete" class="button yo-button-danger" disabled><?php echo esc_html__( 'Delete reviewed files', 'thumbnail-manager' ); ?></button>
+				</div>
+			</section>
+	        </div>
 
         <!-- TAB 3: THUMBNAIL SIZES -->
 	        <div class="yo-panel" id="yotm_panel_sizes" role="tabpanel" aria-labelledby="yotm_tab_sizes" hidden>
@@ -535,9 +730,10 @@ function yotm_manage_thumbnails_page() {
                 ?>
             </p>
 
-            <form method="post">
-                <?php wp_nonce_field( 'yotm_sizes_save_nonce', 'yotm_sizes_save_nonce' ); ?>
-                <table class="widefat striped" style="max-width:980px;">
+	            <form method="post">
+	                <?php wp_nonce_field( 'yotm_sizes_save_nonce', 'yotm_sizes_save_nonce' ); ?>
+				<div class="yo-table-scroll">
+	                <table class="widefat striped" style="max-width:980px;">
                     <thead>
                         <tr>
                             <th style="width:80px;"><?php echo esc_html__( 'Generate', 'thumbnail-manager' ); ?></th>
@@ -587,8 +783,9 @@ function yotm_manage_thumbnails_page() {
                             </td>
                         </tr>
                     <?php endforeach; ?>
-                    </tbody>
-                </table>
+	                    </tbody>
+	                </table>
+				</div>
 
                 <p class="yo-row">
                     <button class="button button-primary" name="yotm_sizes_save" value="1">
