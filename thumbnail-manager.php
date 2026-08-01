@@ -1,7 +1,7 @@
 <?php
 /**
  * Plugin Name: Thumbnail Manager
- * Plugin URI:  https://wordpress.org/plugins/thumbnail-manager
+ * Plugin URI:  https://yoohw.com/product/thumbnail-manager/
  * Description: Clean, control, and regenerate thumbnails with precision - remove unused sizes, prevent bloat, and rebuild what matters.
  * Version:     1.4.0
  * Author:      YoOhw.com
