@@ -21,6 +21,14 @@ SLUG = "thumbnail-manager"
 FIXED_ZIP_TIME = (1980, 1, 1, 0, 0, 0)
 SHA_PATTERN = re.compile(r"[0-9a-f]{40}")
 VERSION_PATTERN = re.compile(r"[0-9]+(?:\.[0-9]+){1,2}")
+RELEASE_CONTROL_COMPONENTS = (
+    ".github/workflows/release-prepare.yml",
+    "bin/build-release.sh",
+    "bin/validate-plugin-check.py",
+    "bin/validate-release.py",
+    "release/payload-manifest.txt",
+    "release/plugin-check-baseline.json",
+)
 
 
 class ReleaseValidationError(RuntimeError):
@@ -45,6 +53,21 @@ def sha256_file(path: Path) -> str:
 
 def canonical_json_bytes(value: Any) -> bytes:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def release_control_identity(
+    control_root: Path = CONTROL_ROOT, payload_manifest_path: Path | None = None
+) -> dict[str, Any]:
+    root = control_root.resolve()
+    components: list[dict[str, str]] = []
+    for relative in RELEASE_CONTROL_COMPONENTS:
+        target = payload_manifest_path.resolve() if relative == "release/payload-manifest.txt" and payload_manifest_path else root / relative
+        if not target.is_file():
+            fail(f"release-control component is missing: {relative}")
+        components.append({"path": relative, "sha256": sha256_file(target)})
+    identity: dict[str, Any] = {"schema_version": 1, "components": components}
+    identity["bundle_sha256"] = sha256_bytes(canonical_json_bytes(identity))
+    return identity
 
 
 def output_json(value: Any) -> None:
@@ -171,6 +194,9 @@ def metadata_from_texts(plugin: str, readme: str, changelog: str, pot: str) -> d
         "changelog_version": require_match(
             r"^=\s*([0-9]+(?:\.[0-9]+){1,2})\s*\(", changelog, "latest changelog version"
         ),
+        "readme_changelog_version": require_match(
+            r"^=\s*([0-9]+(?:\.[0-9]+){1,2})\s*\(", readme, "latest readme changelog version"
+        ),
         "upgrade_notice_version": require_match(
             r"^== Upgrade Notice ==\s*\n\s*=\s*([0-9]+(?:\.[0-9]+){1,2})\s*=",
             readme,
@@ -192,10 +218,16 @@ def metadata_from_texts(plugin: str, readme: str, changelog: str, pot: str) -> d
         fail("PHP minimum differs between plugin header and readme")
     if not VERSION_PATTERN.fullmatch(metadata["tested_up_to"]):
         fail(f"invalid Tested up to version: {metadata['tested_up_to']}")
-    version_normalized = normalized_release(metadata["version"])
-    for field in ("changelog_version", "upgrade_notice_version", "pot_version"):
-        if normalized_release(metadata[field]) != version_normalized:
-            fail(f"{field}={metadata[field]} does not describe plugin version {metadata['version']}")
+    historical_compatibility = {
+        ("1.4.0", "changelog_version", "1.4"),
+        ("1.4.0", "readme_changelog_version", "1.4"),
+    }
+    for field in ("changelog_version", "readme_changelog_version", "upgrade_notice_version", "pot_version"):
+        if metadata[field] == metadata["version"]:
+            continue
+        if (metadata["version"], field, metadata[field]) in historical_compatibility:
+            continue
+        fail(f"{field} must exactly equal active release version {metadata['version']}; got {metadata[field]}")
     return metadata
 
 
@@ -253,6 +285,7 @@ def build_release(args: argparse.Namespace) -> dict[str, Any]:
 
     contract_path = Path(args.payload_manifest).resolve()
     contract_entries = load_payload_contract(contract_path)
+    control_identity = release_control_identity(payload_manifest_path=contract_path)
     metadata = validate_source_metadata(source, args.version)
     payload_files = collect_payload_files(source, contract_entries)
     ensure_empty_output(output, source)
@@ -289,6 +322,7 @@ def build_release(args: argparse.Namespace) -> dict[str, Any]:
         "source_sha": args.source_sha,
         "preparation_run_id": args.preparation_run_id,
         "payload_contract_sha256": sha256_file(contract_path),
+        "release_control": control_identity,
         "metadata": metadata,
         "file_count": len(manifest_files),
         "files": manifest_files,
@@ -388,6 +422,29 @@ def validate_package(package_path: Path, manifest_path: Path) -> dict[str, Any]:
     return manifest
 
 
+def validate_control_binding(
+    manifest_path: Path, preparation_record_path: Path, control_root: Path = CONTROL_ROOT
+) -> dict[str, Any]:
+    manifest = load_and_authenticate_manifest(manifest_path)
+    try:
+        preparation = json.loads(preparation_record_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        fail(f"could not read preparation record: {error}")
+    expected = release_control_identity(control_root)
+    if manifest.get("release_control") != expected:
+        fail("release candidate was prepared with a stale or tampered release-control bundle")
+    if preparation.get("release_control") != expected:
+        fail("preparation record release-control identity mismatch")
+    payload_digest = next(
+        item["sha256"] for item in expected["components"] if item["path"] == "release/payload-manifest.txt"
+    )
+    if manifest.get("payload_contract_sha256") != payload_digest:
+        fail("release candidate payload contract differs from trusted protected-main control")
+    if preparation.get("manifest_sha256") != manifest.get("manifest_sha256"):
+        fail("preparation record does not bind the authenticated manifest")
+    return expected
+
+
 def command_metadata(args: argparse.Namespace) -> None:
     output_json(validate_source_metadata(Path(args.source).resolve(), args.version))
 
@@ -418,6 +475,22 @@ def command_validate_package(args: argparse.Namespace) -> None:
     )
 
 
+def command_control_identity(args: argparse.Namespace) -> None:
+    identity = release_control_identity(Path(args.control_root).resolve())
+    if args.output:
+        Path(args.output).write_text(json.dumps(identity, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    output_json(identity)
+
+
+def command_validate_control_binding(args: argparse.Namespace) -> None:
+    identity = validate_control_binding(
+        Path(args.manifest).resolve(),
+        Path(args.preparation_record).resolve(),
+        Path(args.control_root).resolve(),
+    )
+    output_json({"status": "RELEASE_CONTROL_BOUND", **identity})
+
+
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(description=__doc__)
     subparsers = root.add_subparsers(dest="command", required=True)
@@ -440,6 +513,19 @@ def parser() -> argparse.ArgumentParser:
     validate.add_argument("--package", required=True)
     validate.add_argument("--manifest", required=True)
     validate.set_defaults(handler=command_validate_package)
+
+    control = subparsers.add_parser("control-identity", help="compute the trusted release-control identity")
+    control.add_argument("--control-root", default=str(CONTROL_ROOT))
+    control.add_argument("--output")
+    control.set_defaults(handler=command_control_identity)
+
+    binding = subparsers.add_parser(
+        "validate-control-binding", help="bind an RC artifact to the current trusted release-control identity"
+    )
+    binding.add_argument("--manifest", required=True)
+    binding.add_argument("--preparation-record", required=True)
+    binding.add_argument("--control-root", default=str(CONTROL_ROOT))
+    binding.set_defaults(handler=command_validate_control_binding)
     return root
 
 

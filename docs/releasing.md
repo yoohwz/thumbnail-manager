@@ -29,6 +29,7 @@ Do not store WordPress.org email/tokenized Release Confirmation links in GitHub.
    - `changelog.txt` newest release;
    - POT `Project-Id-Version`;
    - `Tested up to` only when the exact stable WordPress version has supporting matrix evidence.
+   The current historical `1.4.0` release alone may retain `1.4` in its two changelog headings. Every future release must use the selected exact numeric version string in all active release fields.
 3. Open a normal reviewed PR. Merge only with the protected `CI Gate` green.
 4. From the Actions UI on **main**, manually run `Prepare WordPress.org Release Candidate` with:
    - the exact 40-character merged candidate SHA;
@@ -37,6 +38,7 @@ Do not store WordPress.org email/tokenized Release Confirmation links in GitHub.
    - exact source SHA/version;
    - deterministic package SHA-256;
    - manifest and expanded-tree SHA-256;
+   - release-control bundle SHA-256 covering the allowlist, Plugin Check baseline, builder/validators and preparation workflow;
    - exact 17-file positive payload;
    - Plugin Check result and reviewed warning-baseline delta;
    - successful exact-SHA `CI Gate`.
@@ -73,7 +75,9 @@ The workflow definition and trusted helpers always execute from protected `main`
 
 ## WordPress.org Release Confirmation
 
-After the SVN commit and exact SVN tree verification:
+After the SVN commit, the production path performs a fresh checkout and authenticates the exact SVN revision/log message, candidate SHA, manifest, trunk, tag and unchanged assets against the approved preflight. Only that verified result may enter WordPress.org confirmation/propagation handling or populate the durable publication record.
+
+After authenticated SVN verification:
 
 - `enabled` or `unknown` produces `WPORG_RELEASE_CONFIRMATION_PENDING`. A WordPress.org plugin committer must confirm through Release Management/tokenized email. Do not rerun publication and do not recommit SVN.
 - `disabled` permits bounded public propagation checks. A timeout produces `WPORG_PROPAGATION_PENDING`; this is not an SVN failure.

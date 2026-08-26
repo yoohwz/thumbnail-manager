@@ -273,6 +273,7 @@ def stage_svn(args: argparse.Namespace) -> dict[str, Any]:
         "status": "READ_ONLY_PUBLICATION_PREFLIGHT",
         "snapshot": before,
         "manifest_sha256": manifest["manifest_sha256"],
+        "release_control": manifest.get("release_control"),
         "source_sha": manifest["source_sha"],
         "tree_sha256": manifest["tree_sha256"],
         "version": args.version,
@@ -366,6 +367,8 @@ def verify_svn_publication(args: argparse.Namespace) -> dict[str, Any]:
     manifest = validator.load_and_authenticate_manifest(manifest_path)
     if preflight_record["manifest_sha256"] != manifest["manifest_sha256"]:
         fail("approved preflight manifest identity mismatch")
+    if preflight_record.get("release_control") != manifest.get("release_control"):
+        fail("approved preflight release-control identity mismatch")
     log_result = run_svn("log", "--xml", "--limit", "1", str(working_copy / "tags" / args.version))
     try:
         entry = ElementTree.fromstring(log_result.stdout).find("logentry")

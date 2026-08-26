@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import os
@@ -74,6 +75,19 @@ class ReleasePackageTests(unittest.TestCase):
 
         manifest = json.loads(first_manifest.read_text(encoding="utf-8"))
         self.assertEqual(17, manifest["file_count"])
+        self.assertRegex(manifest["release_control"]["bundle_sha256"], r"^[0-9a-f]{64}$")
+        component_paths = {item["path"] for item in manifest["release_control"]["components"]}
+        self.assertEqual(
+            {
+                ".github/workflows/release-prepare.yml",
+                "bin/build-release.sh",
+                "bin/validate-plugin-check.py",
+                "bin/validate-release.py",
+                "release/payload-manifest.txt",
+                "release/plugin-check-baseline.json",
+            },
+            component_paths,
+        )
         paths = {item["path"] for item in manifest["files"]}
         self.assertIn("thumbnail-manager.php", paths)
         self.assertIn("inc/job-storage.php", paths)
@@ -159,6 +173,138 @@ class ReleasePackageTests(unittest.TestCase):
             str(self.temp / "missing-plugin-check-results.txt"),
             "--baseline",
             "release/plugin-check-baseline.json",
+            expect_success=False,
+        )
+
+    def test_release_control_binding_rejects_self_consistent_stale_contract(self) -> None:
+        package, manifest_path = self.build(self.temp / "control-binding")
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        preparation_path = self.temp / "preparation-record.json"
+        preparation = {
+            "manifest_sha256": manifest["manifest_sha256"],
+            "release_control": manifest["release_control"],
+        }
+        preparation_path.write_text(json.dumps(preparation), encoding="utf-8")
+        run(
+            "python3",
+            "bin/validate-release.py",
+            "validate-control-binding",
+            "--manifest",
+            str(manifest_path),
+            "--preparation-record",
+            str(preparation_path),
+        )
+
+        stale_control = manifest["release_control"]
+        stale_control["components"][0]["sha256"] = "0" * 64
+        stale_identity = {"schema_version": stale_control["schema_version"], "components": stale_control["components"]}
+        stale_control["bundle_sha256"] = hashlib.sha256(
+            json.dumps(stale_identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        manifest["release_control"] = stale_control
+        unsigned = dict(manifest)
+        unsigned.pop("manifest_sha256")
+        manifest["manifest_sha256"] = hashlib.sha256(
+            json.dumps(unsigned, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        preparation["manifest_sha256"] = manifest["manifest_sha256"]
+        preparation["release_control"] = stale_control
+        preparation_path.write_text(json.dumps(preparation), encoding="utf-8")
+        run(
+            "python3",
+            "bin/validate-release.py",
+            "validate-package",
+            "--package",
+            str(package),
+            "--manifest",
+            str(manifest_path),
+        )
+        run(
+            "python3",
+            "bin/validate-release.py",
+            "validate-control-binding",
+            "--manifest",
+            str(manifest_path),
+            "--preparation-record",
+            str(preparation_path),
+            expect_success=False,
+        )
+
+    def test_future_release_requires_exact_version_strings(self) -> None:
+        source = self.temp / "future-candidate"
+        shutil.copytree(ROOT, source, ignore=shutil.ignore_patterns(".git", "vendor", "__pycache__"))
+        replacements = {
+            "thumbnail-manager.php": [("1.4.0", "1.5.0"), ("1.4.0", "1.5.0")],
+            "readme.txt": [("Stable tag: 1.4.0", "Stable tag: 1.5.0"), ("= 1.4.0 =", "= 1.5.0 ="), ("= 1.4 (", "= 1.5 (")],
+            "changelog.txt": [("= 1.4 (", "= 1.5 (")],
+            "languages/thumbnail-manager.pot": [("Thumbnail Manager 1.4.0", "Thumbnail Manager 1.5.0")],
+        }
+        for relative, changes in replacements.items():
+            target = source / relative
+            content = target.read_text(encoding="utf-8")
+            for old, new in changes:
+                content = content.replace(old, new, 1)
+            target.write_text(content, encoding="utf-8")
+        run(
+            "bash",
+            "bin/build-release.sh",
+            "--source",
+            str(source),
+            "--output-dir",
+            str(self.temp / "future-mismatch"),
+            "--version",
+            "1.5.0",
+            "--source-sha",
+            FULL_SHA,
+            expect_success=False,
+        )
+        for relative in ("readme.txt", "changelog.txt"):
+            target = source / relative
+            target.write_text(target.read_text(encoding="utf-8").replace("= 1.5 (", "= 1.5.0 (", 1), encoding="utf-8")
+        run(
+            "bash",
+            "bin/build-release.sh",
+            "--source",
+            str(source),
+            "--output-dir",
+            str(self.temp / "future-exact"),
+            "--version",
+            "1.5.0",
+            "--source-sha",
+            FULL_SHA,
+        )
+        readme = source / "readme.txt"
+        exact_readme = readme.read_text(encoding="utf-8")
+        readme.write_text(exact_readme.replace("= 1.5.0 =", "= 1.5 =", 1), encoding="utf-8")
+        run(
+            "bash",
+            "bin/build-release.sh",
+            "--source",
+            str(source),
+            "--output-dir",
+            str(self.temp / "future-upgrade-mismatch"),
+            "--version",
+            "1.5.0",
+            "--source-sha",
+            FULL_SHA,
+            expect_success=False,
+        )
+        readme.write_text(exact_readme, encoding="utf-8")
+        pot = source / "languages/thumbnail-manager.pot"
+        exact_pot = pot.read_text(encoding="utf-8")
+        pot.write_text(exact_pot.replace("Thumbnail Manager 1.5.0", "Thumbnail Manager 1.5", 1), encoding="utf-8")
+        run(
+            "bash",
+            "bin/build-release.sh",
+            "--source",
+            str(source),
+            "--output-dir",
+            str(self.temp / "future-pot-mismatch"),
+            "--version",
+            "1.5.0",
+            "--source-sha",
+            FULL_SHA,
             expect_success=False,
         )
 

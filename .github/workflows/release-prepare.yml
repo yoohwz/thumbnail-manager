@@ -147,6 +147,7 @@ jobs:
               "package_sha256": manifest["package"]["sha256"],
               "manifest_sha256": manifest["manifest_sha256"],
               "tree_sha256": manifest["tree_sha256"],
+              "release_control": manifest["release_control"],
               "status": "RC_PREPARED",
           }
           with open(sys.argv[2], "w", encoding="utf-8") as handle:
@@ -186,5 +187,6 @@ jobs:
           print(f"- Package SHA-256: `{manifest['package']['sha256']}`")
           print(f"- Manifest SHA-256: `{manifest['manifest_sha256']}`")
           print(f"- Tree SHA-256: `{manifest['tree_sha256']}`")
+          print(f"- Release-control bundle: `{manifest['release_control']['bundle_sha256']}`")
           print("- External mutation: `NOT RUN — release preparation is read-only`")
           PY

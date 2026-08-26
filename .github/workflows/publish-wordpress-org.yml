@@ -155,23 +155,30 @@ jobs:
           python3 control/bin/validate-release.py validate-package \
             --package "$RUNNER_TEMP/prepared/thumbnail-manager-$VERSION.zip" \
             --manifest "$RUNNER_TEMP/prepared/release-manifest.json"
-          python3 - "$RUNNER_TEMP/prepared/preparation-record.json" "$RUNNER_TEMP/prepared/release-manifest.json" <<'PY'
+          python3 control/bin/validate-release.py validate-control-binding \
+            --manifest "$RUNNER_TEMP/prepared/release-manifest.json" \
+            --preparation-record "$RUNNER_TEMP/prepared/preparation-record.json"
+          python3 - "$RUNNER_TEMP/prepared/preparation-record.json" "$RUNNER_TEMP/prepared/release-manifest.json" "$RUNNER_TEMP/preparation-run.json" <<'PY'
           import json
           import os
           import sys
 
           record = json.load(open(sys.argv[1], encoding="utf-8"))
           manifest = json.load(open(sys.argv[2], encoding="utf-8"))
+          preparation_run = json.load(open(sys.argv[3], encoding="utf-8"))
           expected = {
               "repository": os.environ["GITHUB_REPOSITORY"],
               "workflow_path": ".github/workflows/release-prepare.yml",
               "workflow_run_id": int(os.environ["PREPARATION_RUN_ID"]),
+              "workflow_ref": f"{os.environ['GITHUB_REPOSITORY']}/.github/workflows/release-prepare.yml@refs/heads/main",
+              "control_sha": preparation_run["head_sha"],
               "candidate_sha": os.environ["CANDIDATE_SHA"],
               "version": os.environ["VERSION"],
               "artifact_name": f"thumbnail-manager-{os.environ['VERSION']}-{os.environ['CANDIDATE_SHA']}",
               "package_sha256": manifest["package"]["sha256"],
               "manifest_sha256": manifest["manifest_sha256"],
               "tree_sha256": manifest["tree_sha256"],
+              "release_control": manifest["release_control"],
               "status": "RC_PREPARED",
           }
           mismatches = [key for key, value in expected.items() if record.get(key) != value]
@@ -428,21 +435,26 @@ jobs:
           test -n "$revision"
           echo "svn_revision=$revision" >> "$GITHUB_OUTPUT"
 
-      - name: Verify committed SVN trees before public release checks
+      - name: Authenticate committed SVN release before public release checks
         env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          SVN_REVISION: ${{ steps.svn-commit.outputs.svn_revision }}
           VERSION: ${{ inputs.version }}
         shell: bash
         run: |
           set -euo pipefail
           svn_url="$(python3 -c 'import json; print(json.load(open("control/release/wporg-policy.json"))["svn_url"])')"
-          svn export --quiet "$svn_url/trunk" "$RUNNER_TEMP/verified-trunk"
-          svn export --quiet "$svn_url/tags/$VERSION" "$RUNNER_TEMP/verified-tag"
-          python3 control/bin/wporg-release.py validate-tree \
-            --directory "$RUNNER_TEMP/verified-trunk" \
-            --manifest "$RUNNER_TEMP/preflight/release-manifest.json"
-          python3 control/bin/wporg-release.py validate-tree \
-            --directory "$RUNNER_TEMP/verified-tag" \
-            --manifest "$RUNNER_TEMP/preflight/release-manifest.json"
+          svn checkout --quiet "$svn_url" "$RUNNER_TEMP/wporg-post-commit"
+          python3 control/bin/wporg-release.py verify-svn-publication \
+            --working-copy "$RUNNER_TEMP/wporg-post-commit" \
+            --policy control/release/wporg-policy.json \
+            --version "$VERSION" \
+            --candidate-sha "$CANDIDATE_SHA" \
+            --publish-run-id "$GITHUB_RUN_ID" \
+            --manifest "$RUNNER_TEMP/preflight/release-manifest.json" \
+            --preflight-record "$RUNNER_TEMP/preflight/preflight-record.json" \
+            --expected-revision "$SVN_REVISION" \
+            --output "$RUNNER_TEMP/post-commit-svn-verification.json"
 
       - name: Resolve WordPress.org confirmation or propagation state
         id: release-state
@@ -495,13 +507,18 @@ jobs:
           set -euo pipefail
           publication_artifact="publication-record-$GITHUB_RUN_ID"
           echo "publication_artifact=$publication_artifact" >> "$GITHUB_OUTPUT"
-          python3 - "$RUNNER_TEMP/preflight/release-manifest.json" "$RUNNER_TEMP/preflight/preflight-record.json" "$RUNNER_TEMP/publication-record.json" <<'PY'
+          python3 - "$RUNNER_TEMP/preflight/release-manifest.json" "$RUNNER_TEMP/preflight/preflight-record.json" "$RUNNER_TEMP/post-commit-svn-verification.json" "$RUNNER_TEMP/publication-record.json" <<'PY'
           import json
           import os
           import sys
 
           manifest = json.load(open(sys.argv[1], encoding="utf-8"))
           preflight = json.load(open(sys.argv[2], encoding="utf-8"))["snapshot"]
+          verification = json.load(open(sys.argv[3], encoding="utf-8"))
+          if verification.get("status") != "SVN_COMMITTED_VERIFIED":
+              raise SystemExit("authenticated post-commit SVN verification is missing")
+          if verification.get("svn_revision") != int(os.environ["SVN_REVISION"]):
+              raise SystemExit("authenticated post-commit SVN revision mismatch")
           record = {
               "schema_version": 1,
               "repository": os.environ["GITHUB_REPOSITORY"],
@@ -513,15 +530,19 @@ jobs:
               "manifest_sha256": manifest["manifest_sha256"],
               "package_sha256": manifest["package"]["sha256"],
               "tree_sha256": manifest["tree_sha256"],
+              "release_control": manifest["release_control"],
               "git_tag_state": os.environ["TAG_STATE"],
-              "svn_revision": int(os.environ["SVN_REVISION"]),
+              "svn_revision": verification["svn_revision"],
+              "svn_verification_status": verification["status"],
+              "svn_trunk_tree_sha256": verification["trunk"]["tree_sha256"],
+              "svn_tag_tree_sha256": verification["tag"]["tree_sha256"],
               "svn_trunk_before_sha256": preflight["trunk"]["tree_sha256"],
-              "assets_tree_sha256": preflight["assets"]["tree_sha256"],
-              "assets_file_count": preflight["assets"]["file_count"],
+              "assets_tree_sha256": verification["assets"]["tree_sha256"],
+              "assets_file_count": verification["assets"]["file_count"],
               "release_confirmation_mode": preflight["release_confirmation"]["mode"],
               "wporg_state": os.environ.get("WPORG_STATE") or "SVN_COMMITTED_UNVERIFIED",
           }
-          with open(sys.argv[3], "w", encoding="utf-8") as handle:
+          with open(sys.argv[4], "w", encoding="utf-8") as handle:
               json.dump(record, handle, indent=2, sort_keys=True)
               handle.write("\n")
           PY
@@ -652,6 +673,7 @@ jobs:
               "workflow_run_id": int(os.environ["ORIGINAL_PUBLISH_RUN_ID"]),
               "package_sha256": manifest["package"]["sha256"],
               "tree_sha256": manifest["tree_sha256"],
+              "release_control": manifest["release_control"],
           }
           if publication_path.is_file():
               record = json.load(open(publication_path, encoding="utf-8"))
@@ -662,6 +684,7 @@ jobs:
               preflight = json.load(open(preflight_path, encoding="utf-8"))
               preflight_expected = {
                   "manifest_sha256": manifest["manifest_sha256"],
+                  "release_control": manifest["release_control"],
                   "source_sha": os.environ["CANDIDATE_SHA"],
                   "version": os.environ["VERSION"],
                   "status": "READ_ONLY_PUBLICATION_PREFLIGHT",
@@ -685,12 +708,15 @@ jobs:
               "repository": os.environ["GITHUB_REPOSITORY"],
               "workflow_path": ".github/workflows/release-prepare.yml",
               "workflow_run_id": int(os.environ["PREPARATION_RUN_ID"]),
+              "workflow_ref": f"{os.environ['GITHUB_REPOSITORY']}/.github/workflows/release-prepare.yml@refs/heads/main",
+              "control_sha": preparation_run["head_sha"],
               "candidate_sha": os.environ["CANDIDATE_SHA"],
               "version": os.environ["VERSION"],
               "artifact_name": expected_artifact,
               "manifest_sha256": manifest["manifest_sha256"],
               "package_sha256": manifest["package"]["sha256"],
               "tree_sha256": manifest["tree_sha256"],
+              "release_control": manifest["release_control"],
               "status": "RC_PREPARED",
           }
           preparation_mismatches = [key for key, value in preparation_expected.items() if preparation.get(key) != value]
@@ -772,8 +798,12 @@ jobs:
                   "manifest_sha256": manifest["manifest_sha256"],
                   "package_sha256": manifest["package"]["sha256"],
                   "tree_sha256": manifest["tree_sha256"],
+                  "release_control": manifest["release_control"],
                   "git_tag_state": "TAG_SEALED_RECOVERED",
                   "svn_revision": svn["svn_revision"],
+                  "svn_verification_status": svn["status"],
+                  "svn_trunk_tree_sha256": svn["trunk"]["tree_sha256"],
+                  "svn_tag_tree_sha256": svn["tag"]["tree_sha256"],
                   "svn_trunk_before_sha256": preflight["trunk"]["tree_sha256"],
                   "assets_tree_sha256": preflight["assets"]["tree_sha256"],
                   "assets_file_count": preflight["assets"]["file_count"],

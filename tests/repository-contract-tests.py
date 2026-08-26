@@ -53,6 +53,7 @@ payload_manifest = read("release/payload-manifest.txt")
 plugin_check_baseline = json.loads(read("release/plugin-check-baseline.json"))
 wporg_policy = json.loads(read("release/wporg-policy.json"))
 wporg_helper = read("bin/wporg-release.py")
+release_validator = read("bin/validate-release.py")
 
 plugin_version = match(r"^\s*\*\s*Version:\s*(\S+)", plugin, "plugin header Version")
 constant_version = match(r"define\(\s*'YOTM_VERSION'\s*,\s*'([^']+)'\s*\)", plugin, "YOTM_VERSION")
@@ -222,6 +223,31 @@ if ordering != sorted(ordering):
 preflight_job = publish_workflow.split("  preflight:", 1)[1].split("  dry-run:", 1)[0]
 if "environment:" in preflight_job or "WPORG_SVN_PASSWORD" in preflight_job:
     fail("read-only publication preflight must run before the production environment and secrets")
+if "validate-control-binding" not in preflight_job:
+    fail("publisher preflight must bind RC artifacts to the current trusted release-control bundle")
+for expected_binding in ("control_sha", "payload_contract_sha256", "release_control"):
+    if expected_binding not in preflight_job and expected_binding not in release_validator:
+        fail(f"publisher preflight is missing trusted RC binding for {expected_binding}")
+
+production_job = publish_workflow.split("  production-publish:", 1)[1].split("  verify-public:", 1)[0]
+for required in (
+    "Authenticate committed SVN release before public release checks",
+    "verify-svn-publication",
+    '--expected-revision "$SVN_REVISION"',
+    'verification["assets"]["tree_sha256"]',
+    'verification["assets"]["file_count"]',
+):
+    if required not in production_job:
+        fail(f"direct production path is missing authenticated post-SVN evidence: {required}")
+post_svn_order = [
+    production_job.index("Commit trunk and new SVN tag atomically"),
+    production_job.index("Authenticate committed SVN release before public release checks"),
+    production_job.index("Resolve WordPress.org confirmation or propagation state"),
+    production_job.index("Write durable publication record"),
+]
+if post_svn_order != sorted(post_svn_order):
+    fail("direct production state must be SVN commit -> authenticated verification -> release state -> record")
+
 verify_job = publish_workflow.split("  verify-public:", 1)[1].split("  github-release:", 1)[0]
 for forbidden in (
     "svn commit",
@@ -240,6 +266,22 @@ if publish_workflow.count("WPORG_SVN_PASSWORD: ${{ secrets.WPORG_SVN_PASSWORD }}
     fail("SVN credential mapping must appear exactly once")
 if 'run_svn("commit"' in wporg_helper or "svn commit" in wporg_helper:
     fail("trusted WordPress.org helper must remain structurally non-mutating for remote SVN")
+
+for component in (
+    ".github/workflows/release-prepare.yml",
+    "bin/build-release.sh",
+    "bin/validate-plugin-check.py",
+    "bin/validate-release.py",
+    "release/payload-manifest.txt",
+    "release/plugin-check-baseline.json",
+):
+    if f'"{component}"' not in release_validator:
+        fail(f"release-control bundle is missing {component}")
+for historical_field in ("changelog_version", "readme_changelog_version"):
+    if f'("1.4.0", "{historical_field}", "1.4")' not in release_validator:
+        fail(f"release metadata contract is missing the known 1.4.0 compatibility for {historical_field}")
+if "must exactly equal active release version" not in release_validator:
+    fail("future release metadata must use exact active version strings")
 
 for needle, label in (
     ("bash bin/build-release.sh", "shared deterministic builder"),
