@@ -54,19 +54,19 @@ jobs:
 
           while IFS= read -r path; do
             case "$path" in
-              thumbnail-manager.php|inc/*|tests/*|bin/*|composer.json|composer.lock|phpunit.xml.dist|phpcs.xml.dist|.github/workflows/ci.yml)
+              thumbnail-manager.php|inc/*|tests/*|bin/*|release/*|composer.json|composer.lock|phpunit.xml.dist|phpcs.xml.dist|.github/workflows/ci.yml|.github/workflows/release-prepare.yml|.github/workflows/publish-wordpress-org.yml)
                 integration=true
                 ;;
             esac
 
             case "$path" in
-              thumbnail-manager.php|inc/*|css/*|js/*|languages/*|readme.txt|changelog.txt|license.txt|.github/workflows/ci.yml)
+              thumbnail-manager.php|inc/*|css/*|js/*|languages/*|readme.txt|changelog.txt|license.txt|bin/build-release.sh|bin/validate-release.py|bin/validate-plugin-check.py|release/*|.github/workflows/ci.yml|.github/workflows/release-prepare.yml|.github/workflows/publish-wordpress-org.yml)
                 plugin_check=true
                 ;;
             esac
 
             case "$path" in
-              js/*)
+              js/*|bin/build-release.sh|bin/validate-release.py|release/payload-manifest.txt|.github/workflows/release-prepare.yml|.github/workflows/publish-wordpress-org.yml)
                 javascript=true
                 ;;
             esac
@@ -123,6 +123,9 @@ jobs:
 
       - name: Repository metadata and workflow contracts
         run: python3 tests/repository-contract-tests.py
+
+      - name: Release tooling regression tests
+        run: python3 tests/test_release_tooling.py
 
       - name: Diff whitespace
         shell: bash
@@ -251,35 +254,36 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Stage distributable plugin payload
+      - name: Build exact distributable plugin payload
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf plugin-check-dist
-          mkdir plugin-check-dist
-          for path in \
-            css \
-            inc \
-            js \
-            languages \
-            thumbnail-manager.php \
-            readme.txt \
-            changelog.txt \
-            license.txt
-          do
-            test -e "$path"
-            cp -a "$path" plugin-check-dist/
-          done
+          version="$(awk '/^[[:space:]]*\*[[:space:]]*Version:/ {print $3; exit}' thumbnail-manager.php)"
+          test -n "$version"
+          bash bin/build-release.sh \
+            --source . \
+            --output-dir "$RUNNER_TEMP/plugin-check-build" \
+            --version "$version" \
+            --source-sha "$GITHUB_SHA" \
+            --preparation-run-id "$GITHUB_RUN_ID"
 
       - name: Run WordPress Plugin Check
         uses: wordpress/plugin-check-action@10857da14b6c2246d15402b3e69f777edcf8c12e # v1.1.9
         with:
-          build-dir: plugin-check-dist
+          build-dir: ${{ runner.temp }}/plugin-check-build/staged/thumbnail-manager
           slug: thumbnail-manager
           # Current WordPress drift is monitored separately; PR validation
           # must not rewrite the published Tested up to header just to go green.
           ignore-codes: outdated_tested_upto_header
           strict: false
+
+      - name: Enforce reviewed Plugin Check warning baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 bin/validate-plugin-check.py \
+            --results "$RUNNER_TEMP/plugin-check-results.txt" \
+            --baseline release/plugin-check-baseline.json
 
   ci-gate:
     name: CI Gate

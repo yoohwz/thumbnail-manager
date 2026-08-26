@@ -1,0 +1,956 @@
+name: Publish Thumbnail Manager to WordPress.org
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Publish a prepared candidate or continue verification only
+        required: true
+        default: publish
+        type: choice
+        options:
+          - publish
+          - verify-only
+      preparation_run_id:
+        description: Successful Prepare WordPress.org Release Candidate run ID
+        required: true
+        type: string
+      candidate_sha:
+        description: Exact 40-character prepared candidate SHA
+        required: true
+        type: string
+      version:
+        description: Exact numeric plugin version
+        required: true
+        type: string
+      original_publish_run_id:
+        description: Original publish run ID; required for verify-only
+        required: false
+        default: ''
+        type: string
+      dry_run:
+        description: Keep all external production state read-only
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  actions: read
+  checks: read
+  contents: read
+
+concurrency:
+  group: wordpress-org-thumbnail-manager
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Read-only publication preflight
+    if: ${{ inputs.operation == 'publish' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      artifact_name: ${{ steps.identity.outputs.artifact_name }}
+      preflight_artifact: ${{ steps.identity.outputs.preflight_artifact }}
+    steps:
+      - name: Assert trusted main publisher control plane
+        env:
+          EXPECTED_WORKFLOW_REF: yoohwz/thumbnail-manager/.github/workflows/publish-wordpress-org.yml@refs/heads/main
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "yoohwz/thumbnail-manager"
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$GITHUB_WORKFLOW_REF" = "$EXPECTED_WORKFLOW_REF"
+          test "${{ github.event.repository.default_branch }}" = "main"
+
+      - name: Validate publication inputs as data
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          PREPARATION_RUN_ID: ${{ inputs.preparation_run_id }}
+          VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$PREPARATION_RUN_ID" =~ ^[0-9]+$ ]]
+          [[ "$VERSION" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]]
+
+      - name: Checkout trusted publisher control plane
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          ref: ${{ github.sha }}
+          path: control
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout candidate as non-executable data
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          ref: ${{ inputs.candidate_sha }}
+          path: candidate-data
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Authenticate preparation run and artifact identity
+        id: identity
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          GH_TOKEN: ${{ github.token }}
+          PREPARATION_RUN_ID: ${{ inputs.preparation_run_id }}
+          VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact_name="thumbnail-manager-$VERSION-$CANDIDATE_SHA"
+          preflight_artifact="publication-preflight-$GITHUB_RUN_ID"
+          echo "artifact_name=$artifact_name" >> "$GITHUB_OUTPUT"
+          echo "preflight_artifact=$preflight_artifact" >> "$GITHUB_OUTPUT"
+
+          test "$(git -C candidate-data rev-parse HEAD)" = "$CANDIDATE_SHA"
+          git -C candidate-data fetch --no-tags origin main
+          git -C candidate-data merge-base --is-ancestor "$CANDIDATE_SHA" origin/main
+
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PREPARATION_RUN_ID" > "$RUNNER_TEMP/preparation-run.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PREPARATION_RUN_ID/artifacts" > "$RUNNER_TEMP/preparation-artifacts.json"
+          python3 - "$RUNNER_TEMP/preparation-run.json" "$RUNNER_TEMP/preparation-artifacts.json" <<'PY'
+          import json
+          import os
+          import sys
+
+          run = json.load(open(sys.argv[1], encoding="utf-8"))
+          artifacts = json.load(open(sys.argv[2], encoding="utf-8"))["artifacts"]
+          expected_name = f"thumbnail-manager-{os.environ['VERSION']}-{os.environ['CANDIDATE_SHA']}"
+          checks = {
+              "repository": run.get("repository", {}).get("full_name") == os.environ["GITHUB_REPOSITORY"],
+              "workflow": run.get("path") == ".github/workflows/release-prepare.yml",
+              "event": run.get("event") == "workflow_dispatch",
+              "branch": run.get("head_branch") == "main",
+              "conclusion": run.get("status") == "completed" and run.get("conclusion") == "success",
+          }
+          failed = sorted(name for name, valid in checks.items() if not valid)
+          if failed:
+              raise SystemExit(f"untrusted preparation run fields: {failed}")
+          matches = [item for item in artifacts if item.get("name") == expected_name and not item.get("expired")]
+          if len(matches) != 1 or not str(matches[0].get("digest", "")).startswith("sha256:"):
+              raise SystemExit("expected exactly one non-expired preparation artifact with an API SHA-256 digest")
+          with open(os.path.join(os.environ["RUNNER_TEMP"], "preparation-artifact-api.json"), "w", encoding="utf-8") as handle:
+              json.dump(matches[0], handle, indent=2, sort_keys=True)
+              handle.write("\n")
+          PY
+
+          mkdir "$RUNNER_TEMP/prepared"
+          gh run download "$PREPARATION_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name "$artifact_name" --dir "$RUNNER_TEMP/prepared"
+
+      - name: Authenticate exact candidate evidence
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          GH_TOKEN: ${{ github.token }}
+          PREPARATION_RUN_ID: ${{ inputs.preparation_run_id }}
+          VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 control/bin/validate-release.py validate-package \
+            --package "$RUNNER_TEMP/prepared/thumbnail-manager-$VERSION.zip" \
+            --manifest "$RUNNER_TEMP/prepared/release-manifest.json"
+          python3 control/bin/validate-release.py validate-control-binding \
+            --manifest "$RUNNER_TEMP/prepared/release-manifest.json" \
+            --preparation-record "$RUNNER_TEMP/prepared/preparation-record.json"
+          python3 - "$RUNNER_TEMP/prepared/preparation-record.json" "$RUNNER_TEMP/prepared/release-manifest.json" "$RUNNER_TEMP/preparation-run.json" <<'PY'
+          import json
+          import os
+          import sys
+
+          record = json.load(open(sys.argv[1], encoding="utf-8"))
+          manifest = json.load(open(sys.argv[2], encoding="utf-8"))
+          preparation_run = json.load(open(sys.argv[3], encoding="utf-8"))
+          expected = {
+              "repository": os.environ["GITHUB_REPOSITORY"],
+              "workflow_path": ".github/workflows/release-prepare.yml",
+              "workflow_run_id": int(os.environ["PREPARATION_RUN_ID"]),
+              "workflow_ref": f"{os.environ['GITHUB_REPOSITORY']}/.github/workflows/release-prepare.yml@refs/heads/main",
+              "control_sha": preparation_run["head_sha"],
+              "candidate_sha": os.environ["CANDIDATE_SHA"],
+              "version": os.environ["VERSION"],
+              "artifact_name": f"thumbnail-manager-{os.environ['VERSION']}-{os.environ['CANDIDATE_SHA']}",
+              "package_sha256": manifest["package"]["sha256"],
+              "manifest_sha256": manifest["manifest_sha256"],
+              "tree_sha256": manifest["tree_sha256"],
+              "release_control": manifest["release_control"],
+              "status": "RC_PREPARED",
+          }
+          mismatches = [key for key, value in expected.items() if record.get(key) != value]
+          if mismatches:
+              raise SystemExit(f"preparation record mismatch: {mismatches}")
+          if manifest["source_sha"] != os.environ["CANDIDATE_SHA"] or manifest["version"] != os.environ["VERSION"]:
+              raise SystemExit("release manifest candidate identity mismatch")
+          PY
+          gate_count="$(gh api "repos/$GITHUB_REPOSITORY/commits/$CANDIDATE_SHA/check-runs" \
+            --jq '[.check_runs[] | select(.name == "CI Gate" and .conclusion == "success")] | length')"
+          test "$gate_count" -ge 1
+
+      - name: Inspect WordPress.org SVN and stage local-only delta
+        env:
+          VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          svn_url="$(python3 -c 'import json; print(json.load(open("control/release/wporg-policy.json"))["svn_url"])')"
+          svn checkout --quiet "$svn_url" "$RUNNER_TEMP/wporg-preflight"
+          python3 control/bin/wporg-release.py stage-svn \
+            --working-copy "$RUNNER_TEMP/wporg-preflight" \
+            --policy control/release/wporg-policy.json \
+            --version "$VERSION" \
+            --package "$RUNNER_TEMP/prepared/thumbnail-manager-$VERSION.zip" \
+            --manifest "$RUNNER_TEMP/prepared/release-manifest.json" \
+            --output "$RUNNER_TEMP/preflight-record.json"
+
+      - name: Record exact Human approval target
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          PREPARATION_RUN_ID: ${{ inputs.preparation_run_id }}
+          VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp "$RUNNER_TEMP/prepared/thumbnail-manager-$VERSION.zip" "$RUNNER_TEMP/"
+          cp "$RUNNER_TEMP/prepared/release-manifest.json" "$RUNNER_TEMP/"
+          cp "$RUNNER_TEMP/prepared/preparation-record.json" "$RUNNER_TEMP/"
+          python3 - "$RUNNER_TEMP/preflight-record.json" >> "$GITHUB_STEP_SUMMARY" <<'PY'
+          import json
+          import os
+          import sys
+
+          preflight = json.load(open(sys.argv[1], encoding="utf-8"))
+          snapshot = preflight["snapshot"]
+          print("## READ_ONLY_PUBLICATION_PREFLIGHT")
+          print(f"- Candidate SHA: `{os.environ['CANDIDATE_SHA']}`")
+          print(f"- Version: `{os.environ['VERSION']}`")
+          print(f"- Preparation run: `{os.environ['PREPARATION_RUN_ID']}`")
+          print(f"- Manifest SHA-256: `{preflight['manifest_sha256']}`")
+          print(f"- SVN working-copy revision: `{snapshot['working_copy_revision']}`")
+          print(f"- SVN trunk tree: `{snapshot['trunk']['tree_sha256']}`")
+          print(f"- SVN assets tree: `{snapshot['assets']['tree_sha256']}` (`unchanged`)")
+          print(f"- Release Confirmation mode: `{snapshot['release_confirmation']['mode']}`")
+          print("- Git tag / SVN commit / GitHub Release: `NOT RUN — awaiting Human publication gate`")
+          PY
+
+      - name: Upload preflight snapshot for the gated job
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4.6.2
+        with:
+          name: ${{ steps.identity.outputs.preflight_artifact }}
+          path: |
+            ${{ runner.temp }}/thumbnail-manager-${{ inputs.version }}.zip
+            ${{ runner.temp }}/release-manifest.json
+            ${{ runner.temp }}/preparation-record.json
+            ${{ runner.temp }}/preparation-artifact-api.json
+            ${{ runner.temp }}/preflight-record.json
+          if-no-files-found: error
+          retention-days: 90
+
+  dry-run:
+    name: Dry-run final recheck and SVN staging
+    needs: preflight
+    if: ${{ inputs.operation == 'publish' && inputs.dry_run }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Assert dry-run cannot receive the production environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
+          test -z "${WPORG_SVN_PASSWORD:-}"
+
+      - name: Checkout trusted publisher control plane
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          ref: ${{ github.sha }}
+          path: control
+          persist-credentials: false
+
+      - name: Download reviewed preflight snapshot
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir "$RUNNER_TEMP/preflight"
+          gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name "${{ needs.preflight.outputs.preflight_artifact }}" --dir "$RUNNER_TEMP/preflight"
+
+      - name: Final remote recheck and local-only restaging
+        env:
+          VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          svn_url="$(python3 -c 'import json; print(json.load(open("control/release/wporg-policy.json"))["svn_url"])')"
+          svn checkout --quiet "$svn_url" "$RUNNER_TEMP/wporg-final"
+          python3 control/bin/wporg-release.py compare-snapshot \
+            --working-copy "$RUNNER_TEMP/wporg-final" \
+            --policy control/release/wporg-policy.json \
+            --version "$VERSION" \
+            --snapshot "$RUNNER_TEMP/preflight/preflight-record.json"
+          python3 control/bin/wporg-release.py stage-svn \
+            --working-copy "$RUNNER_TEMP/wporg-final" \
+            --policy control/release/wporg-policy.json \
+            --version "$VERSION" \
+            --package "$RUNNER_TEMP/preflight/thumbnail-manager-$VERSION.zip" \
+            --manifest "$RUNNER_TEMP/preflight/release-manifest.json" \
+            --output "$RUNNER_TEMP/dry-run-final-record.json"
+
+      - name: Summarize dry-run release boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "## FINAL_PRE_MUTATION_REMOTE_RECHECK"
+            echo "- Final relevant-path recheck: \`PASS\`"
+            echo "- Local SVN staging: \`PASS\`"
+            echo "- Human production gate: \`NOT RUN — dry_run=true\`"
+            echo "- Git tag: \`NOT RUN — dry_run=true\`"
+            echo "- WordPress.org SVN commit: \`NOT RUN — dry_run=true\`"
+            echo "- GitHub Release: \`NOT RUN — dry_run=true\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  production-publish:
+    name: Human-gated tag seal and atomic SVN publication
+    needs: preflight
+    if: ${{ inputs.operation == 'publish' && !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: wordpress-org-production
+    permissions:
+      actions: read
+      checks: read
+      contents: write
+    outputs:
+      wporg_state: ${{ steps.release-state.outputs.wporg_state }}
+      publication_artifact: ${{ steps.publication-record.outputs.publication_artifact }}
+    steps:
+      - name: Assert approved trusted main publisher
+        env:
+          EXPECTED_WORKFLOW_REF: yoohwz/thumbnail-manager/.github/workflows/publish-wordpress-org.yml@refs/heads/main
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "yoohwz/thumbnail-manager"
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$GITHUB_WORKFLOW_REF" = "$EXPECTED_WORKFLOW_REF"
+
+      - name: Checkout trusted publisher control plane
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          ref: ${{ github.sha }}
+          path: control
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Download exact approved preflight evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir "$RUNNER_TEMP/preflight"
+          gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name "${{ needs.preflight.outputs.preflight_artifact }}" --dir "$RUNNER_TEMP/preflight"
+
+      - name: Final pre-mutation remote recheck and staging
+        env:
+          VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          svn_url="$(python3 -c 'import json; print(json.load(open("control/release/wporg-policy.json"))["svn_url"])')"
+          svn checkout --quiet "$svn_url" "$RUNNER_TEMP/wporg-final"
+          python3 control/bin/wporg-release.py compare-snapshot \
+            --working-copy "$RUNNER_TEMP/wporg-final" \
+            --policy control/release/wporg-policy.json \
+            --version "$VERSION" \
+            --snapshot "$RUNNER_TEMP/preflight/preflight-record.json"
+          python3 control/bin/wporg-release.py stage-svn \
+            --working-copy "$RUNNER_TEMP/wporg-final" \
+            --policy control/release/wporg-policy.json \
+            --version "$VERSION" \
+            --package "$RUNNER_TEMP/preflight/thumbnail-manager-$VERSION.zip" \
+            --manifest "$RUNNER_TEMP/preflight/release-manifest.json" \
+            --output "$RUNNER_TEMP/final-stage-record.json"
+
+      - name: Seal annotated Git tag after final recheck
+        id: seal-tag
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          GH_TOKEN: ${{ github.token }}
+          PREPARATION_RUN_ID: ${{ inputs.preparation_run_id }}
+          VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if reference="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$VERSION" 2>/dev/null)"; then
+            tag_type="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["object"]["type"])' <<< "$reference")"
+            tag_object="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["object"]["sha"])' <<< "$reference")"
+            test "$tag_type" = "tag"
+            peeled="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$tag_object" --jq .object.sha)"
+            test "$peeled" = "$CANDIDATE_SHA"
+            echo "tag_state=TAGGED_NOT_PUBLISHED_RECOVERY" >> "$GITHUB_OUTPUT"
+          else
+            tag_object="$(gh api --method POST "repos/$GITHUB_REPOSITORY/git/tags" \
+              -f tag="$VERSION" \
+              -f message="Thumbnail Manager $VERSION\n\nGit SHA: $CANDIDATE_SHA\nPreparation run: $PREPARATION_RUN_ID\nPublication run: $GITHUB_RUN_ID" \
+              -f object="$CANDIDATE_SHA" \
+              -f type=commit --jq .sha)"
+            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+              -f ref="refs/tags/$VERSION" -f sha="$tag_object" > /dev/null
+            echo "tag_state=TAG_SEALED" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit trunk and new SVN tag atomically
+        id: svn-commit
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          MANIFEST_PATH: ${{ runner.temp }}/preflight/release-manifest.json
+          VERSION: ${{ inputs.version }}
+          WPORG_SVN_PASSWORD: ${{ secrets.WPORG_SVN_PASSWORD }}
+          WPORG_SVN_USERNAME: ${{ vars.WPORG_SVN_USERNAME }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$WPORG_SVN_USERNAME"
+          test -n "$WPORG_SVN_PASSWORD"
+          manifest_sha="$(python3 -c 'import json,os; print(json.load(open(os.environ["MANIFEST_PATH"]))["manifest_sha256"])')"
+          set +x
+          svn commit \
+            "$RUNNER_TEMP/wporg-final/trunk" \
+            "$RUNNER_TEMP/wporg-final/tags/$VERSION" \
+            --non-interactive --no-auth-cache \
+            --username "$WPORG_SVN_USERNAME" \
+            --password "$WPORG_SVN_PASSWORD" \
+            --message "Release $VERSION from Git $CANDIDATE_SHA; manifest $manifest_sha; GitHub run $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            | tee "$RUNNER_TEMP/svn-commit-output.txt"
+          revision="$(sed -n 's/^Committed revision \([0-9][0-9]*\)\.$/\1/p' "$RUNNER_TEMP/svn-commit-output.txt" | tail -n 1)"
+          test -n "$revision"
+          echo "svn_revision=$revision" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate committed SVN release before public release checks
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          SVN_REVISION: ${{ steps.svn-commit.outputs.svn_revision }}
+          VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          svn_url="$(python3 -c 'import json; print(json.load(open("control/release/wporg-policy.json"))["svn_url"])')"
+          svn checkout --quiet "$svn_url" "$RUNNER_TEMP/wporg-post-commit"
+          python3 control/bin/wporg-release.py verify-svn-publication \
+            --working-copy "$RUNNER_TEMP/wporg-post-commit" \
+            --policy control/release/wporg-policy.json \
+            --version "$VERSION" \
+            --candidate-sha "$CANDIDATE_SHA" \
+            --publish-run-id "$GITHUB_RUN_ID" \
+            --manifest "$RUNNER_TEMP/preflight/release-manifest.json" \
+            --preflight-record "$RUNNER_TEMP/preflight/preflight-record.json" \
+            --expected-revision "$SVN_REVISION" \
+            --output "$RUNNER_TEMP/post-commit-svn-verification.json"
+
+      - name: Resolve WordPress.org confirmation or propagation state
+        id: release-state
+        env:
+          VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          confirmation_mode="$(python3 -c 'import json; print(json.load(open("control/release/wporg-policy.json"))["release_confirmation"]["mode"])')"
+          state=WPORG_RELEASE_CONFIRMATION_PENDING
+          if [[ "$confirmation_mode" = "disabled" ]]; then
+            state=WPORG_PROPAGATION_PENDING
+            for attempt in 1 2 3 4 5 6; do
+              if curl -fsSL "https://api.wordpress.org/plugins/info/1.2/?action=plugin_information&request%5Bslug%5D=thumbnail-manager" \
+                -o "$RUNNER_TEMP/wporg-plugin-info.json" \
+                && test "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("version", ""))' "$RUNNER_TEMP/wporg-plugin-info.json")" = "$VERSION" \
+                && curl -fsSL "https://downloads.wordpress.org/plugin/thumbnail-manager.$VERSION.zip" -o "$RUNNER_TEMP/wporg-public.zip"; then
+                rm -rf "$RUNNER_TEMP/wporg-public"
+                unzip -q "$RUNNER_TEMP/wporg-public.zip" -d "$RUNNER_TEMP/wporg-public"
+                if python3 control/bin/wporg-release.py validate-tree \
+                  --directory "$RUNNER_TEMP/wporg-public/thumbnail-manager" \
+                  --manifest "$RUNNER_TEMP/preflight/release-manifest.json"; then
+                  state=WPORG_PUBLIC_RELEASE_VERIFIED
+                  break
+                fi
+              fi
+              sleep 10
+            done
+          fi
+          echo "wporg_state=$state" >> "$GITHUB_OUTPUT"
+          echo "## $state" >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$state" = "WPORG_RELEASE_CONFIRMATION_PENDING" ]]; then
+            echo "A WordPress.org plugin committer must confirm this release through Release Management/email, then run \`operation=verify-only\`." >> "$GITHUB_STEP_SUMMARY"
+          elif [[ "$state" = "WPORG_PROPAGATION_PENDING" ]]; then
+            echo "SVN is verified; public propagation is pending. Run \`operation=verify-only\` later. Do not recommit SVN." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Write durable publication record
+        id: publication-record
+        if: ${{ always() && steps.svn-commit.outputs.svn_revision != '' }}
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          PREPARATION_RUN_ID: ${{ inputs.preparation_run_id }}
+          SVN_REVISION: ${{ steps.svn-commit.outputs.svn_revision }}
+          TAG_STATE: ${{ steps.seal-tag.outputs.tag_state }}
+          VERSION: ${{ inputs.version }}
+          WPORG_STATE: ${{ steps.release-state.outputs.wporg_state }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          publication_artifact="publication-record-$GITHUB_RUN_ID"
+          echo "publication_artifact=$publication_artifact" >> "$GITHUB_OUTPUT"
+          python3 - "$RUNNER_TEMP/preflight/release-manifest.json" "$RUNNER_TEMP/preflight/preflight-record.json" "$RUNNER_TEMP/post-commit-svn-verification.json" "$RUNNER_TEMP/publication-record.json" <<'PY'
+          import json
+          import os
+          import sys
+
+          manifest = json.load(open(sys.argv[1], encoding="utf-8"))
+          preflight = json.load(open(sys.argv[2], encoding="utf-8"))["snapshot"]
+          verification = json.load(open(sys.argv[3], encoding="utf-8"))
+          if verification.get("status") != "SVN_COMMITTED_VERIFIED":
+              raise SystemExit("authenticated post-commit SVN verification is missing")
+          if verification.get("svn_revision") != int(os.environ["SVN_REVISION"]):
+              raise SystemExit("authenticated post-commit SVN revision mismatch")
+          record = {
+              "schema_version": 1,
+              "repository": os.environ["GITHUB_REPOSITORY"],
+              "workflow_path": ".github/workflows/publish-wordpress-org.yml",
+              "workflow_run_id": int(os.environ["GITHUB_RUN_ID"]),
+              "preparation_run_id": int(os.environ["PREPARATION_RUN_ID"]),
+              "candidate_sha": os.environ["CANDIDATE_SHA"],
+              "version": os.environ["VERSION"],
+              "manifest_sha256": manifest["manifest_sha256"],
+              "package_sha256": manifest["package"]["sha256"],
+              "tree_sha256": manifest["tree_sha256"],
+              "release_control": manifest["release_control"],
+              "git_tag_state": os.environ["TAG_STATE"],
+              "svn_revision": verification["svn_revision"],
+              "svn_verification_status": verification["status"],
+              "svn_trunk_tree_sha256": verification["trunk"]["tree_sha256"],
+              "svn_tag_tree_sha256": verification["tag"]["tree_sha256"],
+              "svn_trunk_before_sha256": preflight["trunk"]["tree_sha256"],
+              "assets_tree_sha256": verification["assets"]["tree_sha256"],
+              "assets_file_count": verification["assets"]["file_count"],
+              "release_confirmation_mode": preflight["release_confirmation"]["mode"],
+              "wporg_state": os.environ.get("WPORG_STATE") or "SVN_COMMITTED_UNVERIFIED",
+          }
+          with open(sys.argv[4], "w", encoding="utf-8") as handle:
+              json.dump(record, handle, indent=2, sort_keys=True)
+              handle.write("\n")
+          PY
+
+      - name: Upload publication record for verification-only continuation
+        if: ${{ always() && steps.publication-record.outputs.publication_artifact != '' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4.6.2
+        with:
+          name: ${{ steps.publication-record.outputs.publication_artifact }}
+          path: ${{ runner.temp }}/publication-record.json
+          if-no-files-found: error
+          retention-days: 90
+
+  verify-public:
+    name: Verification and reconciliation only
+    if: ${{ inputs.operation == 'verify-only' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      actions: read
+      checks: read
+      contents: read
+    outputs:
+      wporg_state: ${{ steps.verify.outputs.wporg_state }}
+      evidence_artifact: ${{ steps.identity.outputs.evidence_artifact }}
+    steps:
+      - name: Assert main-only structurally non-mutating continuation
+        env:
+          EXPECTED_WORKFLOW_REF: yoohwz/thumbnail-manager/.github/workflows/publish-wordpress-org.yml@refs/heads/main
+          ORIGINAL_PUBLISH_RUN_ID: ${{ inputs.original_publish_run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "yoohwz/thumbnail-manager"
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$GITHUB_WORKFLOW_REF" = "$EXPECTED_WORKFLOW_REF"
+          [[ "$ORIGINAL_PUBLISH_RUN_ID" =~ ^[0-9]+$ ]]
+          test -z "${WPORG_SVN_PASSWORD:-}"
+
+      - name: Checkout trusted verification control plane
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          ref: ${{ github.sha }}
+          path: control
+          persist-credentials: false
+
+      - name: Authenticate and download original evidence
+        id: identity
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          GH_TOKEN: ${{ github.token }}
+          ORIGINAL_PUBLISH_RUN_ID: ${{ inputs.original_publish_run_id }}
+          PREPARATION_RUN_ID: ${{ inputs.preparation_run_id }}
+          VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$PREPARATION_RUN_ID" =~ ^[0-9]+$ ]]
+          [[ "$VERSION" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]]
+          artifact_name="thumbnail-manager-$VERSION-$CANDIDATE_SHA"
+          evidence_artifact="public-verification-$GITHUB_RUN_ID"
+          echo "evidence_artifact=$evidence_artifact" >> "$GITHUB_OUTPUT"
+          mkdir "$RUNNER_TEMP/prepared" "$RUNNER_TEMP/original-publication" "$RUNNER_TEMP/original-preflight"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PREPARATION_RUN_ID" > "$RUNNER_TEMP/preparation-run.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PREPARATION_RUN_ID/artifacts" > "$RUNNER_TEMP/preparation-artifacts.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ORIGINAL_PUBLISH_RUN_ID" > "$RUNNER_TEMP/original-publish-run.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ORIGINAL_PUBLISH_RUN_ID/artifacts" > "$RUNNER_TEMP/original-publish-artifacts.json"
+          gh run download "$PREPARATION_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name "$artifact_name" --dir "$RUNNER_TEMP/prepared"
+          if gh run download "$ORIGINAL_PUBLISH_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name "publication-record-$ORIGINAL_PUBLISH_RUN_ID" --dir "$RUNNER_TEMP/original-publication"; then
+            echo "publication_record_source=durable" >> "$GITHUB_OUTPUT"
+          else
+            gh run download "$ORIGINAL_PUBLISH_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+              --name "publication-preflight-$ORIGINAL_PUBLISH_RUN_ID" --dir "$RUNNER_TEMP/original-publication"
+            echo "publication_record_source=reconstruct-from-svn" >> "$GITHUB_OUTPUT"
+          fi
+          gh run download "$ORIGINAL_PUBLISH_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name "publication-preflight-$ORIGINAL_PUBLISH_RUN_ID" --dir "$RUNNER_TEMP/original-preflight"
+          python3 control/bin/validate-release.py validate-package \
+            --package "$RUNNER_TEMP/prepared/thumbnail-manager-$VERSION.zip" \
+            --manifest "$RUNNER_TEMP/prepared/release-manifest.json"
+          python3 - "$RUNNER_TEMP/preparation-run.json" "$RUNNER_TEMP/preparation-artifacts.json" "$RUNNER_TEMP/original-publish-run.json" "$RUNNER_TEMP/original-publish-artifacts.json" "$RUNNER_TEMP/original-publication/publication-record.json" "$RUNNER_TEMP/original-preflight/preflight-record.json" "$RUNNER_TEMP/prepared/preparation-record.json" "$RUNNER_TEMP/prepared/release-manifest.json" <<'PY'
+          import json
+          import os
+          import pathlib
+          import sys
+
+          preparation_run = json.load(open(sys.argv[1], encoding="utf-8"))
+          artifacts = json.load(open(sys.argv[2], encoding="utf-8"))["artifacts"]
+          run = json.load(open(sys.argv[3], encoding="utf-8"))
+          publish_artifacts = json.load(open(sys.argv[4], encoding="utf-8"))["artifacts"]
+          publication_path = pathlib.Path(sys.argv[5])
+          preflight_path = pathlib.Path(sys.argv[6])
+          preparation = json.load(open(sys.argv[7], encoding="utf-8"))
+          manifest = json.load(open(sys.argv[8], encoding="utf-8"))
+          expected_artifact = f"thumbnail-manager-{os.environ['VERSION']}-{os.environ['CANDIDATE_SHA']}"
+          if (
+              preparation_run.get("repository", {}).get("full_name") != os.environ["GITHUB_REPOSITORY"]
+              or preparation_run.get("path") != ".github/workflows/release-prepare.yml"
+              or preparation_run.get("event") != "workflow_dispatch"
+              or preparation_run.get("head_branch") != "main"
+              or preparation_run.get("conclusion") != "success"
+          ):
+              raise SystemExit("untrusted preparation run")
+          artifact_matches = [item for item in artifacts if item.get("name") == expected_artifact and not item.get("expired")]
+          if len(artifact_matches) != 1 or not str(artifact_matches[0].get("digest", "")).startswith("sha256:"):
+              raise SystemExit("untrusted preparation artifact identity")
+          if (
+              run.get("repository", {}).get("full_name") != os.environ["GITHUB_REPOSITORY"]
+              or run.get("path") != ".github/workflows/publish-wordpress-org.yml"
+              or run.get("event") != "workflow_dispatch"
+              or run.get("head_branch") != "main"
+              or run.get("status") != "completed"
+          ):
+              raise SystemExit("untrusted original publication run")
+          common_expected = {
+              "repository": os.environ["GITHUB_REPOSITORY"],
+              "workflow_path": ".github/workflows/publish-wordpress-org.yml",
+              "preparation_run_id": int(os.environ["PREPARATION_RUN_ID"]),
+              "candidate_sha": os.environ["CANDIDATE_SHA"],
+              "version": os.environ["VERSION"],
+              "manifest_sha256": manifest["manifest_sha256"],
+          }
+          publication_expected = {
+              **common_expected,
+              "workflow_run_id": int(os.environ["ORIGINAL_PUBLISH_RUN_ID"]),
+              "package_sha256": manifest["package"]["sha256"],
+              "tree_sha256": manifest["tree_sha256"],
+              "release_control": manifest["release_control"],
+          }
+          if publication_path.is_file():
+              record = json.load(open(publication_path, encoding="utf-8"))
+              mismatches = [key for key, value in publication_expected.items() if record.get(key) != value]
+              if mismatches:
+                  raise SystemExit(f"original publication record mismatch: {mismatches}")
+          elif preflight_path.is_file():
+              preflight = json.load(open(preflight_path, encoding="utf-8"))
+              preflight_expected = {
+                  "manifest_sha256": manifest["manifest_sha256"],
+                  "release_control": manifest["release_control"],
+                  "source_sha": os.environ["CANDIDATE_SHA"],
+                  "version": os.environ["VERSION"],
+                  "status": "READ_ONLY_PUBLICATION_PREFLIGHT",
+              }
+              mismatches = [key for key, value in preflight_expected.items() if preflight.get(key) != value]
+              if mismatches or preflight.get("snapshot", {}).get("target_tag_exists") is not False:
+                  raise SystemExit(f"original preflight recovery evidence mismatch: {mismatches}")
+          else:
+              raise SystemExit("original publication run has no authenticatable continuation evidence")
+          required_publish_artifacts = [f"publication-preflight-{os.environ['ORIGINAL_PUBLISH_RUN_ID']}"]
+          if publication_path.is_file():
+              required_publish_artifacts.append(f"publication-record-{os.environ['ORIGINAL_PUBLISH_RUN_ID']}")
+          for expected_publish_artifact in required_publish_artifacts:
+              publish_matches = [
+                  item for item in publish_artifacts
+                  if item.get("name") == expected_publish_artifact and not item.get("expired")
+              ]
+              if len(publish_matches) != 1 or not str(publish_matches[0].get("digest", "")).startswith("sha256:"):
+                  raise SystemExit(f"untrusted original publication artifact identity: {expected_publish_artifact}")
+          preparation_expected = {
+              "repository": os.environ["GITHUB_REPOSITORY"],
+              "workflow_path": ".github/workflows/release-prepare.yml",
+              "workflow_run_id": int(os.environ["PREPARATION_RUN_ID"]),
+              "workflow_ref": f"{os.environ['GITHUB_REPOSITORY']}/.github/workflows/release-prepare.yml@refs/heads/main",
+              "control_sha": preparation_run["head_sha"],
+              "candidate_sha": os.environ["CANDIDATE_SHA"],
+              "version": os.environ["VERSION"],
+              "artifact_name": expected_artifact,
+              "manifest_sha256": manifest["manifest_sha256"],
+              "package_sha256": manifest["package"]["sha256"],
+              "tree_sha256": manifest["tree_sha256"],
+              "release_control": manifest["release_control"],
+              "status": "RC_PREPARED",
+          }
+          preparation_mismatches = [key for key, value in preparation_expected.items() if preparation.get(key) != value]
+          if preparation_mismatches:
+              raise SystemExit(f"preparation record mismatch: {preparation_mismatches}")
+          PY
+          gate_count="$(gh api "repos/$GITHUB_REPOSITORY/commits/$CANDIDATE_SHA/check-runs" \
+            --jq '[.check_runs[] | select(.name == "CI Gate" and .conclusion == "success")] | length')"
+          test "$gate_count" -ge 1
+
+      - name: Verify immutable Git tag, SVN trees, assets and public download
+        id: verify
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          GH_TOKEN: ${{ github.token }}
+          ORIGINAL_PUBLISH_RUN_ID: ${{ inputs.original_publish_run_id }}
+          PREPARATION_RUN_ID: ${{ inputs.preparation_run_id }}
+          VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          reference="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$VERSION")"
+          tag_type="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["object"]["type"])' <<< "$reference")"
+          tag_object="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["object"]["sha"])' <<< "$reference")"
+          test "$tag_type" = "tag"
+          peeled="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$tag_object" --jq .object.sha)"
+          test "$peeled" = "$CANDIDATE_SHA"
+
+          svn_url="$(python3 -c 'import json; print(json.load(open("control/release/wporg-policy.json"))["svn_url"])')"
+          svn checkout --quiet "$svn_url" "$RUNNER_TEMP/wporg-verified"
+          revision_args=()
+          if [[ -f "$RUNNER_TEMP/original-publication/publication-record.json" ]]; then
+            expected_revision="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["svn_revision"])' "$RUNNER_TEMP/original-publication/publication-record.json")"
+            revision_args=(--expected-revision "$expected_revision")
+          fi
+          python3 control/bin/wporg-release.py verify-svn-publication \
+            --working-copy "$RUNNER_TEMP/wporg-verified" \
+            --policy control/release/wporg-policy.json \
+            --version "$VERSION" \
+            --candidate-sha "$CANDIDATE_SHA" \
+            --publish-run-id "$ORIGINAL_PUBLISH_RUN_ID" \
+            --manifest "$RUNNER_TEMP/prepared/release-manifest.json" \
+            --preflight-record "$RUNNER_TEMP/original-preflight/preflight-record.json" \
+            --output "$RUNNER_TEMP/svn-verification-record.json" \
+            "${revision_args[@]}"
+
+          curl -fsSL "https://api.wordpress.org/plugins/info/1.2/?action=plugin_information&request%5Bslug%5D=thumbnail-manager" \
+            -o "$RUNNER_TEMP/wporg-plugin-info.json"
+          test "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("version", ""))' "$RUNNER_TEMP/wporg-plugin-info.json")" = "$VERSION"
+          curl -fsSL "https://downloads.wordpress.org/plugin/thumbnail-manager.$VERSION.zip" -o "$RUNNER_TEMP/wporg-public.zip"
+          unzip -q "$RUNNER_TEMP/wporg-public.zip" -d "$RUNNER_TEMP/wporg-public"
+          python3 control/bin/wporg-release.py validate-tree \
+            --directory "$RUNNER_TEMP/wporg-public/thumbnail-manager" \
+            --manifest "$RUNNER_TEMP/prepared/release-manifest.json"
+
+          python3 - "$RUNNER_TEMP/original-publication/publication-record.json" "$RUNNER_TEMP/wporg-verified/assets" "$RUNNER_TEMP/public-verification-record.json" "$RUNNER_TEMP/svn-verification-record.json" "$RUNNER_TEMP/original-preflight/preflight-record.json" "$RUNNER_TEMP/prepared/release-manifest.json" <<'PY'
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import sys
+
+          publication_path = pathlib.Path(sys.argv[1])
+          assets_root = pathlib.Path(sys.argv[2])
+          svn = json.load(open(sys.argv[4], encoding="utf-8"))
+          preflight = json.load(open(sys.argv[5], encoding="utf-8"))["snapshot"]
+          manifest = json.load(open(sys.argv[6], encoding="utf-8"))
+          if publication_path.is_file():
+              publication = json.load(open(publication_path, encoding="utf-8"))
+          else:
+              publication = {
+                  "schema_version": 1,
+                  "repository": os.environ["GITHUB_REPOSITORY"],
+                  "workflow_path": ".github/workflows/publish-wordpress-org.yml",
+                  "workflow_run_id": int(os.environ["ORIGINAL_PUBLISH_RUN_ID"]),
+                  "preparation_run_id": int(os.environ["PREPARATION_RUN_ID"]),
+                  "candidate_sha": os.environ["CANDIDATE_SHA"],
+                  "version": os.environ["VERSION"],
+                  "manifest_sha256": manifest["manifest_sha256"],
+                  "package_sha256": manifest["package"]["sha256"],
+                  "tree_sha256": manifest["tree_sha256"],
+                  "release_control": manifest["release_control"],
+                  "git_tag_state": "TAG_SEALED_RECOVERED",
+                  "svn_revision": svn["svn_revision"],
+                  "svn_verification_status": svn["status"],
+                  "svn_trunk_tree_sha256": svn["trunk"]["tree_sha256"],
+                  "svn_tag_tree_sha256": svn["tag"]["tree_sha256"],
+                  "svn_trunk_before_sha256": preflight["trunk"]["tree_sha256"],
+                  "assets_tree_sha256": preflight["assets"]["tree_sha256"],
+                  "assets_file_count": preflight["assets"]["file_count"],
+                  "release_confirmation_mode": preflight["release_confirmation"]["mode"],
+                  "wporg_state": "SVN_COMMITTED_UNVERIFIED_RECOVERED",
+              }
+          if publication.get("svn_revision") != svn["svn_revision"]:
+              raise SystemExit("WordPress.org SVN revision differs from the durable publication identity")
+          digest = hashlib.sha256()
+          for path in sorted(item for item in assets_root.rglob("*") if item.is_file()):
+              relative = path.relative_to(assets_root).as_posix()
+              digest.update(relative.encode())
+              digest.update(b"\0")
+              digest.update(hashlib.sha256(path.read_bytes()).hexdigest().encode())
+              digest.update(b"\0")
+              digest.update(b"0644")
+              digest.update(b"\n")
+          assets_digest = digest.hexdigest()
+          assets_count = sum(1 for item in assets_root.rglob("*") if item.is_file())
+          if assets_digest != publication.get("assets_tree_sha256") or assets_count != publication.get("assets_file_count"):
+              raise SystemExit("WordPress.org assets changed since the approved preflight")
+          record = {
+              **publication,
+              "verification_run_id": int(os.environ["GITHUB_RUN_ID"]),
+              "wporg_state": "WPORG_PUBLIC_RELEASE_VERIFIED",
+              "assets_tree_sha256": assets_digest,
+          }
+          with open(sys.argv[3], "w", encoding="utf-8") as handle:
+              json.dump(record, handle, indent=2, sort_keys=True)
+              handle.write("\n")
+          PY
+          echo "wporg_state=WPORG_PUBLIC_RELEASE_VERIFIED" >> "$GITHUB_OUTPUT"
+
+      - name: Upload verified public evidence before any GitHub content write
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4.6.2
+        with:
+          name: ${{ steps.identity.outputs.evidence_artifact }}
+          path: ${{ runner.temp }}/public-verification-record.json
+          if-no-files-found: error
+          retention-days: 90
+
+  github-release:
+    name: Publish or reconcile GitHub Release after WordPress.org verification
+    needs:
+      - preflight
+      - production-publish
+      - verify-public
+    if: >-
+      ${{ always() &&
+          ((needs.production-publish.result == 'success' && needs.production-publish.outputs.wporg_state == 'WPORG_PUBLIC_RELEASE_VERIFIED') ||
+           (needs.verify-public.result == 'success' && needs.verify-public.outputs.wporg_state == 'WPORG_PUBLIC_RELEASE_VERIFIED')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - name: Assert main-only post-verification release publisher
+        env:
+          EXPECTED_WORKFLOW_REF: yoohwz/thumbnail-manager/.github/workflows/publish-wordpress-org.yml@refs/heads/main
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$GITHUB_WORKFLOW_REF" = "$EXPECTED_WORKFLOW_REF"
+          test -z "${WPORG_SVN_PASSWORD:-}"
+
+      - name: Download exact prepared package
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          GH_TOKEN: ${{ github.token }}
+          PREPARATION_RUN_ID: ${{ inputs.preparation_run_id }}
+          VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir "$RUNNER_TEMP/prepared"
+          gh run download "$PREPARATION_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name "thumbnail-manager-$VERSION-$CANDIDATE_SHA" --dir "$RUNNER_TEMP/prepared"
+          reference="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$VERSION")"
+          tag_type="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["object"]["type"])' <<< "$reference")"
+          tag_object="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["object"]["sha"])' <<< "$reference")"
+          test "$tag_type" = "tag"
+          peeled="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$tag_object" --jq .object.sha)"
+          test "$peeled" = "$CANDIDATE_SHA"
+
+      - name: Create or reconcile exact GitHub Release
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          GH_TOKEN: ${{ github.token }}
+          PREPARATION_RUN_ID: ${{ inputs.preparation_run_id }}
+          VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          notes="WordPress.org release verified.\n\nGit SHA: $CANDIDATE_SHA\nPreparation run: $PREPARATION_RUN_ID\nPublication/verification run: $GITHUB_RUN_ID"
+          expected_package="thumbnail-manager-$VERSION.zip"
+          expected_manifest="release-manifest.json"
+          if gh release view "$VERSION" --repo "$GITHUB_REPOSITORY" --json tagName,isDraft,assets \
+            > "$RUNNER_TEMP/existing-release.json" 2>/dev/null; then
+            existing_target="$(python3 - "$RUNNER_TEMP/existing-release.json" "$VERSION" <<'PY'
+          import json
+          import sys
+
+          release = json.load(open(sys.argv[1], encoding="utf-8"))
+          if release.get("tagName") != sys.argv[2]:
+              raise SystemExit("existing GitHub Release tag identity mismatch")
+          names = sorted(asset.get("name") for asset in release.get("assets", []))
+          expected = {f"thumbnail-manager-{sys.argv[2]}.zip", "release-manifest.json"}
+          if not set(names).issubset(expected):
+              raise SystemExit(f"existing GitHub Release asset set mismatch: {names}")
+          print("draft" if release.get("isDraft") else "public")
+          PY
+          )"
+            mkdir "$RUNNER_TEMP/existing-assets"
+            missing_assets=()
+            for asset in "$expected_package" "$expected_manifest"; do
+              if python3 - "$RUNNER_TEMP/existing-release.json" "$asset" <<'PY'
+          import json
+          import sys
+          release = json.load(open(sys.argv[1], encoding="utf-8"))
+          raise SystemExit(0 if sys.argv[2] in {item.get("name") for item in release.get("assets", [])} else 1)
+          PY
+              then
+                gh release download "$VERSION" --repo "$GITHUB_REPOSITORY" \
+                  --pattern "$asset" --dir "$RUNNER_TEMP/existing-assets"
+                cmp "$RUNNER_TEMP/prepared/$asset" "$RUNNER_TEMP/existing-assets/$asset"
+              else
+                missing_assets+=("$RUNNER_TEMP/prepared/$asset")
+              fi
+            done
+            if (( ${#missing_assets[@]} )); then
+              gh release upload "$VERSION" "${missing_assets[@]}" --repo "$GITHUB_REPOSITORY"
+            fi
+            if [[ "$existing_target" == draft ]]; then
+              gh release edit "$VERSION" --repo "$GITHUB_REPOSITORY" --draft=false --latest \
+                --title "Thumbnail Manager $VERSION" --notes "$notes"
+            else
+              echo "Exact public GitHub Release assets verified/reconciled."
+            fi
+          else
+            gh release create "$VERSION" \
+              "$RUNNER_TEMP/prepared/thumbnail-manager-$VERSION.zip" \
+              "$RUNNER_TEMP/prepared/release-manifest.json" \
+              --repo "$GITHUB_REPOSITORY" --verify-tag --latest \
+              --title "Thumbnail Manager $VERSION" --notes "$notes"
+          fi
+          echo "## GITHUB_RELEASE_PUBLISHED" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Git tag: \`$VERSION\` -> \`$CANDIDATE_SHA\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- WordPress.org state: \`WPORG_PUBLIC_RELEASE_VERIFIED\`" >> "$GITHUB_STEP_SUMMARY"

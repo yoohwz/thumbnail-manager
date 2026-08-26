@@ -1,0 +1,10 @@
+# Positive distributable allowlist. Paths are relative to the repository root.
+# Directory entries must end in /** and include regular files recursively.
+css/**
+inc/**
+js/**
+languages/**
+thumbnail-manager.php
+readme.txt
+changelog.txt
+license.txt
