@@ -12,43 +12,55 @@ WP_TESTS_DIR="${WP_TESTS_DIR-/tmp/wordpress-tests-lib}"
 
 download() {
 	if command -v curl >/dev/null 2>&1; then
-		curl -sSL "$1" -o "$2"
+		curl -fsSL "$1" -o "$2"
 	else
 		wget -nv -O "$2" "$1"
 	fi
 }
 
-if [[ ! -d "$WP_CORE_DIR/wp-admin" ]]; then
-	mkdir -p "$WP_CORE_DIR"
+if [[ "$WP_VERSION" == "latest" ]]; then
+	develop_ref="trunk"
+else
+	develop_ref="$WP_VERSION"
+fi
+
+if [[ ! -d "$WP_CORE_DIR/wp-admin" || ! -d "$WP_TESTS_DIR/includes" || ! -f "$WP_TESTS_DIR/wp-tests-config.php" ]]; then
 	archive="$(mktemp)"
-	if [[ "$WP_VERSION" == "latest" ]]; then
-		download "https://wordpress.org/latest.tar.gz" "$archive"
-	else
-		download "https://wordpress.org/wordpress-${WP_VERSION}.tar.gz" "$archive"
-	fi
-	tar --strip-components=1 -C "$WP_CORE_DIR" -zxf "$archive"
-	rm -f "$archive"
-fi
+	tmp_dir="$(mktemp -d)"
+	develop_archive="https://github.com/WordPress/wordpress-develop/archive/refs/heads/${develop_ref}.tar.gz"
 
-if [[ ! -d "$WP_TESTS_DIR/includes" ]]; then
-	mkdir -p "$WP_TESTS_DIR"
-	if [[ "$WP_VERSION" == "latest" ]]; then
-		tests_tag="trunk"
-	else
-		tests_tag="tags/${WP_VERSION}"
-	fi
-	svn export --quiet "https://develop.svn.wordpress.org/${tests_tag}/tests/phpunit/includes/" "$WP_TESTS_DIR/includes"
-	svn export --quiet "https://develop.svn.wordpress.org/${tests_tag}/tests/phpunit/data/" "$WP_TESTS_DIR/data"
-fi
+	download "$develop_archive" "$archive"
+	tar -C "$tmp_dir" -zxf "$archive"
+	develop_root="$(find "$tmp_dir" -mindepth 1 -maxdepth 1 -type d -print -quit)"
 
-if [[ ! -f "$WP_TESTS_DIR/wp-tests-config.php" ]]; then
-	download "https://develop.svn.wordpress.org/trunk/wp-tests-config-sample.php" "$WP_TESTS_DIR/wp-tests-config.php"
-	sed -i.bak "s/youremptytestdbnamehere/${DB_NAME}/" "$WP_TESTS_DIR/wp-tests-config.php"
-	sed -i.bak "s/yourusernamehere/${DB_USER}/" "$WP_TESTS_DIR/wp-tests-config.php"
-	sed -i.bak "s/yourpasswordhere/${DB_PASS}/" "$WP_TESTS_DIR/wp-tests-config.php"
-	sed -i.bak "s|localhost|${DB_HOST}|" "$WP_TESTS_DIR/wp-tests-config.php"
-	sed -i.bak "s|dirname( __FILE__ ) . '/src/'|'${WP_CORE_DIR}/'|" "$WP_TESTS_DIR/wp-tests-config.php"
-	rm -f "$WP_TESTS_DIR/wp-tests-config.php.bak"
+	if [[ -z "$develop_root" || ! -d "$develop_root/src/wp-admin" || ! -d "$develop_root/tests/phpunit/includes" || ! -d "$develop_root/tests/phpunit/data" || ! -f "$develop_root/wp-tests-config-sample.php" ]]; then
+		echo "Could not locate the WordPress source and PHPUnit library for ${WP_VERSION}." >&2
+		rm -rf "$tmp_dir" "$archive"
+		exit 1
+	fi
+
+	if [[ ! -d "$WP_CORE_DIR/wp-admin" ]]; then
+		mkdir -p "$WP_CORE_DIR"
+		cp -R "$develop_root/src/." "$WP_CORE_DIR/"
+	fi
+
+	if [[ ! -d "$WP_TESTS_DIR/includes" ]]; then
+		mkdir -p "$WP_TESTS_DIR"
+		cp -R "$develop_root/tests/phpunit/includes" "$WP_TESTS_DIR/includes"
+		cp -R "$develop_root/tests/phpunit/data" "$WP_TESTS_DIR/data"
+	fi
+
+	if [[ ! -f "$WP_TESTS_DIR/wp-tests-config.php" ]]; then
+		cp "$develop_root/wp-tests-config-sample.php" "$WP_TESTS_DIR/wp-tests-config.php"
+		sed -i.bak "s/youremptytestdbnamehere/${DB_NAME}/" "$WP_TESTS_DIR/wp-tests-config.php"
+		sed -i.bak "s/yourusernamehere/${DB_USER}/" "$WP_TESTS_DIR/wp-tests-config.php"
+		sed -i.bak "s/yourpasswordhere/${DB_PASS}/" "$WP_TESTS_DIR/wp-tests-config.php"
+		sed -i.bak "s|localhost|${DB_HOST}|" "$WP_TESTS_DIR/wp-tests-config.php"
+		sed -i.bak "s|dirname( __FILE__ ) . '/src/'|'${WP_CORE_DIR}/'|" "$WP_TESTS_DIR/wp-tests-config.php"
+		rm -f "$WP_TESTS_DIR/wp-tests-config.php.bak"
+	fi
+
+	rm -rf "$tmp_dir" "$archive"
 fi
 
 mysqladmin --host="$DB_HOST" --user="$DB_USER" --password="$DB_PASS" create "$DB_NAME" >/dev/null 2>&1 || true
