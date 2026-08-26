@@ -36,10 +36,11 @@ if [[ ! -d "$WP_TESTS_DIR/includes" ]]; then
 	tmp_dir="$(mktemp -d)"
 
 	if [[ "$WP_VERSION" == "latest" ]]; then
-		develop_archive="https://github.com/WordPress/wordpress-develop/archive/refs/heads/trunk.tar.gz"
+		develop_ref="trunk"
 	else
-		develop_archive="https://github.com/WordPress/wordpress-develop/archive/refs/tags/${WP_VERSION}.tar.gz"
+		develop_ref="$WP_VERSION"
 	fi
+	develop_archive="https://github.com/WordPress/wordpress-develop/archive/refs/heads/${develop_ref}.tar.gz"
 
 	download "$develop_archive" "$archive"
 	tar -C "$tmp_dir" -zxf "$archive"
