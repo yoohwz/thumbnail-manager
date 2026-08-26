@@ -1,0 +1,42 @@
+name: Composer Lock Refresh
+
+on:
+  pull_request:
+    paths:
+      - composer.json
+      - composer.lock
+      - .github/workflows/lock-refresh.yml
+
+permissions:
+  contents: read
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up PHP 8.4
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
+        with:
+          php-version: '8.4'
+          coverage: none
+          tools: composer:v2
+
+      - name: Refresh lock for the minimum PHP platform
+        run: composer update --no-interaction --prefer-dist
+
+      - name: Validate refreshed dependency state
+        run: composer validate --strict
+
+      - name: Upload refreshed lock
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: composer-lock-refresh
+          path: composer.lock
+          if-no-files-found: error
+          retention-days: 1
