@@ -46,6 +46,13 @@ changelog = read("changelog.txt")
 agents = read("AGENTS.md")
 safety = read("docs/media-safety-contract.md")
 pr_template = read(".github/pull_request_template.md")
+ci_workflow = read(".github/workflows/ci.yml")
+prepare_workflow = read(".github/workflows/release-prepare.yml")
+publish_workflow = read(".github/workflows/publish-wordpress-org.yml")
+payload_manifest = read("release/payload-manifest.txt")
+plugin_check_baseline = json.loads(read("release/plugin-check-baseline.json"))
+wporg_policy = json.loads(read("release/wporg-policy.json"))
+wporg_helper = read("bin/wporg-release.py")
 
 plugin_version = match(r"^\s*\*\s*Version:\s*(\S+)", plugin, "plugin header Version")
 constant_version = match(r"define\(\s*'YOTM_VERSION'\s*,\s*'([^']+)'\s*\)", plugin, "YOTM_VERSION")
@@ -117,6 +124,129 @@ for needle, label in (
 for heading in ("## Goal", "## Risk lane", "## Validation", "## Release boundary"):
     if heading not in pr_template:
         fail(f"pull request template is missing {heading}")
+
+expected_payload_entries = {
+    "css/**",
+    "inc/**",
+    "js/**",
+    "languages/**",
+    "thumbnail-manager.php",
+    "readme.txt",
+    "changelog.txt",
+    "license.txt",
+}
+actual_payload_entries = {
+    line.strip()
+    for line in payload_manifest.splitlines()
+    if line.strip() and not line.lstrip().startswith("#")
+}
+if actual_payload_entries != expected_payload_entries:
+    fail(
+        "release payload allowlist differs: "
+        f"expected={sorted(expected_payload_entries)}, actual={sorted(actual_payload_entries)}"
+    )
+
+if plugin_check_baseline.get("schema_version") != 1:
+    fail("Plugin Check baseline schema must be version 1")
+fingerprints = plugin_check_baseline.get("fingerprints", [])
+if sum(int(item.get("count", 0)) for item in fingerprints) != 101:
+    fail("Plugin Check baseline must preserve the reviewed 101-warning capacity")
+for item in fingerprints:
+    if "line" in item or "column" in item:
+        fail("Plugin Check fingerprint identity must exclude line and column")
+    for key in ("path", "code", "message", "count"):
+        if key not in item:
+            fail(f"Plugin Check fingerprint is missing {key}")
+
+if wporg_policy.get("schema_version") != 1:
+    fail("WordPress.org policy schema must remain version 1")
+if wporg_policy.get("slug") != "thumbnail-manager":
+    fail("WordPress.org policy slug must remain thumbnail-manager")
+if wporg_policy.get("svn_url") != "https://plugins.svn.wordpress.org/thumbnail-manager":
+    fail("WordPress.org policy must use the canonical HTTPS SVN URL")
+if wporg_policy.get("assets_mode") != "unchanged":
+    fail("TM-WF-0002 must keep WordPress.org assets unchanged")
+confirmation = wporg_policy.get("release_confirmation", {})
+if confirmation.get("mode") not in {"enabled", "disabled", "unknown"}:
+    fail("Release Confirmation mode must be enabled, disabled, or unknown")
+if confirmation.get("mode") == "unknown":
+    if confirmation.get("observed_at") is not None:
+        fail("unknown Release Confirmation state must not claim an observation time")
+elif not confirmation.get("observed_at"):
+    fail("an enabled/disabled Release Confirmation state requires observation provenance")
+if not confirmation.get("source"):
+    fail("Release Confirmation policy requires a durable Human-verification source")
+
+for workflow, path in (
+    (prepare_workflow, ".github/workflows/release-prepare.yml"),
+    (publish_workflow, ".github/workflows/publish-wordpress-org.yml"),
+):
+    trigger_block = workflow.split("permissions:", 1)[0]
+    if "workflow_dispatch:" not in trigger_block:
+        fail(f"{path} must be explicitly Human-dispatched")
+    for forbidden in ("pull_request:", "push:", "schedule:", "workflow_run:", "repository_dispatch:", "workflow_call:"):
+        if forbidden in trigger_block:
+            fail(f"{path} must not expose production/release preparation through {forbidden[:-1]}")
+    if "refs/heads/main" not in workflow or "GITHUB_WORKFLOW_REF" not in workflow:
+        fail(f"{path} must assert protected-main workflow execution")
+    if "persist-credentials: false" not in workflow:
+        fail(f"{path} checkouts must not persist credentials")
+
+for needle, label in (
+    ("ref: ${{ inputs.candidate_sha }}", "candidate SHA as data"),
+    ("path: candidate-data", "isolated candidate checkout"),
+    ("READ_ONLY_PUBLICATION_PREFLIGHT", "read-only preflight state"),
+    ("environment: wordpress-org-production", "Human publication environment gate"),
+    ("Final pre-mutation remote recheck and staging", "post-approval final recheck"),
+    ("Seal annotated Git tag after final recheck", "post-recheck tag sealing"),
+    ("Commit trunk and new SVN tag atomically", "atomic SVN commit"),
+    ("WPORG_RELEASE_CONFIRMATION_PENDING", "WordPress.org confirmation pending state"),
+    ("WPORG_PROPAGATION_PENDING", "WordPress.org propagation pending state"),
+    ("operation == 'verify-only'", "verification-only continuation"),
+    ("verify-svn-publication", "SVN ambiguous-outcome verification"),
+    ("cancel-in-progress: false", "non-cancellable serialized publisher"),
+):
+    if needle not in publish_workflow:
+        fail(f"publisher workflow is missing {label}")
+
+ordering = [
+    publish_workflow.index("Read-only publication preflight"),
+    publish_workflow.index("environment: wordpress-org-production"),
+    publish_workflow.index("Final pre-mutation remote recheck and staging"),
+    publish_workflow.index("Seal annotated Git tag after final recheck"),
+    publish_workflow.index("Commit trunk and new SVN tag atomically"),
+]
+if ordering != sorted(ordering):
+    fail("publisher state ordering must be preflight -> Human gate -> final recheck -> tag -> SVN commit")
+
+preflight_job = publish_workflow.split("  preflight:", 1)[1].split("  dry-run:", 1)[0]
+if "environment:" in preflight_job or "WPORG_SVN_PASSWORD" in preflight_job:
+    fail("read-only publication preflight must run before the production environment and secrets")
+verify_job = publish_workflow.split("  verify-public:", 1)[1].split("  github-release:", 1)[0]
+for forbidden in (
+    "svn commit",
+    "WPORG_SVN_PASSWORD: ${{ secrets.",
+    "--method POST",
+    "--method PATCH",
+    "--method DELETE",
+    "contents: write",
+):
+    if forbidden in verify_job:
+        fail(f"verification-only continuation must not contain {forbidden}")
+
+if "WPORG_SVN_PASSWORD: ${{ secrets.WPORG_SVN_PASSWORD }}" not in publish_workflow:
+    fail("SVN credential must be mapped explicitly only for the atomic commit step")
+if publish_workflow.count("WPORG_SVN_PASSWORD: ${{ secrets.WPORG_SVN_PASSWORD }}") != 1:
+    fail("SVN credential mapping must appear exactly once")
+if 'run_svn("commit"' in wporg_helper or "svn commit" in wporg_helper:
+    fail("trusted WordPress.org helper must remain structurally non-mutating for remote SVN")
+
+for needle, label in (
+    ("bash bin/build-release.sh", "shared deterministic builder"),
+    ("bin/validate-plugin-check.py", "reviewed Plugin Check baseline enforcement"),
+):
+    if needle not in ci_workflow:
+        fail(f"CI workflow is missing {label}")
 
 print(
     "Repository contracts passed: "

@@ -1,0 +1,190 @@
+name: Prepare WordPress.org Release Candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: Full 40-character candidate SHA already merged to protected main
+        required: true
+        type: string
+      version:
+        description: Exact numeric plugin version recorded by the candidate
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  checks: read
+  contents: read
+
+concurrency:
+  group: thumbnail-manager-release-prepare-${{ inputs.candidate_sha }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Prepare immutable release candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Assert trusted main control plane
+        env:
+          EXPECTED_WORKFLOW_REF: yoohwz/thumbnail-manager/.github/workflows/release-prepare.yml@refs/heads/main
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "yoohwz/thumbnail-manager"
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$GITHUB_WORKFLOW_REF" = "$EXPECTED_WORKFLOW_REF"
+          test "${{ github.event.repository.default_branch }}" = "main"
+
+      - name: Validate candidate inputs as data
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$VERSION" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]]
+
+      - name: Checkout trusted control plane
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          ref: ${{ github.sha }}
+          path: control
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout candidate as data
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          ref: ${{ inputs.candidate_sha }}
+          path: candidate
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Authenticate candidate SHA and CI evidence
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C candidate rev-parse HEAD)" = "$CANDIDATE_SHA"
+          git -C candidate fetch --no-tags origin main
+          git -C candidate merge-base --is-ancestor "$CANDIDATE_SHA" origin/main
+          gate_count="$(gh api "repos/$GITHUB_REPOSITORY/commits/$CANDIDATE_SHA/check-runs" \
+            --jq '[.check_runs[] | select(.name == "CI Gate" and .conclusion == "success")] | length')"
+          test "$gate_count" -ge 1
+
+      - name: Build candidate twice from trusted tooling
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash control/bin/build-release.sh \
+            --source candidate \
+            --output-dir "$RUNNER_TEMP/rc-a" \
+            --version "$VERSION" \
+            --source-sha "$CANDIDATE_SHA" \
+            --preparation-run-id "$GITHUB_RUN_ID"
+          bash control/bin/build-release.sh \
+            --source candidate \
+            --output-dir "$RUNNER_TEMP/rc-b" \
+            --version "$VERSION" \
+            --source-sha "$CANDIDATE_SHA" \
+            --preparation-run-id "$GITHUB_RUN_ID"
+          cmp "$RUNNER_TEMP/rc-a/thumbnail-manager-$VERSION.zip" "$RUNNER_TEMP/rc-b/thumbnail-manager-$VERSION.zip"
+          cmp "$RUNNER_TEMP/rc-a/release-manifest.json" "$RUNNER_TEMP/rc-b/release-manifest.json"
+          diff -qr "$RUNNER_TEMP/rc-a/staged" "$RUNNER_TEMP/rc-b/staged"
+
+      - name: Run WordPress Plugin Check on exact staged payload
+        uses: wordpress/plugin-check-action@10857da14b6c2246d15402b3e69f777edcf8c12e # v1.1.9
+        with:
+          build-dir: ${{ runner.temp }}/rc-a/staged/thumbnail-manager
+          slug: thumbnail-manager
+          ignore-codes: outdated_tested_upto_header
+          strict: false
+
+      - name: Enforce reviewed Plugin Check baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 control/bin/validate-plugin-check.py \
+            --results "$RUNNER_TEMP/plugin-check-results.txt" \
+            --baseline control/release/plugin-check-baseline.json
+          cp "$RUNNER_TEMP/plugin-check-results.txt" "$RUNNER_TEMP/rc-a/plugin-check-results.txt"
+
+      - name: Record authenticated preparation identity
+        id: identity
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact_name="thumbnail-manager-$VERSION-$CANDIDATE_SHA"
+          echo "artifact_name=$artifact_name" >> "$GITHUB_OUTPUT"
+          python3 - "$RUNNER_TEMP/rc-a/release-manifest.json" "$RUNNER_TEMP/rc-a/preparation-record.json" <<'PY'
+          import json
+          import os
+          import sys
+
+          manifest = json.load(open(sys.argv[1], encoding="utf-8"))
+          record = {
+              "schema_version": 1,
+              "repository": os.environ["GITHUB_REPOSITORY"],
+              "workflow_path": ".github/workflows/release-prepare.yml",
+              "workflow_ref": os.environ["GITHUB_WORKFLOW_REF"],
+              "workflow_run_id": int(os.environ["GITHUB_RUN_ID"]),
+              "control_sha": os.environ["GITHUB_SHA"],
+              "candidate_sha": os.environ["CANDIDATE_SHA"],
+              "version": os.environ["VERSION"],
+              "artifact_name": f"thumbnail-manager-{os.environ['VERSION']}-{os.environ['CANDIDATE_SHA']}",
+              "package_sha256": manifest["package"]["sha256"],
+              "manifest_sha256": manifest["manifest_sha256"],
+              "tree_sha256": manifest["tree_sha256"],
+              "status": "RC_PREPARED",
+          }
+          with open(sys.argv[2], "w", encoding="utf-8") as handle:
+              json.dump(record, handle, indent=2, sort_keys=True)
+              handle.write("\n")
+          PY
+
+      - name: Upload immutable release-candidate evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4.6.2
+        with:
+          name: ${{ steps.identity.outputs.artifact_name }}
+          path: |
+            ${{ runner.temp }}/rc-a/thumbnail-manager-${{ inputs.version }}.zip
+            ${{ runner.temp }}/rc-a/release-manifest.json
+            ${{ runner.temp }}/rc-a/preparation-record.json
+            ${{ runner.temp }}/rc-a/plugin-check-results.txt
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Summarize Human review target
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - "$RUNNER_TEMP/rc-a/release-manifest.json" >> "$GITHUB_STEP_SUMMARY" <<'PY'
+          import json
+          import os
+          import sys
+
+          manifest = json.load(open(sys.argv[1], encoding="utf-8"))
+          print("## RC_PREPARED")
+          print(f"- Candidate SHA: `{os.environ['CANDIDATE_SHA']}`")
+          print(f"- Version: `{os.environ['VERSION']}`")
+          print(f"- Preparation run: `{os.environ['GITHUB_RUN_ID']}`")
+          print(f"- Package SHA-256: `{manifest['package']['sha256']}`")
+          print(f"- Manifest SHA-256: `{manifest['manifest_sha256']}`")
+          print(f"- Tree SHA-256: `{manifest['tree_sha256']}`")
+          print("- External mutation: `NOT RUN — release preparation is read-only`")
+          PY

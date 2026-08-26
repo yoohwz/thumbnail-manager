@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "slug": "thumbnail-manager",
+  "svn_url": "https://plugins.svn.wordpress.org/thumbnail-manager",
+  "assets_mode": "unchanged",
+  "release_confirmation": {
+    "mode": "unknown",
+    "observed_at": null,
+    "source": "Human verification in WordPress.org Release Management is required before first production use."
+  }
+}
