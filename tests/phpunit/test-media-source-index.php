@@ -248,6 +248,73 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 		}
 	}
 
+	public function test_import_attachments_are_fenced_when_mutations_create_image_applicability() {
+		$add_path    = trailingslashit( $this->test_dir ) . 'import-add.jpg';
+		$old_path    = trailingslashit( $this->test_dir ) . 'import-old.txt';
+		$update_path = trailingslashit( $this->test_dir ) . 'import-update.jpg';
+		$by_mid_path = trailingslashit( $this->test_dir ) . 'import-by-mid.jpg';
+		foreach ( array( $add_path, $old_path, $update_path, $by_mid_path ) as $path ) {
+			$this->write_file( $path, wp_basename( $path ) );
+		}
+
+		$add_id  = $this->create_import_attachment();
+		$meta_id = add_post_meta( $add_id, '_wp_attached_file', $this->relative_path( $add_path ) );
+		$this->assertIsInt( $meta_id );
+		$this->assertTrue( yotm_media_source_path_is_authoritative( $add_path ) );
+
+		$update_id = $this->create_import_attachment();
+		$this->assertIsInt( add_post_meta( $update_id, '_wp_attached_file', $this->relative_path( $old_path ) ) );
+		$this->assertNotFalse( update_post_meta( $update_id, '_wp_attached_file', $this->relative_path( $update_path ) ) );
+		$this->assertFalse( yotm_media_source_path_is_authoritative( $old_path ) );
+		$this->assertTrue( yotm_media_source_path_is_authoritative( $update_path ) );
+
+		$by_mid_id = $this->create_import_attachment();
+		$meta_id   = add_post_meta( $by_mid_id, 'yotm_import_transition', 'ordinary' );
+		$this->assertIsInt( $meta_id );
+		$this->assertTrue( update_metadata_by_mid( 'post', $meta_id, $this->relative_path( $by_mid_path ), '_wp_attached_file' ) );
+		$this->assertTrue( yotm_media_source_path_is_authoritative( $by_mid_path ) );
+		$this->assertTrue( yotm_media_source_require_clean_index() );
+		$this->assert_guard_state_clean();
+	}
+
+	public function test_ambiguous_import_attached_file_rows_fail_closed() {
+		$attachment_id = $this->create_import_attachment();
+		$first         = trailingslashit( $this->test_dir ) . 'import-multi-first.txt';
+		$second        = trailingslashit( $this->test_dir ) . 'import-multi-second.txt';
+		$proposed      = trailingslashit( $this->test_dir ) . 'import-multi-proposed.jpg';
+		foreach ( array( $first, $second, $proposed ) as $path ) {
+			$this->write_file( $path, wp_basename( $path ) );
+		}
+
+		global $wpdb;
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.SlowDBQuery.slow_db_query_meta_key,WordPress.DB.SlowDBQuery.slow_db_query_meta_value -- The fixture intentionally creates an ambiguous authoritative raw state outside the guarded API.
+		foreach ( array( $first, $second ) as $path ) {
+			$inserted = $wpdb->insert(
+				$wpdb->postmeta,
+				array(
+					'post_id'    => $attachment_id,
+					'meta_key'   => '_wp_attached_file',
+					'meta_value' => $this->relative_path( $path ),
+				),
+				array( '%d', '%s', '%s' )
+			);
+			$this->assertSame( 1, $inserted );
+		}
+		// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.SlowDBQuery.slow_db_query_meta_key,WordPress.DB.SlowDBQuery.slow_db_query_meta_value
+		wp_cache_delete( $attachment_id, 'post_meta' );
+		$this->assertTrue( yotm_media_source_sync_attachment( $attachment_id, null, true ) );
+
+		$this->assertFalse( update_post_meta( $attachment_id, '_wp_attached_file', $this->relative_path( $proposed ) ) );
+		$this->assertWPError( $GLOBALS['yotm_media_source_last_error'] );
+		$rows = yotm_media_reference_raw_postmeta_rows( $attachment_id, '_wp_attached_file' );
+		$this->assertIsArray( $rows );
+		$this->assertCount( 2, $rows );
+		$this->assertSame( array( $this->relative_path( $first ), $this->relative_path( $second ) ), wp_list_pluck( $rows, 'value' ) );
+		$this->assertFalse( yotm_media_source_path_is_authoritative( $proposed ) );
+		$this->assertTrue( yotm_media_source_require_clean_index() );
+		$this->assert_guard_state_clean();
+	}
+
 	public function test_stateful_metadata_accessor_cannot_turn_raw_update_into_unfenced_write() {
 		$fixture  = $this->create_attachment_with_thumbnail( 'stateful-write.jpg', 'stateful-write-150x150.jpg' );
 		$old      = $this->relative_path( $fixture['original'] );
@@ -1321,6 +1388,19 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 			$this->assertNotFalse( update_attached_file( $attachment_id, $file ) );
 		}
 		$this->assertNotFalse( wp_update_attachment_metadata( $attachment_id, $metadata ) );
+		return $attachment_id;
+	}
+
+	private function create_import_attachment() {
+		$attachment_id = wp_insert_attachment(
+			array(
+				'post_mime_type' => 'import',
+				'post_title'     => 'YOTM import source test',
+				'post_status'    => 'inherit',
+			)
+		);
+		$this->assertIsInt( $attachment_id );
+		$this->attachments[] = $attachment_id;
 		return $attachment_id;
 	}
 

@@ -116,9 +116,9 @@ function yotm_media_reference_raw_postmeta_rows( $attachment_id, $meta_key ) {
  * Classify an image attachment without filterable attachment accessors.
  *
  * Core historically permits imported image attachments whose MIME type is
- * `import`. Preserve that compatibility only when the exact raw attached-file
- * row has a recognized image extension. Ambiguous storage failures are errors
- * so authoritative mutations fail closed.
+ * `import`. Guard every import attachment conservatively because an
+ * authoritative metadata mutation can itself introduce the image extension;
+ * classifying only the pre-write attached-file value would be fail-open.
  *
  * @param int $attachment_id Attachment ID.
  * @return bool|WP_Error
@@ -141,21 +141,8 @@ function yotm_media_reference_is_image_attachment( $attachment_id ) {
 	if ( 0 === strpos( $mime_type, 'image/' ) ) {
 		return true;
 	}
-	if ( 'import' !== $mime_type ) {
-		return false;
-	}
 
-	$rows = yotm_media_reference_raw_postmeta_rows( $attachment_id, '_wp_attached_file' );
-	if ( is_wp_error( $rows ) ) {
-		return $rows;
-	}
-	if ( 1 !== count( $rows ) || ! is_string( $rows[0]['value'] ) ) {
-		return false;
-	}
-
-	$extension   = strtolower( pathinfo( $rows[0]['value'], PATHINFO_EXTENSION ) );
-	$image_types = wp_get_ext_types()['image'] ?? array();
-	return in_array( $extension, $image_types, true );
+	return 'import' === $mime_type;
 }
 
 /**
