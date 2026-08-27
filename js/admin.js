@@ -552,6 +552,13 @@
         return;
       }
       const data = response.data;
+      if (data.stopped || data.status === 'cancelled' || data.status === 'expired') {
+        $pruneResults.prepend(htmlNotice('notice-warning', t('jobStopped', 'Job stopped.')));
+        clearPruneJob({keepResults: true});
+        setPruneStep('configure');
+        loadRecentJobs();
+        return;
+      }
       let label = t('scanning', 'Scanning…') + ' ' + data.scan_processed + ' / ' + data.scan_total_attachments;
       let indeterminate = false;
       if (data.scan_phase === 'disk') {
@@ -563,7 +570,7 @@
       }
       pruneProgress(data.scan_percent || 0, label, indeterminate);
       if (!data.scan_done) {
-        window.setTimeout(scanPruneBatch, 120);
+        window.setTimeout(scanPruneBatch, parseInt(data.retry_after_ms || 120, 10));
         return;
       }
       pruneRunning = false;
@@ -645,7 +652,7 @@
       }
       pruneProgress(data.percent || 0, t('deleting', 'Deleting…') + ' ' + data.processed + ' / ' + pruneTotal + ' — ' + data.bytes_human);
       if (!data.done) {
-        window.setTimeout(deletePruneBatch, 120);
+        window.setTimeout(deletePruneBatch, parseInt(data.retry_after_ms || 120, 10));
         return;
       }
       let message = formatTemplate(t('doneDeleted', 'Done. Deleted %1$s files — Freed %2$s.'), {'%1$s': data.deleted, '%2$s': data.bytes_human});
@@ -811,7 +818,7 @@
       regenProgress(data.percent || 0, t('processing', 'Processing…') + ' ' + data.processed + ' / ' + data.total);
       renderRegenState(data);
       if (!data.done) {
-        window.setTimeout(regenerateBatch, 120);
+        window.setTimeout(regenerateBatch, parseInt(data.retry_after_ms || 120, 10));
         return;
       }
       $regenResults.prepend(htmlNotice(data.failed ? 'notice-warning' : 'notice-success', formatTemplate(t('doneRegenerated', 'Done. Regenerated %1$s attachments, skipped %2$s, failed %3$s.'), {'%1$s': data.regenerated, '%2$s': data.skipped, '%3$s': data.failed})) + errorDetails(data.errors));
@@ -1012,7 +1019,7 @@
       const label = data.phase === 'content' ? t('scanningContentReferences', 'Scanning content references…') : t('scanningAttachmentMetadata', 'Scanning attachment metadata…');
       recommendationProgress(data.percent || 0, label + ' ' + data.processed + ' / ' + data.total);
       if (!data.done) {
-        window.setTimeout(recommendationBatch, 120);
+        window.setTimeout(recommendationBatch, parseInt(data.retry_after_ms || 120, 10));
         return;
       }
       renderRecommendationResult(data.result || {});

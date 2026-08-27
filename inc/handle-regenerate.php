@@ -87,20 +87,22 @@ function yotm_regenerate_prepare() {
 	$job    = yotm_job_create(
 		'regenerate',
 		array(
-			'only_missing' => $only_missing ? 1 : 0,
-			'force_all'    => $force_all ? 1 : 0,
-			'scope'        => $scope,
-			'scope_label'  => $scope_label,
-			'subpath'      => $subpath,
-			'cursor_mode'  => $cursor_mode ? 1 : 0,
-			'query_args'   => $query_args,
+			'only_missing'   => $only_missing ? 1 : 0,
+			'force_all'      => $force_all ? 1 : 0,
+			'scope'          => $scope,
+			'scope_label'    => $scope_label,
+			'subpath'        => $subpath,
+			'cursor_mode'    => $cursor_mode ? 1 : 0,
+			'discovery_done' => $cursor_mode ? 0 : 1,
+			'query_args'     => $query_args,
 		),
 		array(
-			'status' => 'running',
-			'phase'  => 'regenerate',
-			'total'  => $total,
-			'max_id' => $max_id,
-			'ttl'    => DAY_IN_SECONDS,
+			'status'       => 'running',
+			'phase'        => 'regenerate',
+			'counter_mode' => 'item_v2',
+			'total'        => $total,
+			'max_id'       => $max_id,
+			'ttl'          => DAY_IN_SECONDS,
 		)
 	);
 
@@ -117,11 +119,16 @@ function yotm_regenerate_prepare() {
 
 	if ( ! $cursor_mode ) {
 		foreach ( $ids as $attachment_id ) {
-			yotm_job_add_item(
+			$item_key = hash( 'sha256', 'attachment:' . $attachment_id );
+			$inserted = yotm_job_add_item(
 				$job['id'],
-				hash( 'sha256', 'attachment:' . $attachment_id ),
+				$item_key,
 				array( 'attachment_id' => $attachment_id )
 			);
+			if ( ! $inserted && ! yotm_job_item_exists( $job['id'], $item_key ) ) {
+				yotm_job_delete( $job['id'] );
+				wp_send_json_error( array( 'msg' => yotm_job_storage_error()->get_error_message() ), 500 );
+			}
 		}
 	}
 
@@ -158,9 +165,142 @@ function yotm_regenerate_batch() {
 		wp_send_json_error( array( 'msg' => __( 'This regeneration job is not runnable.', 'thumbnail-manager' ) ), 409 );
 	}
 
+	$worker = yotm_job_acquire_worker( $job['id'], array( 'running' ), array( 'regenerate' ) );
+	if ( is_wp_error( $worker ) ) {
+		if ( 'yotm_job_worker_busy' !== $worker->get_error_code() ) {
+			wp_send_json_error( array( 'msg' => $worker->get_error_message() ), 503 );
+		}
+
+		$data                       = $worker->get_error_data();
+		$current                    = is_array( $data ) && is_array( $data['job'] ?? null ) ? $data['job'] : $job;
+		$response                   = yotm_build_regenerate_response( $current, ( $current['status'] ?? '' ) === 'completed' );
+		$response['retry_after_ms'] = 'running' === ( $current['status'] ?? '' ) ? 250 : 0;
+		wp_send_json_success( $response );
+	}
+
+	$job = yotm_job_get_by_id( $job['id'] );
+	if ( 'item_v2' === $job['counter_mode'] ) {
+		wp_send_json_success( yotm_regenerate_item_batch( $job, $worker, $batch ) );
+	}
+
+	wp_send_json_success( yotm_regenerate_legacy_batch( $job, $worker, $batch ) );
+}
+
+/**
+ * Process an item-authoritative regeneration batch.
+ *
+ * @param array $job Job row.
+ * @param array $worker Worker ownership data.
+ * @param int   $batch Batch size.
+ * @return array
+ */
+function yotm_regenerate_item_batch( $job, $worker, $batch ) {
 	$payload     = $job['payload'];
 	$cursor_mode = ! empty( $payload['cursor_mode'] );
-	$items       = array();
+	$counters    = yotm_job_item_counters( $job['id'] );
+
+	if ( $cursor_mode && 0 === $counters['remaining'] && empty( $payload['discovery_done'] ) ) {
+		$ids = yotm_get_image_attachment_ids_after(
+			is_array( $payload['query_args'] ?? null ) ? $payload['query_args'] : array(),
+			$job['cursor'],
+			$batch,
+			$job['max_id']
+		);
+
+		if ( empty( $ids ) ) {
+			$payload['discovery_done'] = 1;
+			yotm_job_worker_update( $worker, array( 'payload' => $payload ) );
+		} else {
+			$materialized = true;
+			foreach ( $ids as $attachment_id ) {
+				$item_key = hash( 'sha256', 'attachment:' . absint( $attachment_id ) );
+				$inserted = yotm_job_add_item(
+					$job['id'],
+					$item_key,
+					array( 'attachment_id' => absint( $attachment_id ) )
+				);
+				if ( ! $inserted && ! yotm_job_item_exists( $job['id'], $item_key ) ) {
+					$materialized = false;
+					break;
+				}
+			}
+
+			if ( ! $materialized ) {
+				return array_merge(
+					yotm_build_regenerate_response( yotm_job_get_by_id( $job['id'] ), false ),
+					array( 'retry_after_ms' => 250 )
+				);
+			}
+
+			yotm_job_worker_update( $worker, array( 'cursor' => max( array_map( 'absint', $ids ) ) ) );
+		}//end if
+
+		$job     = yotm_job_get_by_id( $job['id'] );
+		$payload = $job['payload'];
+	}//end if
+
+	$items = yotm_job_claim_items( $worker, $batch );
+	if ( is_wp_error( $items ) ) {
+		return array_merge(
+			yotm_build_regenerate_response( yotm_job_get_by_id( $job['id'] ), false ),
+			array( 'retry_after_ms' => 250 )
+		);
+	}
+
+	foreach ( $items as $item ) {
+		if ( ! yotm_job_refresh_worker( $worker ) || ! yotm_job_refresh_item_claim( $item ) ) {
+			break;
+		}
+
+		$attachment_id = absint( $item['payload']['attachment_id'] ?? 0 );
+		if ( ! $attachment_id ) {
+			yotm_job_finish_item( $item, 'failed', __( 'Attachment ID is missing.', 'thumbnail-manager' ) );
+			continue;
+		}
+
+		$result = yotm_regenerate_attachment( $attachment_id, ! empty( $payload['only_missing'] ), ! empty( $payload['force_all'] ) );
+		if ( 'regenerated' === $result['status'] ) {
+			yotm_job_finish_item( $item, 'done' );
+		} elseif ( 'skipped' === $result['status'] ) {
+			yotm_job_finish_item( $item, 'skipped', (string) $result['message'] );
+		} else {
+			yotm_job_finish_item( $item, 'failed', (string) $result['message'] );
+		}
+	}
+
+	$job      = yotm_job_sync_item_counters( $job['id'] );
+	$counters = yotm_job_item_counters( $job['id'] );
+	$done     = ! empty( $job['payload']['discovery_done'] ) && 0 === $counters['remaining'];
+
+	if ( $done && 'running' === $job['status'] ) {
+		yotm_job_worker_update(
+			$worker,
+			array(
+				'status'     => 'completed',
+				'phase'      => 'completed',
+				'expires_at' => gmdate( 'Y-m-d H:i:s', time() + YOTM_JOB_AUDIT_RETENTION_SECONDS ),
+			)
+		);
+	}
+
+	$current = yotm_job_get_by_id( $job['id'] );
+
+	return yotm_build_regenerate_response( $current, 'completed' === $current['status'] );
+}
+
+/**
+ * Resume one pre-migration regeneration job without mixing counter sources.
+ *
+ * @param array $job Job row.
+ * @param array $worker Worker ownership data.
+ * @param int   $batch Batch size.
+ * @return array
+ */
+function yotm_regenerate_legacy_batch( $job, $worker, $batch ) {
+	$payload          = $job['payload'];
+	$cursor_mode      = ! empty( $payload['cursor_mode'] );
+	$items            = array();
+	$cursor_exhausted = false;
 
 	if ( $cursor_mode ) {
 		$ids = yotm_get_image_attachment_ids_after(
@@ -175,9 +315,13 @@ function yotm_regenerate_batch() {
 				'payload' => array( 'attachment_id' => $attachment_id ),
 			);
 		}
+		$cursor_exhausted = empty( $items );
 	} else {
-		$items = yotm_job_get_items( $job['id'], array( 'queued', 'processing' ), $batch );
-		$ids   = array_map(
+		$items = yotm_job_claim_items( $worker, $batch );
+		if ( is_wp_error( $items ) ) {
+			return array_merge( yotm_build_regenerate_response( $job, false ), array( 'retry_after_ms' => 250 ) );
+		}
+		$ids = array_map(
 			static function ( $item ) {
 				return absint( $item['payload']['attachment_id'] ?? 0 );
 			},
@@ -185,38 +329,19 @@ function yotm_regenerate_batch() {
 		);
 	}//end if
 
-	if ( empty( $items ) ) {
-		$current = yotm_job_get_by_id( $job['id'] );
-		if ( is_array( $current ) && 'cancelled' === $current['status'] ) {
-			wp_send_json_success( yotm_build_regenerate_response( $current, false ) );
-		}
-
-		yotm_job_update(
-			$job['id'],
-			array(
-				'status'     => 'completed',
-				'phase'      => 'completed',
-				'expires_at' => gmdate( 'Y-m-d H:i:s', time() + 7 * DAY_IN_SECONDS ),
-			)
-		);
-		wp_send_json_success( yotm_build_regenerate_response( yotm_job_get_by_id( $job['id'] ), true ) );
-	}
-
 	$processed_now   = 0;
 	$regenerated_now = 0;
-	$skipped_now     = 0;
 	$failed_now      = 0;
 	$last_id         = $job['cursor'];
 
 	foreach ( $items as $item ) {
-		$attachment_id = absint( $item['payload']['attachment_id'] ?? 0 );
-
-		if ( ! $attachment_id ) {
-			continue;
+		if ( ! yotm_job_refresh_worker( $worker ) || ( ! empty( $item['id'] ) && ! yotm_job_refresh_item_claim( $item ) ) ) {
+			break;
 		}
 
-		if ( ! empty( $item['id'] ) ) {
-			yotm_job_update_item( $item['id'], 'processing' );
+		$attachment_id = absint( $item['payload']['attachment_id'] ?? 0 );
+		if ( ! $attachment_id ) {
+			continue;
 		}
 
 		$last_id = max( $last_id, $attachment_id );
@@ -226,17 +351,16 @@ function yotm_regenerate_batch() {
 		if ( 'regenerated' === $result['status'] ) {
 			++$regenerated_now;
 			if ( ! empty( $item['id'] ) ) {
-				yotm_job_update_item( $item['id'], 'done' );
+				yotm_job_finish_item( $item, 'done' );
 			}
 		} elseif ( 'skipped' === $result['status'] ) {
-			++$skipped_now;
 			if ( ! empty( $item['id'] ) ) {
-				yotm_job_update_item( $item['id'], 'skipped', (string) $result['message'] );
+				yotm_job_finish_item( $item, 'skipped', (string) $result['message'] );
 			}
 		} else {
 			++$failed_now;
 			if ( ! empty( $item['id'] ) ) {
-				yotm_job_update_item( $item['id'], 'failed', (string) $result['message'] );
+				yotm_job_finish_item( $item, 'failed', (string) $result['message'] );
 			} else {
 				$failure_key = hash( 'sha256', 'regenerate-failure:' . $attachment_id );
 				yotm_job_add_item( $job['id'], $failure_key, array( 'attachment_id' => $attachment_id ), 'failed' );
@@ -248,34 +372,38 @@ function yotm_regenerate_batch() {
 		}//end if
 	}//end foreach
 
-	$processed   = $job['processed'] + $processed_now;
-	$regenerated = $job['succeeded'] + $regenerated_now;
-	$failed      = $job['failed'] + $failed_now;
-	$fields      = array(
-		'processed' => $processed,
-		'succeeded' => $regenerated,
-		'failed'    => $failed,
+	$fields = array(
+		'processed' => $job['processed'] + $processed_now,
+		'succeeded' => $job['succeeded'] + $regenerated_now,
+		'failed'    => $job['failed'] + $failed_now,
 	);
-
-	if ( $cursor_mode ) {
+	if ( $cursor_mode && $processed_now > 0 ) {
 		$fields['cursor'] = $last_id;
+	}
+	if ( $processed_now > 0 ) {
+		yotm_job_legacy_worker_update( $worker, $fields );
 	}
 
 	$remaining = $cursor_mode
-		? max( 0, $job['total'] - $processed )
+		? ( $cursor_exhausted ? 0 : 1 )
 		: yotm_job_count_items( $job['id'], 'queued' ) + yotm_job_count_items( $job['id'], 'processing' );
-	$done      = 0 === $remaining || ( $cursor_mode && $processed >= $job['total'] );
 	$current   = yotm_job_get_by_id( $job['id'] );
-	$stopped   = is_array( $current ) && 'cancelled' === $current['status'];
+	$done      = 0 === $remaining;
 
-	if ( $done && ! $stopped ) {
-		$fields['status']     = 'completed';
-		$fields['phase']      = 'completed';
-		$fields['expires_at'] = gmdate( 'Y-m-d H:i:s', time() + 7 * DAY_IN_SECONDS );
+	if ( $done && 'running' === $current['status'] ) {
+		yotm_job_worker_update(
+			$worker,
+			array(
+				'status'     => 'completed',
+				'phase'      => 'completed',
+				'expires_at' => gmdate( 'Y-m-d H:i:s', time() + YOTM_JOB_AUDIT_RETENTION_SECONDS ),
+			)
+		);
 	}
 
-	yotm_job_update( $job['id'], $fields );
-	wp_send_json_success( yotm_build_regenerate_response( yotm_job_get_by_id( $job['id'] ), $done && ! $stopped ) );
+	$current = yotm_job_get_by_id( $job['id'] );
+
+	return yotm_build_regenerate_response( $current, 'completed' === $current['status'] );
 }
 
 /**
@@ -463,7 +591,7 @@ function yotm_build_regenerate_response( $job, $done ) {
 		'remaining'    => max( 0, $total - $processed ),
 		'percent'      => $percent,
 		'done'         => (bool) $done,
-		'stopped'      => 'cancelled' === $job['status'],
+		'stopped'      => in_array( $job['status'], array( 'cancelled', 'expired' ), true ),
 		'scope'        => (string) ( $payload['scope'] ?? 'all' ),
 		'scope_label'  => (string) ( $payload['scope_label'] ?? __( 'All media', 'thumbnail-manager' ) ),
 		'only_missing' => ! empty( $payload['only_missing'] ) ? 1 : 0,

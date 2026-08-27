@@ -74,10 +74,11 @@ function yotm_prune_prepare() {
 			'disk_entries_processed' => 0,
 		),
 		array(
-			'status' => 'scanning',
-			'phase'  => 'metadata',
-			'max_id' => yotm_get_max_image_attachment_id( $query_args ),
-			'ttl'    => DAY_IN_SECONDS,
+			'status'       => 'scanning',
+			'phase'        => 'metadata',
+			'counter_mode' => 'item_v2',
+			'max_id'       => yotm_get_max_image_attachment_id( $query_args ),
+			'ttl'          => DAY_IN_SECONDS,
 		)
 	);
 
@@ -125,6 +126,21 @@ function yotm_prune_scan_batch() {
 		wp_send_json_error( array( 'msg' => __( 'This prune job is not scannable.', 'thumbnail-manager' ) ), 409 );
 	}
 
+	$worker = yotm_job_acquire_worker( $job['id'], array( 'scanning' ), array( 'metadata', 'disk', 'manifest' ) );
+	if ( is_wp_error( $worker ) ) {
+		if ( 'yotm_job_worker_busy' !== $worker->get_error_code() ) {
+			wp_send_json_error( array( 'msg' => $worker->get_error_message() ), 503 );
+		}
+
+		$data                       = $worker->get_error_data();
+		$current                    = is_array( $data ) && is_array( $data['job'] ?? null ) ? $data['job'] : $job;
+		$response                   = yotm_build_prune_scan_response( $current, ( $current['status'] ?? '' ) !== 'scanning' );
+		$response['retry_after_ms'] = 'scanning' === ( $current['status'] ?? '' ) ? 250 : 0;
+		wp_send_json_success( $response );
+	}
+
+	$job = yotm_job_get_by_id( $job['id'] );
+
 	$payload = $job['payload'];
 	$phase   = $payload['scan_phase'] ?? 'metadata';
 
@@ -154,12 +170,12 @@ function yotm_prune_scan_batch() {
 					continue;
 				}
 
-					$path                         = yotm_normalize_filesystem_path( $candidate['path'] );
-					$item_key                     = hash( 'sha256', $path );
-					$bytes                        = is_file( $path ) ? filesize( $path ) : 0;
-					$bytes                        = false === $bytes ? 0 : (int) $bytes;
-					$candidate['estimated_bytes'] = $bytes;
-					$inserted                     = yotm_job_add_item( $job['id'], $item_key, $candidate, 'queued', $bytes );
+				$path                         = yotm_normalize_filesystem_path( $candidate['path'] );
+				$item_key                     = hash( 'sha256', $path );
+				$bytes                        = is_file( $path ) ? filesize( $path ) : 0;
+				$bytes                        = false === $bytes ? 0 : (int) $bytes;
+				$candidate['estimated_bytes'] = $bytes;
+				$inserted                     = yotm_job_add_item( $job['id'], $item_key, $candidate, 'queued', $bytes );
 
 				if ( ! $inserted ) {
 					yotm_job_merge_item_payload( $job['id'], $item_key, $candidate );
@@ -173,8 +189,8 @@ function yotm_prune_scan_batch() {
 			$payload['scan_processed'] = (int) ( $payload['scan_processed'] ?? 0 ) + count( $ids );
 			$cursor                    = max( array_map( 'absint', $ids ) );
 			$total                     = yotm_job_count_items( $job['id'] );
-			yotm_job_update(
-				$job['id'],
+			yotm_job_worker_update(
+				$worker,
 				array(
 					'payload' => $payload,
 					'cursor'  => $cursor,
@@ -197,8 +213,8 @@ function yotm_prune_scan_batch() {
 				},
 				is_array( $payload['scan_bases'] ?? null ) ? $payload['scan_bases'] : array( $payload['scan_base'] )
 			);
-			yotm_job_update(
-				$job['id'],
+			yotm_job_worker_update(
+				$worker,
 				array(
 					'payload' => $payload,
 					'phase'   => 'disk',
@@ -207,8 +223,8 @@ function yotm_prune_scan_batch() {
 			$job = yotm_job_get_by_id( $job['id'] );
 		} else {
 			$payload['scan_phase'] = 'manifest';
-			yotm_job_update(
-				$job['id'],
+			yotm_job_worker_update(
+				$worker,
 				array(
 					'payload' => $payload,
 					'phase'   => 'manifest',
@@ -219,7 +235,7 @@ function yotm_prune_scan_batch() {
 	}//end if
 
 	if ( 'disk' === ( $job['payload']['scan_phase'] ?? '' ) ) {
-		$disk = yotm_prune_scan_disk_batch( $job, $batch );
+		$disk = yotm_prune_scan_disk_batch( $job, $batch, $worker );
 		$job  = $disk['job'];
 
 		if ( ! $disk['done'] ) {
@@ -228,8 +244,8 @@ function yotm_prune_scan_batch() {
 
 		$payload               = $job['payload'];
 		$payload['scan_phase'] = 'manifest';
-		yotm_job_update(
-			$job['id'],
+		yotm_job_worker_update(
+			$worker,
 			array(
 				'payload' => $payload,
 				'phase'   => 'manifest',
@@ -238,7 +254,7 @@ function yotm_prune_scan_batch() {
 		$job = yotm_job_get_by_id( $job['id'] );
 	}
 
-	$manifest = yotm_job_build_manifest_batch( $job, max( 500, $batch * 5 ) );
+	$manifest = yotm_job_build_manifest_batch( $job, max( 500, $batch * 5 ), $worker );
 	$job      = $manifest['job'];
 
 	if ( ! $manifest['done'] ) {
@@ -257,8 +273,8 @@ function yotm_prune_scan_batch() {
 	$total                      = yotm_job_count_items( $job['id'] );
 	$final_status               = $total > 0 ? 'awaiting_approval' : 'completed';
 	$final_phase                = $total > 0 ? 'review' : 'completed';
-	yotm_job_update(
-		$job['id'],
+	yotm_job_worker_update(
+		$worker,
 		array(
 			'payload'    => $payload,
 			'phase'      => $final_phase,
@@ -274,11 +290,12 @@ function yotm_prune_scan_batch() {
 /**
  * Scan disk entries with a persisted breadth-first directory cursor.
  *
- * @param array $job Job row.
- * @param int   $limit Maximum directory entries.
+ * @param array      $job Job row.
+ * @param int        $limit Maximum directory entries.
+ * @param array|null $worker Optional worker ownership data.
  * @return array{done:bool,job:array}
  */
-function yotm_prune_scan_disk_batch( $job, $limit = 100 ) {
+function yotm_prune_scan_disk_batch( $job, $limit = 100, $worker = null ) {
 	$payload    = $job['payload'];
 	$queue      = is_array( $payload['disk_queue'] ?? null ) ? $payload['disk_queue'] : array();
 	$summary    = is_array( $payload['orphan_summary'] ?? null ) ? $payload['orphan_summary'] : yotm_initial_orphan_summary();
@@ -378,7 +395,11 @@ function yotm_prune_scan_disk_batch( $job, $limit = 100 ) {
 	$payload['orphan_summary']         = $summary;
 	$payload['disk_queue']             = array_values( $queue );
 	$payload['disk_entries_processed'] = (int) ( $payload['disk_entries_processed'] ?? 0 ) + $processed;
-	yotm_job_update( $job['id'], array( 'payload' => $payload ) );
+	if ( is_array( $worker ) ) {
+		yotm_job_worker_update( $worker, array( 'payload' => $payload ) );
+	} else {
+		yotm_job_update( $job['id'], array( 'payload' => $payload ) );
+	}
 
 	return array(
 		'done' => empty( $queue ),
@@ -428,6 +449,7 @@ function yotm_build_prune_scan_response( $job, $done ) {
 		'orphan_summary'         => is_array( $payload['orphan_summary'] ?? null ) ? $payload['orphan_summary'] : yotm_initial_orphan_summary(),
 		'manifest_hash'          => $job['manifest_hash'],
 		'expires_at'             => $job['expires_at'],
+		'stopped'                => in_array( $job['status'], array( 'cancelled', 'expired' ), true ),
 	);
 }
 
