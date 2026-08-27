@@ -199,6 +199,133 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 		$this->assertTrue( yotm_media_source_path_is_authoritative( $edit_backup ) );
 	}
 
+	public function test_filtered_attached_file_cannot_bypass_authoritative_mutation_guards() {
+		$fixture = $this->create_attachment_with_thumbnail( 'hidden-guard.jpg', 'hidden-guard-150x150.jpg' );
+		$paths   = array();
+		foreach ( array( 'add', 'regular-update', 'by-mid-update', 'by-mid-delete' ) as $name ) {
+			$paths[ $name ] = trailingslashit( $this->test_dir ) . 'hidden-guard-' . $name . '.jpg';
+			$this->write_file( $paths[ $name ], $name );
+		}
+		$backup = static function ( $path ) {
+			return array(
+				'full-orig' => array(
+					'file'   => wp_basename( $path ),
+					'width'  => 800,
+					'height' => 600,
+				),
+			);
+		};
+		$filter = static function ( $file, $attachment_id ) use ( $fixture ) {
+			return $fixture['attachment_id'] === (int) $attachment_id ? false : $file;
+		};
+
+		add_filter( 'get_attached_file', $filter, 10, 2 );
+		try {
+			$meta_id = add_post_meta( $fixture['attachment_id'], '_wp_attachment_backup_sizes', $backup( $paths['add'] ) );
+			$this->assertIsInt( $meta_id );
+			$this->assertTrue( yotm_media_source_path_is_authoritative( $paths['add'] ) );
+
+			$this->assertNotFalse( update_post_meta( $fixture['attachment_id'], '_wp_attachment_backup_sizes', $backup( $paths['regular-update'] ) ) );
+			$this->assertFalse( yotm_media_source_path_is_authoritative( $paths['add'] ) );
+			$this->assertTrue( yotm_media_source_path_is_authoritative( $paths['regular-update'] ) );
+
+			$this->assertTrue( update_metadata_by_mid( 'post', $meta_id, $backup( $paths['by-mid-update'] ), false ) );
+			$this->assertFalse( yotm_media_source_path_is_authoritative( $paths['regular-update'] ) );
+			$this->assertTrue( yotm_media_source_path_is_authoritative( $paths['by-mid-update'] ) );
+
+			$this->assertTrue( delete_post_meta( $fixture['attachment_id'], '_wp_attachment_backup_sizes' ) );
+			$this->assertFalse( yotm_media_source_path_is_authoritative( $paths['by-mid-update'] ) );
+
+			$meta_id = add_post_meta( $fixture['attachment_id'], '_wp_attachment_backup_sizes', $backup( $paths['by-mid-delete'] ) );
+			$this->assertIsInt( $meta_id );
+			$this->assertTrue( yotm_media_source_path_is_authoritative( $paths['by-mid-delete'] ) );
+			$this->assertTrue( delete_metadata_by_mid( 'post', $meta_id ) );
+			$this->assertFalse( yotm_media_source_path_is_authoritative( $paths['by-mid-delete'] ) );
+			$this->assertTrue( yotm_media_source_require_clean_index() );
+			$this->assert_guard_state_clean();
+		} finally {
+			remove_filter( 'get_attached_file', $filter, 10 );
+		}
+	}
+
+	public function test_stateful_metadata_accessor_cannot_turn_raw_update_into_unfenced_write() {
+		$fixture  = $this->create_attachment_with_thumbnail( 'stateful-write.jpg', 'stateful-write-150x150.jpg' );
+		$old      = $this->relative_path( $fixture['original'] );
+		$new_path = trailingslashit( $this->test_dir ) . 'stateful-write-new.jpg';
+		$new      = $this->relative_path( $new_path );
+		$this->write_file( $new_path, 'new' );
+		$calls  = 0;
+		$filter = static function ( $check, $object_id, $meta_key ) use ( &$calls, $fixture, $old, $new ) {
+			if ( $fixture['attachment_id'] !== (int) $object_id || '_wp_attached_file' !== $meta_key ) {
+				return $check;
+			}
+			++$calls;
+			return array( 1 === $calls ? $new : $old );
+		};
+
+		add_filter( 'get_post_metadata', $filter, 10, 3 );
+		try {
+			$this->assertNotFalse( update_post_meta( $fixture['attachment_id'], '_wp_attached_file', $new ) );
+			$this->assertGreaterThanOrEqual( 2, $calls );
+			$rows = yotm_media_reference_raw_postmeta_rows( $fixture['attachment_id'], '_wp_attached_file' );
+			$this->assertIsArray( $rows );
+			$this->assertSame( $new, $rows[0]['value'] );
+			$this->assertTrue( yotm_media_source_path_is_authoritative( $new_path ) );
+			$this->assertTrue( yotm_media_source_require_clean_index() );
+			$this->assert_guard_state_clean();
+		} finally {
+			remove_filter( 'get_post_metadata', $filter, 10 );
+		}
+		$this->assertTrue( yotm_media_source_sync_attachment( $fixture['attachment_id'], null, true ) );
+		$this->assertTrue( yotm_media_source_path_is_authoritative( $new_path ) );
+	}
+
+	public function test_stateful_metadata_accessor_no_write_reconciles_without_permanent_dirty_state() {
+		$fixture  = $this->create_attachment_with_thumbnail( 'stateful-no-write.jpg', 'stateful-no-write-150x150.jpg' );
+		$old      = array(
+			'full-orig' => array(
+				'file'   => 'stateful-no-write-old.jpg',
+				'width'  => 800,
+				'height' => 600,
+			),
+		);
+		$new      = array(
+			'full-orig' => array(
+				'file'   => 'stateful-no-write-new.jpg',
+				'width'  => 800,
+				'height' => 600,
+			),
+		);
+		$old_path = trailingslashit( $this->test_dir ) . $old['full-orig']['file'];
+		$this->write_file( $old_path, 'old' );
+		$this->write_file( trailingslashit( $this->test_dir ) . $new['full-orig']['file'], 'new' );
+		$this->assertNotFalse( update_post_meta( $fixture['attachment_id'], '_wp_attachment_backup_sizes', $old ) );
+		$calls  = 0;
+		$filter = static function ( $check, $object_id, $meta_key ) use ( &$calls, $fixture, $old, $new ) {
+			if ( $fixture['attachment_id'] !== (int) $object_id || '_wp_attachment_backup_sizes' !== $meta_key ) {
+				return $check;
+			}
+			++$calls;
+			return array( 1 === $calls ? $new : $old );
+		};
+
+		add_filter( 'get_post_metadata', $filter, 10, 3 );
+		try {
+			$this->assertFalse( update_post_meta( $fixture['attachment_id'], '_wp_attachment_backup_sizes', $new ) );
+		} finally {
+			remove_filter( 'get_post_metadata', $filter, 10 );
+		}
+		$this->assertSame( 1, $calls );
+		$this->assertNotEmpty( $GLOBALS['yotm_media_source_frames'] );
+		yotm_media_source_shutdown_cleanup();
+		$rows = yotm_media_reference_raw_postmeta_rows( $fixture['attachment_id'], '_wp_attachment_backup_sizes' );
+		$this->assertIsArray( $rows );
+		$this->assertSame( $old, $rows[0]['value'] );
+		$this->assertTrue( yotm_media_source_path_is_authoritative( $old_path ) );
+		$this->assertTrue( yotm_media_source_require_clean_index() );
+		$this->assert_guard_state_clean();
+	}
+
 	public function test_source_baseline_is_bounded_resumable_and_completes_before_metadata_phase() {
 		$first  = $this->create_attachment_with_thumbnail( 'batch-first.jpg', 'batch-first-150x150.jpg' );
 		$second = $this->create_attachment_with_thumbnail( 'batch-second.jpg', 'batch-second-150x150.jpg' );

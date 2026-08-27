@@ -73,7 +73,7 @@ function yotm_media_source_guard_enabled() {
  *
  * @param int    $attachment_id Attachment ID.
  * @param string $meta_key Authoritative meta key.
- * @return array<int,array{meta_id:int,value:mixed}>|WP_Error
+ * @return array<int,array{meta_id:int,raw_value:string,value:mixed}>|WP_Error
  */
 function yotm_media_reference_raw_postmeta_rows( $attachment_id, $meta_key ) {
 	global $wpdb;
@@ -101,13 +101,61 @@ function yotm_media_reference_raw_postmeta_rows( $attachment_id, $meta_key ) {
 
 	$rows = array();
 	foreach ( $stored as $row ) {
-		$rows[] = array(
-			'meta_id' => absint( $row['meta_id'] ?? 0 ),
-			'value'   => maybe_unserialize( $row['meta_value'] ?? '' ),
+		$raw_value = (string) ( $row['meta_value'] ?? '' );
+		$rows[]    = array(
+			'meta_id'   => absint( $row['meta_id'] ?? 0 ),
+			'raw_value' => $raw_value,
+			'value'     => maybe_unserialize( $raw_value ),
 		);
 	}
 
 	return $rows;
+}
+
+/**
+ * Classify an image attachment without filterable attachment accessors.
+ *
+ * Core historically permits imported image attachments whose MIME type is
+ * `import`. Preserve that compatibility only when the exact raw attached-file
+ * row has a recognized image extension. Ambiguous storage failures are errors
+ * so authoritative mutations fail closed.
+ *
+ * @param int $attachment_id Attachment ID.
+ * @return bool|WP_Error
+ */
+function yotm_media_reference_is_image_attachment( $attachment_id ) {
+	global $wpdb;
+
+	$attachment_id    = absint( $attachment_id );
+	$wpdb->last_error = '';
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Guard applicability must use the exact unfiltered post row.
+	$post = $attachment_id ? $wpdb->get_row( $wpdb->prepare( "SELECT post_type,post_mime_type FROM {$wpdb->posts} WHERE ID = %d", $attachment_id ), ARRAY_A ) : null;
+	if ( '' !== (string) $wpdb->last_error ) {
+		return yotm_job_storage_error( 'yotm_job_storage_unavailable', (string) $wpdb->last_error );
+	}
+	if ( ! is_array( $post ) || 'attachment' !== (string) ( $post['post_type'] ?? '' ) ) {
+		return false;
+	}
+
+	$mime_type = strtolower( (string) ( $post['post_mime_type'] ?? '' ) );
+	if ( 0 === strpos( $mime_type, 'image/' ) ) {
+		return true;
+	}
+	if ( 'import' !== $mime_type ) {
+		return false;
+	}
+
+	$rows = yotm_media_reference_raw_postmeta_rows( $attachment_id, '_wp_attached_file' );
+	if ( is_wp_error( $rows ) ) {
+		return $rows;
+	}
+	if ( 1 !== count( $rows ) || ! is_string( $rows[0]['value'] ) ) {
+		return false;
+	}
+
+	$extension   = strtolower( pathinfo( $rows[0]['value'], PATHINFO_EXTENSION ) );
+	$image_types = wp_get_ext_types()['image'] ?? array();
+	return in_array( $extension, $image_types, true );
 }
 
 /**
@@ -1227,6 +1275,16 @@ function yotm_media_source_begin_guard( $channel, $attachment_id, $original_key,
 		yotm_media_source_fence_release( $source_fence );
 		return $attachment_handle;
 	}
+	$regular_raw_rows = array();
+	if ( 'update' === $channel ) {
+		$regular_raw_rows = yotm_media_reference_raw_postmeta_rows( $attachment_id, $original_key );
+		if ( is_wp_error( $regular_raw_rows ) ) {
+			yotm_media_attachment_lock_release( $attachment_handle );
+			yotm_media_source_fence_release( $source_fence );
+			return $regular_raw_rows;
+		}
+		$had_meta = ! empty( $regular_raw_rows );
+	}
 	$aliases = $defer_proposed
 		? yotm_media_source_aliases( $attachment_id )
 		: yotm_media_source_proposed_aliases( $attachment_id, $original_key, $effective_key, $meta_value );
@@ -1294,9 +1352,11 @@ function yotm_media_source_begin_guard( $channel, $attachment_id, $original_key,
 		'protected_aliases'  => $aliases,
 		'had_meta'           => (bool) $had_meta,
 		'ready'              => false,
+		'completion_seen'    => false,
 		'fallback_parent_id' => $fallback_parent_id,
 		'raw_row_snapshot'   => array(),
 		'raw_rows_snapshot'  => array(),
+		'regular_raw_rows'   => $regular_raw_rows,
 	);
 
 	return $frame_id;
@@ -1376,21 +1436,32 @@ function yotm_guard_add_post_metadata( $check, $object_id, $meta_key, $meta_valu
  * @return mixed
  */
 function yotm_guard_update_post_metadata( $check, $object_id, $meta_key, $meta_value, $prev_value ) {
+	$protected_keys = array( '_wp_attached_file', '_wp_attachment_metadata', '_wp_attachment_backup_sizes' );
 	if (
 		null === $check
 		&& yotm_media_source_guard_enabled()
-		&& wp_attachment_is_image( $object_id )
-		&& in_array( $meta_key, array( '_wp_attached_file', '_wp_attachment_metadata', '_wp_attachment_backup_sizes' ), true )
+		&& in_array( $meta_key, $protected_keys, true )
 		&& empty( $prev_value )
 	) {
-		$old_values = get_metadata_raw( 'post', $object_id, $meta_key );
-		if ( is_countable( $old_values ) && 1 === count( $old_values ) && $old_values[0] === $meta_value ) {
+		$applicable = yotm_media_reference_is_image_attachment( $object_id );
+		if ( is_wp_error( $applicable ) ) {
+			$GLOBALS['yotm_media_source_last_error'] = $applicable;
+			yotm_media_source_push_guard_invocation( 'update', '' );
+			return false;
+		}
+		$old_rows = $applicable ? yotm_media_reference_raw_postmeta_rows( $object_id, $meta_key ) : array();
+		if ( is_wp_error( $old_rows ) ) {
+			$GLOBALS['yotm_media_source_last_error'] = $old_rows;
+			yotm_media_source_push_guard_invocation( 'update', '' );
+			return false;
+		}
+		if ( $applicable && 1 === count( $old_rows ) && $old_rows[0]['value'] === $meta_value ) {
 			yotm_media_source_push_guard_invocation( 'update', '' );
 			return $check;
 		}
 	}
 
-	return yotm_media_source_guard_filter( $check, 'update', $object_id, $meta_key, $meta_key, $meta_value, metadata_exists( 'post', $object_id, $meta_key ) );
+	return yotm_media_source_guard_filter( $check, 'update', $object_id, $meta_key, $meta_key, $meta_value, true );
 }
 
 /**
@@ -1406,8 +1477,19 @@ function yotm_guard_update_post_metadata( $check, $object_id, $meta_key, $meta_v
  * @return mixed
  */
 function yotm_media_source_guard_filter( $check, $channel, $object_id, $original_key, $effective_key, $meta_value, $had_meta ) {
-	$frame_id = '';
-	if ( null !== $check || ! yotm_media_source_guard_enabled() || ! wp_attachment_is_image( $object_id ) ) {
+	$frame_id      = '';
+	$authoritative = array( '_wp_attached_file', '_wp_attachment_metadata', '_wp_attachment_backup_sizes' );
+	if ( null !== $check || ! yotm_media_source_guard_enabled() || ( ! in_array( $original_key, $authoritative, true ) && ! in_array( $effective_key, $authoritative, true ) ) ) {
+		yotm_media_source_push_guard_invocation( $channel, $frame_id );
+		return $check;
+	}
+	$applicable = yotm_media_reference_is_image_attachment( $object_id );
+	if ( is_wp_error( $applicable ) ) {
+		$GLOBALS['yotm_media_source_last_error'] = $applicable;
+		yotm_media_source_push_guard_invocation( $channel, $frame_id );
+		return false;
+	}
+	if ( ! $applicable ) {
 		yotm_media_source_push_guard_invocation( $channel, $frame_id );
 		return $check;
 	}
@@ -1490,7 +1572,13 @@ function yotm_guard_delete_post_metadata( $check, $object_id, $meta_key, $meta_v
 		yotm_media_source_push_guard_invocation( 'delete', $frame_id );
 		return false;
 	}
-	if ( ! wp_attachment_is_image( $object_id ) ) {
+	$applicable = yotm_media_reference_is_image_attachment( $object_id );
+	if ( is_wp_error( $applicable ) ) {
+		$GLOBALS['yotm_media_source_last_error'] = $applicable;
+		yotm_media_source_push_guard_invocation( 'delete', $frame_id );
+		return false;
+	}
+	if ( ! $applicable ) {
 		yotm_media_source_push_guard_invocation( 'delete', $frame_id );
 		return $check;
 	}
@@ -1577,7 +1665,17 @@ function yotm_guard_delete_post_metadata_by_mid( $check, $meta_id ) {
 		yotm_media_source_push_guard_invocation( 'delete_by_mid', $frame_id );
 		return false;
 	}
-	if ( ! wp_attachment_is_image( (int) $meta['post_id'] ) || ! in_array( $meta['meta_key'], array( '_wp_attached_file', '_wp_attachment_metadata', '_wp_attachment_backup_sizes' ), true ) ) {
+	if ( ! in_array( $meta['meta_key'], array( '_wp_attached_file', '_wp_attachment_metadata', '_wp_attachment_backup_sizes' ), true ) ) {
+		yotm_media_source_push_guard_invocation( 'delete_by_mid', $frame_id );
+		return $check;
+	}
+	$applicable = yotm_media_reference_is_image_attachment( (int) $meta['post_id'] );
+	if ( is_wp_error( $applicable ) ) {
+		$GLOBALS['yotm_media_source_last_error'] = $applicable;
+		yotm_media_source_push_guard_invocation( 'delete_by_mid', $frame_id );
+		return false;
+	}
+	if ( ! $applicable ) {
 		yotm_media_source_push_guard_invocation( 'delete_by_mid', $frame_id );
 		return $check;
 	}
@@ -1646,10 +1744,6 @@ function yotm_guard_update_post_metadata_by_mid( $check, $meta_id, $meta_value, 
 		yotm_media_source_push_guard_invocation( 'by_mid', $frame_id );
 		return false;
 	}
-	if ( ! wp_attachment_is_image( (int) $meta['post_id'] ) ) {
-		yotm_media_source_push_guard_invocation( 'by_mid', $frame_id );
-		return $check;
-	}
 	if ( false === $meta_key ) {
 		$effective_key = (string) $meta['meta_key'];
 	} elseif ( is_string( $meta_key ) ) {
@@ -1661,6 +1755,16 @@ function yotm_guard_update_post_metadata_by_mid( $check, $meta_id, $meta_value, 
 
 	$protected_keys = array( '_wp_attached_file', '_wp_attachment_metadata', '_wp_attachment_backup_sizes' );
 	if ( ! in_array( (string) $meta['meta_key'], $protected_keys, true ) && ! in_array( $effective_key, $protected_keys, true ) ) {
+		yotm_media_source_push_guard_invocation( 'by_mid', $frame_id );
+		return $check;
+	}
+	$applicable = yotm_media_reference_is_image_attachment( (int) $meta['post_id'] );
+	if ( is_wp_error( $applicable ) ) {
+		$GLOBALS['yotm_media_source_last_error'] = $applicable;
+		yotm_media_source_push_guard_invocation( 'by_mid', $frame_id );
+		return false;
+	}
+	if ( ! $applicable ) {
 		yotm_media_source_push_guard_invocation( 'by_mid', $frame_id );
 		return $check;
 	}
@@ -1746,13 +1850,15 @@ function yotm_media_source_complete_meta_guard( $event, $meta_id, $object_id, $m
 		if ( 'delete' === $event && ! in_array( $frame['channel'], array( 'delete', 'delete_by_mid' ), true ) ) {
 			continue;
 		}
-		if ( (int) $frame['attachment_id'] !== (int) $object_id || $frame['effective_key'] !== (string) $meta_key ) {
+		$frame_key = 'delete' === $event ? $frame['original_key'] : $frame['effective_key'];
+		if ( (int) $frame['attachment_id'] !== (int) $object_id || $frame_key !== (string) $meta_key ) {
 			continue;
 		}
 		if ( in_array( $frame['channel'], array( 'by_mid', 'delete_by_mid' ), true ) && (int) $frame['meta_id'] !== (int) $meta_id ) {
 			continue;
 		}
 
+		$GLOBALS['yotm_media_source_frames'][ $index ]['completion_seen'] = true;
 		$synced = yotm_media_source_sync_attachment( $object_id );
 		if ( is_wp_error( $synced ) ) {
 			$GLOBALS['yotm_media_source_last_error'] = $synced;
@@ -1813,7 +1919,7 @@ function yotm_media_source_complete_updated_meta_guard( $meta_id, $object_id, $m
  */
 function yotm_media_source_resync_after_meta_delete( $meta_ids, $object_id, $meta_key, $meta_value ) {
 	unset( $meta_value );
-	if ( yotm_media_source_guard_enabled() && in_array( $meta_key, array( '_wp_attached_file', '_wp_attachment_metadata', '_wp_attachment_backup_sizes' ), true ) && wp_attachment_is_image( $object_id ) ) {
+	if ( yotm_media_source_guard_enabled() && in_array( $meta_key, array( '_wp_attached_file', '_wp_attachment_metadata', '_wp_attachment_backup_sizes' ), true ) ) {
 		$meta_id = ! empty( $meta_ids ) ? absint( reset( $meta_ids ) ) : 0;
 		yotm_media_source_complete_meta_guard( 'delete', $meta_id, $object_id, $meta_key );
 	}
@@ -1865,6 +1971,8 @@ function yotm_media_source_shutdown_cleanup() {
 				$unwritten_tokens[] = $frame['id'];
 			} elseif ( 'delete' === ( $frame['channel'] ?? '' ) && ! empty( $frame['id'] ) && yotm_media_source_reconcile_delete_frame( $frame ) ) {
 				$unwritten_tokens[] = $frame['id'];
+			} elseif ( 'update' === ( $frame['channel'] ?? '' ) && ! empty( $frame['id'] ) && yotm_media_source_reconcile_regular_update_frame( $frame ) ) {
+				$unwritten_tokens[] = $frame['id'];
 			}
 		}
 		if ( ! empty( $unwritten_tokens ) ) {
@@ -1914,6 +2022,9 @@ function yotm_media_source_shutdown_cleanup() {
  */
 function yotm_media_source_reconcile_by_mid_frame( $frame ) {
 	global $wpdb;
+	if ( ! empty( $frame['completion_seen'] ) ) {
+		return false;
+	}
 
 	$snapshot = $frame['raw_row_snapshot'] ?? array();
 	$meta_id  = absint( $snapshot['meta_id'] ?? 0 );
@@ -1957,6 +2068,9 @@ function yotm_media_source_reconcile_by_mid_frame( $frame ) {
  */
 function yotm_media_source_reconcile_delete_frame( $frame ) {
 	global $wpdb;
+	if ( ! empty( $frame['completion_seen'] ) ) {
+		return false;
+	}
 
 	$snapshot = is_array( $frame['raw_rows_snapshot'] ?? null ) ? $frame['raw_rows_snapshot'] : array();
 	if ( empty( $snapshot ) ) {
@@ -1998,6 +2112,51 @@ function yotm_media_source_reconcile_delete_frame( $frame ) {
 	}
 
 	$synced = yotm_media_source_sync_attachment( absint( $frame['attachment_id'] ?? 0 ) );
+	if ( is_wp_error( $synced ) ) {
+		$GLOBALS['yotm_media_source_last_error'] = $synced;
+		return false;
+	}
+
+	return true;
+}
+
+/**
+ * Reconcile a regular update which reached Core but emitted no completion action.
+ *
+ * @param array $frame Guard frame.
+ * @return bool Whether the exact dirty token may be cleared.
+ */
+function yotm_media_source_reconcile_regular_update_frame( $frame ) {
+	if ( ! empty( $frame['completion_seen'] ) ) {
+		return false;
+	}
+	$snapshot      = $frame['regular_raw_rows'] ?? null;
+	$attachment_id = absint( $frame['attachment_id'] ?? 0 );
+	$meta_key      = (string) ( $frame['original_key'] ?? '' );
+	if ( ! is_array( $snapshot ) || ! $attachment_id || '' === $meta_key ) {
+		return false;
+	}
+
+	$current = yotm_media_reference_raw_postmeta_rows( $attachment_id, $meta_key );
+	if ( is_wp_error( $current ) ) {
+		$GLOBALS['yotm_media_source_last_error'] = $current;
+		return false;
+	}
+	$normalize = static function ( $rows ) {
+		$result = array();
+		foreach ( $rows as $row ) {
+			$result[] = array(
+				'meta_id'   => absint( $row['meta_id'] ?? 0 ),
+				'raw_value' => (string) ( $row['raw_value'] ?? '' ),
+			);
+		}
+		return $result;
+	};
+	if ( $normalize( $snapshot ) === $normalize( $current ) ) {
+		return true;
+	}
+
+	$synced = yotm_media_source_sync_attachment( $attachment_id );
 	if ( is_wp_error( $synced ) ) {
 		$GLOBALS['yotm_media_source_last_error'] = $synced;
 		return false;
