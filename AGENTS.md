@@ -27,7 +27,37 @@ These instructions apply to the entire `thumbnail-manager` repository.
 - **Codex** owns repository discovery, implementation, tests, validation, commits, branch/PR maintenance, and correction of review findings.
 - **GitHub** is the durable record for commits, pull requests, CI, review results, and Controlled-Lane planning handoffs.
 
-Keep Human commands short. Equivalent natural-language commands such as `Chạy task này`, `Tiếp tục`, `Review`, and `Sửa tiếp` should be resolved from the current conversation and GitHub state rather than requiring the Human to restate known context.
+## Human command shorthand and routing
+
+Keep Human commands short. Equivalent natural-language commands such as `Chạy task này`, `Tiếp tục`, `Review`, and `Sửa tiếp` must be resolved from the current conversation and durable GitHub state rather than requiring the Human to restate known context.
+
+Commands may optionally include a target prefix. The prefix is a routing hint, not part of the task identifier or workflow status:
+
+- `Codex - Continue TM-AUD-0001` tells Codex to recover the newest applicable GitHub state for that task and perform the next Codex-owned action.
+- `ChatGPT - Review TM-AUD-0001` tells ChatGPT to recover the newest applicable durable handoff and route it to plan review, technical review, correction re-review, or Human decision as appropriate.
+- General short commands may use the same form, for example `ChatGPT - Add workflow shorthand rule` or `Codex - Fix the current review findings`.
+- `Human - ...` may be used when the next action is explicitly Human-owned, such as a merge, product decision, release action, or production action.
+
+When a task ID or PR/issue reference is supplied, do not ask the Human to repeat plan text, findings, SHAs, PR numbers, or other context that can be recovered safely from GitHub. This rule applies in fresh ChatGPT/Codex threads as well as continuing conversations.
+
+`Continue <TASK-ID>` and `Review <TASK-ID>` are canonical shorthand:
+
+- `Continue <TASK-ID>` means recover the latest durable task state and continue the next action owned by the receiving agent. For Codex this includes correcting a rejected plan, implementing an approved plan, correcting technical-review findings, or continuing other repository work already authorized by the current workflow state.
+- `Review <TASK-ID>` means ChatGPT recovers and reviews the newest applicable durable handoff rather than asking the Human which review stage applies.
+- If durable state is missing, contradictory, stale, or genuinely ambiguous, stop and report the specific missing/ambiguous state instead of guessing.
+
+At the end of a handoff/review response, include one concise copy-ready next-step hint whenever there is a clear next action:
+
+`Next: <Target> - <short command>`
+
+Examples:
+
+- `Next: Codex - Continue TM-AUD-0001`
+- `Next: ChatGPT - Review TM-AUD-0001`
+- `Next: Human - Merge PR #19`
+- `Next: Human - Decide TM-AUD-0008`
+
+`Next:` is Human UX only. It is not a workflow status, does not replace the durable GitHub handoff, and must not introduce a new state outside the status protocol below.
 
 ## Task brief
 
