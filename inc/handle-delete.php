@@ -94,6 +94,10 @@ function yotm_prune_delete_batch() {
 
 	$worker = yotm_job_acquire_worker( $job['id'], array( 'approved', 'deleting' ), array( 'delete' ) );
 	if ( is_wp_error( $worker ) ) {
+		if ( 'yotm_job_worker_busy' !== $worker->get_error_code() ) {
+			wp_send_json_error( array( 'msg' => $worker->get_error_message() ), 503 );
+		}
+
 		$data     = $worker->get_error_data();
 		$current  = is_array( $data ) && is_array( $data['job'] ?? null ) ? $data['job'] : $job;
 		$response = yotm_build_prune_delete_response( $current, 0, 0, true );
@@ -122,11 +126,11 @@ function yotm_prune_delete_batch() {
 	$base        = (string) ( $job['payload']['base'] ?? ( wp_get_upload_dir()['basedir'] ?? '' ) );
 
 	foreach ( $items as $item ) {
-		if ( ! yotm_job_refresh_worker( $worker ) || ! yotm_job_refresh_item_claim( $item ) ) {
+		$result = yotm_process_claimed_prune_item( $item, $job, $worker, $base );
+		if ( is_wp_error( $result ) ) {
 			break;
 		}
 
-		$result = yotm_delete_prune_item( $item['payload'], $base );
 		if ( ! empty( $result['deleted'] ) ) {
 			if ( yotm_job_finish_item( $item, 'done', '', (int) $result['bytes'] ) ) {
 				++$deleted_now;
@@ -281,6 +285,36 @@ function yotm_delete_file_and_count( $path ) {
 	$result = yotm_delete_file_with_result( $path );
 
 	return ! empty( $result['deleted'] ) ? (int) $result['bytes'] : 0;
+}
+
+/**
+ * Execute one claimed prune deletion behind worker and item ownership fences.
+ *
+ * The optional barrier is used by the cross-process smoke test to pause at the
+ * final pre-side-effect boundary while the production unit remains unchanged.
+ * Ownership is refreshed again after the barrier before deleting anything.
+ *
+ * @param array         $item Claimed item.
+ * @param array         $job Current job.
+ * @param array         $worker Worker ownership data.
+ * @param string        $uploads_base Uploads base path.
+ * @param callable|null $barrier Optional pre-delete barrier.
+ * @return array|WP_Error
+ */
+function yotm_process_claimed_prune_item( $item, $job, $worker, $uploads_base, $barrier = null ) {
+	if ( ! yotm_job_refresh_worker( $worker ) || ! yotm_job_refresh_item_claim( $item ) ) {
+		return new WP_Error( 'yotm_job_worker_stale', __( 'This job worker no longer owns the current batch.', 'thumbnail-manager' ) );
+	}
+
+	if ( is_callable( $barrier ) ) {
+		call_user_func( $barrier, $item, $job, $worker );
+	}
+
+	if ( ! yotm_job_refresh_worker( $worker ) || ! yotm_job_refresh_item_claim( $item ) ) {
+		return new WP_Error( 'yotm_job_worker_stale', __( 'This job worker no longer owns the current batch.', 'thumbnail-manager' ) );
+	}
+
+	return yotm_delete_prune_item( $item['payload'], $uploads_base );
 }
 
 /**

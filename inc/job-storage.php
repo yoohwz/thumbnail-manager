@@ -413,7 +413,7 @@ function yotm_job_worker_lock_name( $job_id ) {
  * Acquire a named MySQL lock without waiting.
  *
  * @param string $lock_name Lock name.
- * @return bool
+ * @return bool|WP_Error True when acquired, false for contention, or a persistence error.
  */
 function yotm_job_acquire_named_lock( $lock_name ) {
 	global $wpdb;
@@ -421,7 +421,18 @@ function yotm_job_acquire_named_lock( $lock_name ) {
 	$sql = $wpdb->prepare( 'SELECT GET_LOCK(%s, 0)', sanitize_text_field( $lock_name ) );
 
 	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared -- Advisory locks are connection state and cannot use the object cache.
-	return 1 === (int) $wpdb->get_var( $sql );
+	$result      = $wpdb->get_var( $sql );
+	$query_error = yotm_job_last_database_error();
+
+	if ( is_wp_error( $query_error ) ) {
+		return $query_error;
+	}
+
+	if ( null === $result || ! in_array( (string) $result, array( '0', '1' ), true ) ) {
+		return yotm_job_storage_error();
+	}
+
+	return '1' === (string) $result;
 }
 
 /**
@@ -485,7 +496,20 @@ function yotm_job_acquire_worker( $job_id, $statuses, $phases = array() ) {
 	$phases    = array_values( array_filter( array_map( 'sanitize_key', (array) $phases ) ) );
 	$lock_name = yotm_job_worker_lock_name( $job_id );
 
-	if ( empty( $statuses ) || ! yotm_job_acquire_named_lock( $lock_name ) ) {
+	if ( empty( $statuses ) ) {
+		return new WP_Error(
+			'yotm_job_worker_busy',
+			__( 'Another request is processing this job. Retrying shortly.', 'thumbnail-manager' ),
+			array( 'job' => yotm_job_get_by_id( $job_id ) )
+		);
+	}
+
+	$lock_acquired = yotm_job_acquire_named_lock( $lock_name );
+	if ( is_wp_error( $lock_acquired ) ) {
+		return $lock_acquired;
+	}
+
+	if ( ! $lock_acquired ) {
 		return new WP_Error(
 			'yotm_job_worker_busy',
 			__( 'Another request is processing this job. Retrying shortly.', 'thumbnail-manager' ),
@@ -524,7 +548,14 @@ function yotm_job_acquire_worker( $job_id, $statuses, $phases = array() ) {
 
 	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Atomic worker ownership requires an uncached conditional update; prepared above.
 	$updated = $wpdb->query( $sql );
-	if ( 1 !== $updated ) {
+	if ( false === $updated ) {
+		$query_error = yotm_job_last_database_error();
+		yotm_job_release_named_lock( $lock_name );
+
+		return is_wp_error( $query_error ) ? $query_error : yotm_job_storage_error();
+	}
+
+	if ( 0 === $updated ) {
 		yotm_job_release_named_lock( $lock_name );
 
 		return new WP_Error(
@@ -645,7 +676,7 @@ function yotm_job_release_worker( $worker ) {
  * Expire an overdue active job only when no request still owns its liveness lock.
  *
  * @param array $job Job row.
- * @return array
+ * @return array|WP_Error
  */
 function yotm_job_expire_if_inactive( $job ) {
 	if (
@@ -657,7 +688,12 @@ function yotm_job_expire_if_inactive( $job ) {
 	}
 
 	$lock_name = yotm_job_worker_lock_name( $job['id'] );
-	if ( ! yotm_job_acquire_named_lock( $lock_name ) ) {
+	$lock      = yotm_job_acquire_named_lock( $lock_name );
+	if ( is_wp_error( $lock ) ) {
+		return $lock;
+	}
+
+	if ( ! $lock ) {
 		return $job;
 	}
 
@@ -718,6 +754,10 @@ function yotm_job_get( $token ) {
 	}
 
 	$job = yotm_job_expire_if_inactive( $job );
+	if ( is_wp_error( $job ) ) {
+		return $job;
+	}
+
 	if ( 'expired' === ( $job['status'] ?? '' ) ) {
 		return new WP_Error( 'yotm_job_expired', __( 'This job has expired. Please start a new scan.', 'thumbnail-manager' ) );
 	}
@@ -1795,7 +1835,10 @@ function yotm_cleanup_expired_jobs() {
 	foreach ( $active_ids as $job_id ) {
 		$job = yotm_job_get_by_id( (int) $job_id );
 		if ( $job ) {
-			yotm_job_expire_if_inactive( $job );
+			$expired = yotm_job_expire_if_inactive( $job );
+			if ( is_wp_error( $expired ) ) {
+				return $expired;
+			}
 		}
 	}
 
@@ -1815,7 +1858,12 @@ function yotm_cleanup_expired_jobs() {
 
 	foreach ( $terminal_ids as $job_id ) {
 		$lock_name = yotm_job_worker_lock_name( (int) $job_id );
-		if ( ! yotm_job_acquire_named_lock( $lock_name ) ) {
+		$lock      = yotm_job_acquire_named_lock( $lock_name );
+		if ( is_wp_error( $lock ) ) {
+			return $lock;
+		}
+
+		if ( ! $lock ) {
 			continue;
 		}
 
@@ -1919,6 +1967,9 @@ function yotm_job_get_recent_for_current_user( $limit = 10 ) {
 		$job = yotm_job_normalize_row( $row );
 		if ( $job ) {
 			$job = yotm_job_expire_if_inactive( $job );
+		}
+		if ( is_wp_error( $job ) ) {
+			return $job;
 		}
 		if ( $job ) {
 			$out[] = yotm_job_public_data( $job );

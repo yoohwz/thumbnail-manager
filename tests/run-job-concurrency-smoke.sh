@@ -36,7 +36,9 @@ for _ in {1..100}; do
 done
 
 grep -q '"holder_ready":1' "$state_file"
+kill -0 "$holder_pid"
 "${wp_command[@]}" eval-file "$script_dir/job-concurrency-smoke.php" contend "$state_file"
+kill -0 "$holder_pid"
 kill -KILL "$holder_pid"
 wait "$holder_pid" 2>/dev/null || true
 holder_pid=""

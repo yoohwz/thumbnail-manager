@@ -109,6 +109,10 @@ function yotm_recommend_batch() {
 
 	$worker = yotm_job_acquire_worker( $job['id'], array( 'scanning' ), array( 'metadata', 'content' ) );
 	if ( is_wp_error( $worker ) ) {
+		if ( 'yotm_job_worker_busy' !== $worker->get_error_code() ) {
+			wp_send_json_error( array( 'msg' => $worker->get_error_message() ), 503 );
+		}
+
 		$data                       = $worker->get_error_data();
 		$current                    = is_array( $data ) && is_array( $data['job'] ?? null ) ? $data['job'] : $job;
 		$response                   = yotm_build_recommendation_progress_response( $current, ( $current['status'] ?? '' ) === 'completed' );

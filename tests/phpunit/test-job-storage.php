@@ -34,6 +34,8 @@ class YOTM_Job_Storage_Test extends WP_UnitTestCase {
 	}
 
 	public function tearDown(): void {
+		remove_filter( 'query', array( $this, 'fail_named_lock_query' ) );
+		remove_filter( 'query', array( $this, 'fail_worker_cas_query' ) );
 		$this->clear_jobs();
 		foreach ( array_unique( $this->files ) as $file ) {
 			if ( file_exists( $file ) ) {
@@ -136,6 +138,66 @@ class YOTM_Job_Storage_Test extends WP_UnitTestCase {
 		$this->assertSame( 2, yotm_job_get_by_id( $job['id'] )['processed'] );
 
 		yotm_job_release_worker( $second_worker );
+	}
+
+	public function test_failed_named_lock_query_is_not_reported_as_worker_contention() {
+		global $wpdb;
+
+		$job = yotm_job_create(
+			'recommendation',
+			array(),
+			array(
+				'status'    => 'scanning',
+				'phase'     => 'metadata',
+				'exclusive' => false,
+			)
+		);
+		$this->assertIsArray( $job );
+
+		$suppressing = $wpdb->suppress_errors();
+		add_filter( 'query', array( $this, 'fail_named_lock_query' ) );
+
+		try {
+			$worker = yotm_job_acquire_worker( $job['id'], array( 'scanning' ), array( 'metadata' ) );
+			$this->assertWPError( $worker );
+			$this->assertSame( 'yotm_job_storage_unavailable', $worker->get_error_code() );
+			$this->assertNotSame( 'yotm_job_worker_busy', $worker->get_error_code() );
+		} finally {
+			remove_filter( 'query', array( $this, 'fail_named_lock_query' ) );
+			$wpdb->suppress_errors( $suppressing );
+		}
+	}
+
+	public function test_failed_worker_compare_and_swap_is_not_reported_as_worker_contention() {
+		global $wpdb;
+
+		$job = yotm_job_create(
+			'recommendation',
+			array(),
+			array(
+				'status'    => 'scanning',
+				'phase'     => 'metadata',
+				'exclusive' => false,
+			)
+		);
+		$this->assertIsArray( $job );
+
+		$suppressing = $wpdb->suppress_errors();
+		add_filter( 'query', array( $this, 'fail_worker_cas_query' ) );
+
+		try {
+			$worker = yotm_job_acquire_worker( $job['id'], array( 'scanning' ), array( 'metadata' ) );
+			$this->assertWPError( $worker );
+			$this->assertSame( 'yotm_job_storage_unavailable', $worker->get_error_code() );
+			$this->assertNotSame( 'yotm_job_worker_busy', $worker->get_error_code() );
+		} finally {
+			remove_filter( 'query', array( $this, 'fail_worker_cas_query' ) );
+			$wpdb->suppress_errors( $suppressing );
+		}
+
+		$worker = yotm_job_acquire_worker( $job['id'], array( 'scanning' ), array( 'metadata' ) );
+		$this->assertIsArray( $worker, 'The failed CAS must release its named lock.' );
+		yotm_job_release_worker( $worker );
 	}
 
 	public function test_item_claims_are_owned_and_counters_are_derived_once() {
@@ -580,5 +642,24 @@ class YOTM_Job_Storage_Test extends WP_UnitTestCase {
 		$tables = yotm_job_table_names();
 		$wpdb->query( "DELETE FROM {$tables['items']}" );
 		$wpdb->query( "DELETE FROM {$tables['jobs']}" );
+	}
+
+	public function fail_named_lock_query( $query ) {
+		if ( preg_match( '/^SELECT GET_LOCK\(/i', ltrim( $query ) ) ) {
+			return 'SELECT * FROM yotm_forced_missing_table';
+		}
+
+		return $query;
+	}
+
+	public function fail_worker_cas_query( $query ) {
+		$jobs_table = yotm_job_table_names()['jobs'];
+		$pattern    = '/^UPDATE\s+' . preg_quote( $jobs_table, '/' ) . '\s+SET worker_token\s*=\s*/i';
+
+		if ( preg_match( $pattern, ltrim( $query ) ) ) {
+			return 'UPDATE yotm_forced_missing_table SET worker_token = \'failed\'';
+		}
+
+		return $query;
 	}
 }
