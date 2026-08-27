@@ -16,11 +16,13 @@ if ( ! defined( 'YOTM_MEDIA_SOURCE_FANOUT_LIMIT' ) ) {
 add_filter( 'add_post_metadata', 'yotm_guard_add_post_metadata', PHP_INT_MIN, 5 );
 add_filter( 'update_post_metadata', 'yotm_guard_update_post_metadata', PHP_INT_MIN, 5 );
 add_filter( 'update_post_metadata_by_mid', 'yotm_guard_update_post_metadata_by_mid', PHP_INT_MIN, 4 );
-add_action( 'added_post_meta', 'yotm_media_source_complete_meta_guard', PHP_INT_MIN, 4 );
-add_action( 'updated_post_meta', 'yotm_media_source_complete_meta_guard', PHP_INT_MIN, 4 );
-add_action( 'updated_postmeta', 'yotm_media_source_complete_legacy_meta_guard', PHP_INT_MIN, 4 );
+add_filter( 'add_post_metadata', 'yotm_finalize_add_post_metadata_guard', PHP_INT_MAX, 5 );
+add_filter( 'update_post_metadata', 'yotm_finalize_update_post_metadata_guard', PHP_INT_MAX, 5 );
+add_filter( 'update_post_metadata_by_mid', 'yotm_finalize_update_post_metadata_by_mid_guard', PHP_INT_MAX, 4 );
+add_action( 'added_post_meta', 'yotm_media_source_complete_added_meta_guard', PHP_INT_MIN, 4 );
+add_action( 'updated_post_meta', 'yotm_media_source_complete_updated_meta_guard', PHP_INT_MIN, 4 );
 add_action( 'deleted_post_meta', 'yotm_media_source_resync_after_meta_delete', 10, 4 );
-add_action( 'delete_attachment', 'yotm_media_source_delete_attachment_rows', 10, 1 );
+add_action( 'deleted_post', 'yotm_media_source_delete_attachment_rows', 10, 2 );
 
 /**
  * Return whether guarded source persistence is installed for this site.
@@ -252,16 +254,29 @@ function yotm_media_source_replace_attachment( $attachment_id, $aliases ) {
 /**
  * Synchronize one image attachment from live source metadata.
  *
- * @param int $attachment_id Attachment ID.
+ * @param int           $attachment_id Attachment ID.
+ * @param callable|null $barrier Optional test-only barrier after the live read.
  * @return true|WP_Error
  */
-function yotm_media_source_sync_attachment( $attachment_id ) {
-	$aliases = yotm_media_source_aliases( $attachment_id );
-	if ( is_wp_error( $aliases ) ) {
-		return $aliases;
+function yotm_media_source_sync_attachment( $attachment_id, $barrier = null ) {
+	$attachment_lock = yotm_media_attachment_lock_acquire( $attachment_id );
+	if ( is_wp_error( $attachment_lock ) ) {
+		return $attachment_lock;
 	}
 
-	return yotm_media_source_replace_attachment( $attachment_id, $aliases );
+	try {
+		$aliases = yotm_media_source_aliases( $attachment_id );
+		if ( is_wp_error( $aliases ) ) {
+			return $aliases;
+		}
+		if ( is_callable( $barrier ) ) {
+			call_user_func( $barrier, $attachment_id, $aliases, $attachment_lock );
+		}
+
+		return yotm_media_source_replace_attachment( $attachment_id, $aliases );
+	} finally {
+		yotm_media_attachment_lock_release( $attachment_lock );
+	}
 }
 
 /**
@@ -292,6 +307,89 @@ function yotm_media_path_lock_name( $canonical_path ) {
 	$scope    = $database . '|' . $wpdb->prefix . '|' . get_current_blog_id() . '|' . hash( 'sha256', (string) $canonical_path );
 
 	return 'yotm_media_' . md5( $scope );
+}
+
+/**
+ * Return a site-scoped named lock for one attachment source state.
+ *
+ * Lock ordering is job worker, then attachment source state, then sorted media
+ * paths. Delete workers never acquire attachment locks while owning a path.
+ *
+ * @param int $attachment_id Attachment ID.
+ * @return string
+ */
+function yotm_media_attachment_lock_name( $attachment_id ) {
+	global $wpdb;
+
+	$database = defined( 'DB_NAME' ) ? DB_NAME : 'WordPress';
+	$scope    = $database . '|' . $wpdb->prefix . '|' . get_current_blog_id() . '|' . absint( $attachment_id );
+
+	return 'yotm_source_' . md5( $scope );
+}
+
+/**
+ * Acquire one re-entrant request-local attachment source-state lock.
+ *
+ * @param int $attachment_id Attachment ID.
+ * @return array|WP_Error
+ */
+function yotm_media_attachment_lock_acquire( $attachment_id ) {
+	$attachment_id = absint( $attachment_id );
+	if ( ! $attachment_id ) {
+		return new WP_Error( 'yotm_media_attachment_invalid', __( 'Attachment source state could not be locked.', 'thumbnail-manager' ) );
+	}
+
+	$name = yotm_media_attachment_lock_name( $attachment_id );
+	if ( ! isset( $GLOBALS['yotm_media_attachment_locks'] ) || ! is_array( $GLOBALS['yotm_media_attachment_locks'] ) ) {
+		$GLOBALS['yotm_media_attachment_locks'] = array();
+		register_shutdown_function( 'yotm_media_source_shutdown_cleanup' );
+	}
+
+	if ( isset( $GLOBALS['yotm_media_attachment_locks'][ $name ] ) ) {
+		++$GLOBALS['yotm_media_attachment_locks'][ $name ]['refs'];
+		return array(
+			'name'          => $name,
+			'attachment_id' => $attachment_id,
+		);
+	}
+
+	$acquired = yotm_job_acquire_named_lock( $name );
+	if ( is_wp_error( $acquired ) ) {
+		return new WP_Error( 'yotm_media_attachment_lock_failed', $acquired->get_error_message(), $acquired->get_error_data() );
+	}
+	if ( ! $acquired ) {
+		return new WP_Error( 'yotm_media_attachment_busy', __( 'This attachment source is being updated by another request. Retrying shortly.', 'thumbnail-manager' ) );
+	}
+
+	$GLOBALS['yotm_media_attachment_locks'][ $name ] = array(
+		'name'          => $name,
+		'attachment_id' => $attachment_id,
+		'refs'          => 1,
+	);
+
+	return array(
+		'name'          => $name,
+		'attachment_id' => $attachment_id,
+	);
+}
+
+/**
+ * Release one request-local attachment lock reference.
+ *
+ * @param array $handle Lock handle.
+ * @return void
+ */
+function yotm_media_attachment_lock_release( $handle ) {
+	$name = (string) ( $handle['name'] ?? '' );
+	if ( '' === $name || empty( $GLOBALS['yotm_media_attachment_locks'][ $name ] ) ) {
+		return;
+	}
+
+	--$GLOBALS['yotm_media_attachment_locks'][ $name ]['refs'];
+	if ( $GLOBALS['yotm_media_attachment_locks'][ $name ]['refs'] <= 0 ) {
+		yotm_job_release_named_lock( $name );
+		unset( $GLOBALS['yotm_media_attachment_locks'][ $name ] );
+	}
 }
 
 /**
@@ -429,20 +527,27 @@ function yotm_media_source_proposed_aliases( $attachment_id, $original_key, $eff
  * @param string $effective_key Effective key.
  * @param mixed  $meta_value Proposed value.
  * @param int    $meta_id Optional meta ID.
- * @return true|WP_Error
+ * @param bool   $had_meta Whether the regular update key existed at guard time.
+ * @return string|WP_Error Frame ID, empty string for an unrelated key, or error.
  */
-function yotm_media_source_begin_guard( $channel, $attachment_id, $original_key, $effective_key, $meta_value, $meta_id = 0 ) {
+function yotm_media_source_begin_guard( $channel, $attachment_id, $original_key, $effective_key, $meta_value, $meta_id = 0, $had_meta = true ) {
 	$authoritative = array( '_wp_attached_file', '_wp_attachment_metadata' );
 	if ( ! in_array( $original_key, $authoritative, true ) && ! in_array( $effective_key, $authoritative, true ) ) {
-		return true;
+		return '';
 	}
 
+	$attachment_handle = yotm_media_attachment_lock_acquire( $attachment_id );
+	if ( is_wp_error( $attachment_handle ) ) {
+		return $attachment_handle;
+	}
 	$aliases = yotm_media_source_proposed_aliases( $attachment_id, $original_key, $effective_key, $meta_value );
 	if ( is_wp_error( $aliases ) ) {
+		yotm_media_attachment_lock_release( $attachment_handle );
 		return $aliases;
 	}
 	$handles = yotm_media_path_lock_aliases( $aliases );
 	if ( is_wp_error( $handles ) ) {
+		yotm_media_attachment_lock_release( $attachment_handle );
 		return $handles;
 	}
 
@@ -451,23 +556,93 @@ function yotm_media_source_begin_guard( $channel, $attachment_id, $original_key,
 		foreach ( array_reverse( $handles ) as $handle ) {
 			yotm_media_path_lock_release( $handle );
 		}
+		yotm_media_attachment_lock_release( $attachment_handle );
 		return $upserted;
 	}
 
 	if ( ! isset( $GLOBALS['yotm_media_source_frames'] ) || ! is_array( $GLOBALS['yotm_media_source_frames'] ) ) {
 		$GLOBALS['yotm_media_source_frames'] = array();
 	}
+	$frame_id           = wp_generate_uuid4();
+	$fallback_parent_id = '';
+	if ( 'add' === $channel ) {
+		for ( $index = count( $GLOBALS['yotm_media_source_frames'] ) - 1; $index >= 0; --$index ) {
+			$parent = $GLOBALS['yotm_media_source_frames'][ $index ];
+			if (
+				'update' === $parent['channel']
+				&& ! empty( $parent['ready'] )
+				&& empty( $parent['had_meta'] )
+				&& (int) $parent['attachment_id'] === (int) $attachment_id
+				&& $parent['effective_key'] === (string) $effective_key
+			) {
+				$fallback_parent_id = $parent['id'];
+				break;
+			}
+		}
+	}
 	$GLOBALS['yotm_media_source_frames'][] = array(
-		'id'            => wp_generate_uuid4(),
-		'channel'       => sanitize_key( $channel ),
-		'meta_id'       => absint( $meta_id ),
-		'attachment_id' => absint( $attachment_id ),
-		'original_key'  => (string) $original_key,
-		'effective_key' => (string) $effective_key,
-		'handles'       => $handles,
+		'id'                 => $frame_id,
+		'channel'            => sanitize_key( $channel ),
+		'meta_id'            => absint( $meta_id ),
+		'attachment_id'      => absint( $attachment_id ),
+		'original_key'       => (string) $original_key,
+		'effective_key'      => (string) $effective_key,
+		'handles'            => $handles,
+		'attachment_handle'  => $attachment_handle,
+		'had_meta'           => (bool) $had_meta,
+		'ready'              => false,
+		'fallback_parent_id' => $fallback_parent_id,
 	);
 
-	return true;
+	return $frame_id;
+}
+
+/**
+ * Track one filter invocation so the tail callback marks the exact frame.
+ *
+ * @param string $channel Mutation channel.
+ * @param string $frame_id Optional guarded frame ID.
+ * @return void
+ */
+function yotm_media_source_push_guard_invocation( $channel, $frame_id ) {
+	$channel = sanitize_key( $channel );
+	if ( ! isset( $GLOBALS['yotm_media_source_invocations'] ) || ! is_array( $GLOBALS['yotm_media_source_invocations'] ) ) {
+		$GLOBALS['yotm_media_source_invocations'] = array();
+	}
+	if ( ! isset( $GLOBALS['yotm_media_source_invocations'][ $channel ] ) ) {
+		$GLOBALS['yotm_media_source_invocations'][ $channel ] = array();
+	}
+	$GLOBALS['yotm_media_source_invocations'][ $channel ][] = (string) $frame_id;
+}
+
+/**
+ * Mark the exact frame that reached the end of its Core pre-write filter.
+ *
+ * @param mixed  $check Final short-circuit value seen by this tail callback.
+ * @param string $channel Mutation channel.
+ * @return mixed
+ */
+function yotm_media_source_finalize_guard_filter( $check, $channel ) {
+	$channel  = sanitize_key( $channel );
+	$stack    = $GLOBALS['yotm_media_source_invocations'][ $channel ] ?? array();
+	$frame_id = ! empty( $stack ) ? array_pop( $stack ) : '';
+	if ( empty( $stack ) ) {
+		unset( $GLOBALS['yotm_media_source_invocations'][ $channel ] );
+	} else {
+		$GLOBALS['yotm_media_source_invocations'][ $channel ] = $stack;
+	}
+
+	if ( '' !== $frame_id && ! empty( $GLOBALS['yotm_media_source_frames'] ) ) {
+		foreach ( $GLOBALS['yotm_media_source_frames'] as &$frame ) {
+			if ( $frame['id'] === $frame_id ) {
+				$frame['ready'] = null === $check;
+				break;
+			}
+		}
+		unset( $frame );
+	}
+
+	return $check;
 }
 
 /**
@@ -482,7 +657,7 @@ function yotm_media_source_begin_guard( $channel, $attachment_id, $original_key,
  */
 function yotm_guard_add_post_metadata( $check, $object_id, $meta_key, $meta_value, $unique ) {
 	unset( $unique );
-	return yotm_media_source_guard_filter( $check, 'add', $object_id, '', $meta_key, $meta_value );
+	return yotm_media_source_guard_filter( $check, 'add', $object_id, '', $meta_key, $meta_value, true );
 }
 
 /**
@@ -497,7 +672,7 @@ function yotm_guard_add_post_metadata( $check, $object_id, $meta_key, $meta_valu
  */
 function yotm_guard_update_post_metadata( $check, $object_id, $meta_key, $meta_value, $prev_value ) {
 	unset( $prev_value );
-	return yotm_media_source_guard_filter( $check, 'update', $object_id, $meta_key, $meta_key, $meta_value );
+	return yotm_media_source_guard_filter( $check, 'update', $object_id, $meta_key, $meta_key, $meta_value, metadata_exists( 'post', $object_id, $meta_key ) );
 }
 
 /**
@@ -509,18 +684,68 @@ function yotm_guard_update_post_metadata( $check, $object_id, $meta_key, $meta_v
  * @param string $original_key Original key.
  * @param string $effective_key Effective key.
  * @param mixed  $meta_value Proposed value.
+ * @param bool   $had_meta Whether the regular update key existed at guard time.
  * @return mixed
  */
-function yotm_media_source_guard_filter( $check, $channel, $object_id, $original_key, $effective_key, $meta_value ) {
+function yotm_media_source_guard_filter( $check, $channel, $object_id, $original_key, $effective_key, $meta_value, $had_meta ) {
+	$frame_id = '';
 	if ( null !== $check || ! yotm_media_source_guard_enabled() || ! wp_attachment_is_image( $object_id ) ) {
+		yotm_media_source_push_guard_invocation( $channel, $frame_id );
 		return $check;
 	}
-	$guarded = yotm_media_source_begin_guard( $channel, $object_id, $original_key, $effective_key, $meta_value );
+	$guarded = yotm_media_source_begin_guard( $channel, $object_id, $original_key, $effective_key, $meta_value, 0, $had_meta );
 	if ( is_wp_error( $guarded ) ) {
 		$GLOBALS['yotm_media_source_last_error'] = $guarded;
+		yotm_media_source_push_guard_invocation( $channel, $frame_id );
 		return false;
 	}
+	$frame_id = $guarded;
+	yotm_media_source_push_guard_invocation( $channel, $frame_id );
 	return null;
+}
+
+/**
+ * Tail callback for add_post_metadata.
+ *
+ * @param mixed  $check Short-circuit value.
+ * @param int    $object_id Post ID.
+ * @param string $meta_key Meta key.
+ * @param mixed  $meta_value Proposed value.
+ * @param bool   $unique Whether the key is unique.
+ * @return mixed
+ */
+function yotm_finalize_add_post_metadata_guard( $check, $object_id, $meta_key, $meta_value, $unique ) {
+	unset( $object_id, $meta_key, $meta_value, $unique );
+	return yotm_media_source_finalize_guard_filter( $check, 'add' );
+}
+
+/**
+ * Tail callback for update_post_metadata.
+ *
+ * @param mixed  $check Short-circuit value.
+ * @param int    $object_id Post ID.
+ * @param string $meta_key Meta key.
+ * @param mixed  $meta_value Proposed value.
+ * @param mixed  $prev_value Previous value constraint.
+ * @return mixed
+ */
+function yotm_finalize_update_post_metadata_guard( $check, $object_id, $meta_key, $meta_value, $prev_value ) {
+	unset( $object_id, $meta_key, $meta_value, $prev_value );
+	return yotm_media_source_finalize_guard_filter( $check, 'update' );
+}
+
+/**
+ * Tail callback for update_post_metadata_by_mid.
+ *
+ * @param mixed        $check Short-circuit value.
+ * @param int          $meta_id Meta row ID.
+ * @param mixed        $meta_value Proposed value.
+ * @param string|false $meta_key Optional replacement key.
+ * @return mixed
+ */
+function yotm_finalize_update_post_metadata_by_mid_guard( $check, $meta_id, $meta_value, $meta_key ) {
+	unset( $meta_id, $meta_value, $meta_key );
+	return yotm_media_source_finalize_guard_filter( $check, 'by_mid' );
 }
 
 /**
@@ -533,15 +758,19 @@ function yotm_media_source_guard_filter( $check, $channel, $object_id, $original
  * @return mixed
  */
 function yotm_guard_update_post_metadata_by_mid( $check, $meta_id, $meta_value, $meta_key ) {
+	$frame_id = '';
 	if ( null !== $check || ! yotm_media_source_guard_enabled() ) {
+		yotm_media_source_push_guard_invocation( 'by_mid', $frame_id );
 		return $check;
 	}
 
 	$meta = get_metadata_by_mid( 'post', $meta_id );
 	if ( ! $meta || empty( $meta->post_id ) || ! isset( $meta->meta_key ) ) {
+		yotm_media_source_push_guard_invocation( 'by_mid', $frame_id );
 		return false;
 	}
 	if ( ! wp_attachment_is_image( (int) $meta->post_id ) ) {
+		yotm_media_source_push_guard_invocation( 'by_mid', $frame_id );
 		return $check;
 	}
 	if ( false === $meta_key ) {
@@ -549,37 +778,72 @@ function yotm_guard_update_post_metadata_by_mid( $check, $meta_id, $meta_value, 
 	} elseif ( is_string( $meta_key ) ) {
 		$effective_key = $meta_key;
 	} else {
+		yotm_media_source_push_guard_invocation( 'by_mid', $frame_id );
 		return false;
 	}
 
 	$guarded = yotm_media_source_begin_guard( 'by_mid', (int) $meta->post_id, (string) $meta->meta_key, $effective_key, $meta_value, $meta_id );
 	if ( is_wp_error( $guarded ) ) {
 		$GLOBALS['yotm_media_source_last_error'] = $guarded;
+		yotm_media_source_push_guard_invocation( 'by_mid', $frame_id );
 		return false;
 	}
+	$frame_id = $guarded;
+	yotm_media_source_push_guard_invocation( 'by_mid', $frame_id );
 	return null;
 }
 
 /**
- * Complete one metadata guard frame after Core writes successfully.
+ * Release one exact metadata guard frame without recomputing source state.
  *
+ * @param string $frame_id Frame ID.
+ * @return void
+ */
+function yotm_media_source_release_guard_frame( $frame_id ) {
+	if ( empty( $GLOBALS['yotm_media_source_frames'] ) ) {
+		return;
+	}
+	foreach ( $GLOBALS['yotm_media_source_frames'] as $index => $frame ) {
+		if ( $frame['id'] !== $frame_id ) {
+			continue;
+		}
+		foreach ( array_reverse( (array) $frame['handles'] ) as $handle ) {
+			yotm_media_path_lock_release( $handle );
+		}
+		yotm_media_attachment_lock_release( $frame['attachment_handle'] ?? array() );
+		array_splice( $GLOBALS['yotm_media_source_frames'], $index, 1 );
+		return;
+	}
+}
+
+/**
+ * Complete one exact metadata guard frame after Core writes successfully.
+ *
+ * @param string $event Modern Core action channel: add or update.
  * @param int    $meta_id Meta row ID.
  * @param int    $object_id Post ID.
  * @param string $meta_key Effective key.
- * @param mixed  $meta_value Stored value.
  */
-function yotm_media_source_complete_meta_guard( $meta_id, $object_id, $meta_key, $meta_value ) {
-	unset( $meta_value );
+function yotm_media_source_complete_meta_guard( $event, $meta_id, $object_id, $meta_key ) {
 	if ( empty( $GLOBALS['yotm_media_source_frames'] ) ) {
 		return;
 	}
 
 	for ( $index = count( $GLOBALS['yotm_media_source_frames'] ) - 1; $index >= 0; --$index ) {
 		$frame = $GLOBALS['yotm_media_source_frames'][ $index ];
+		if ( empty( $frame['ready'] ) ) {
+			continue;
+		}
+		if ( 'add' === $event && 'add' !== $frame['channel'] ) {
+			continue;
+		}
+		if ( 'update' === $event && ! in_array( $frame['channel'], array( 'update', 'by_mid' ), true ) ) {
+			continue;
+		}
 		if ( (int) $frame['attachment_id'] !== (int) $object_id || $frame['effective_key'] !== (string) $meta_key ) {
 			continue;
 		}
-		if ( $frame['meta_id'] && (int) $frame['meta_id'] !== (int) $meta_id ) {
+		if ( 'by_mid' === $frame['channel'] && (int) $frame['meta_id'] !== (int) $meta_id ) {
 			continue;
 		}
 
@@ -588,24 +852,40 @@ function yotm_media_source_complete_meta_guard( $meta_id, $object_id, $meta_key,
 			$GLOBALS['yotm_media_source_last_error'] = $synced;
 			return;
 		}
-		foreach ( array_reverse( $frame['handles'] ) as $handle ) {
-			yotm_media_path_lock_release( $handle );
+		$frame_id  = $frame['id'];
+		$parent_id = (string) ( $frame['fallback_parent_id'] ?? '' );
+		yotm_media_source_release_guard_frame( $frame_id );
+		if ( '' !== $parent_id ) {
+			yotm_media_source_release_guard_frame( $parent_id );
 		}
-		array_splice( $GLOBALS['yotm_media_source_frames'], $index, 1 );
 		return;
-	}
+	}//end for
 }
 
 /**
- * Keep legacy updated_postmeta completion idempotent.
+ * Modern added_post_meta completion wrapper.
  *
  * @param int    $meta_id Meta row ID.
  * @param int    $object_id Post ID.
- * @param string $meta_key Effective key.
- * @param mixed  $meta_value Stored value.
+ * @param string $meta_key Meta key.
+ * @param mixed  $meta_value Added value.
  */
-function yotm_media_source_complete_legacy_meta_guard( $meta_id, $object_id, $meta_key, $meta_value ) {
-	yotm_media_source_complete_meta_guard( $meta_id, $object_id, $meta_key, $meta_value );
+function yotm_media_source_complete_added_meta_guard( $meta_id, $object_id, $meta_key, $meta_value ) {
+	unset( $meta_value );
+	yotm_media_source_complete_meta_guard( 'add', $meta_id, $object_id, $meta_key );
+}
+
+/**
+ * Modern updated_post_meta completion wrapper.
+ *
+ * @param int    $meta_id Meta row ID.
+ * @param int    $object_id Post ID.
+ * @param string $meta_key Meta key.
+ * @param mixed  $meta_value Updated value.
+ */
+function yotm_media_source_complete_updated_meta_guard( $meta_id, $object_id, $meta_key, $meta_value ) {
+	unset( $meta_value );
+	yotm_media_source_complete_meta_guard( 'update', $meta_id, $object_id, $meta_key );
 }
 
 /**
@@ -626,11 +906,12 @@ function yotm_media_source_resync_after_meta_delete( $meta_ids, $object_id, $met
 /**
  * Remove source rows after attachment deletion.
  *
- * @param int $attachment_id Attachment ID.
+ * @param int          $attachment_id Attachment ID.
+ * @param WP_Post|null $post Deleted post object supplied by Core.
  */
-function yotm_media_source_delete_attachment_rows( $attachment_id ) {
+function yotm_media_source_delete_attachment_rows( $attachment_id, $post = null ) {
 	global $wpdb;
-	if ( yotm_media_source_guard_enabled() ) {
+	if ( yotm_media_source_guard_enabled() && $post instanceof WP_Post && 'attachment' === $post->post_type ) {
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Plugin-owned source-index rows.
 		$wpdb->delete( yotm_job_table_names()['sources'], array( 'attachment_id' => absint( $attachment_id ) ), array( '%d' ) );
 	}
@@ -643,14 +924,22 @@ function yotm_media_source_shutdown_cleanup() {
 			foreach ( array_reverse( (array) $frame['handles'] ) as $handle ) {
 				yotm_media_path_lock_release( $handle );
 			}
+			yotm_media_attachment_lock_release( $frame['attachment_handle'] ?? array() );
 		}
 		$GLOBALS['yotm_media_source_frames'] = array();
 	}
+	$GLOBALS['yotm_media_source_invocations'] = array();
 	if ( ! empty( $GLOBALS['yotm_media_path_locks'] ) ) {
 		foreach ( array_keys( $GLOBALS['yotm_media_path_locks'] ) as $name ) {
 			yotm_job_release_named_lock( $name );
 		}
 		$GLOBALS['yotm_media_path_locks'] = array();
+	}
+	if ( ! empty( $GLOBALS['yotm_media_attachment_locks'] ) ) {
+		foreach ( array_keys( $GLOBALS['yotm_media_attachment_locks'] ) as $name ) {
+			yotm_job_release_named_lock( $name );
+		}
+		$GLOBALS['yotm_media_attachment_locks'] = array();
 	}
 }
 

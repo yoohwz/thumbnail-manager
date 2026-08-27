@@ -25,6 +25,25 @@ cleanup() {
 trap cleanup EXIT
 
 "${wp_command[@]}" eval-file "$script_dir/source-lock-concurrency-smoke.php" setup "$state_file"
+"${wp_command[@]}" eval-file "$script_dir/source-lock-concurrency-smoke.php" hold_baseline "$state_file" >"$holder_log" 2>&1 &
+holder_pid=$!
+
+for _ in {1..100}; do
+  if grep -q '"baseline_ready":1' "$state_file"; then
+    break
+  fi
+  sleep 0.1
+done
+
+grep -q '"baseline_ready":1' "$state_file"
+kill -0 "$holder_pid"
+"${wp_command[@]}" eval-file "$script_dir/source-lock-concurrency-smoke.php" contend_baseline "$state_file"
+wait "$holder_pid"
+holder_pid=""
+"${wp_command[@]}" eval-file "$script_dir/source-lock-concurrency-smoke.php" promote_source "$state_file"
+"${wp_command[@]}" eval-file "$script_dir/source-lock-concurrency-smoke.php" baseline_after_promotion "$state_file"
+"${wp_command[@]}" eval-file "$script_dir/source-lock-concurrency-smoke.php" reset_source "$state_file"
+
 "${wp_command[@]}" eval-file "$script_dir/source-lock-concurrency-smoke.php" hold_delete "$state_file" >"$holder_log" 2>&1 &
 holder_pid=$!
 

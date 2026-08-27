@@ -225,8 +225,9 @@ function yotm_run_job_table_migration() {
  * Ensure persistent job storage is ready for the current site.
  *
  * The result is memoized for the current site and request. Automatic DDL is
- * allowed only for an absent/older marker when both tables are either present
- * or absent. Partial storage and current-marker data loss always fail closed.
+ * allowed only for an absent/older marker when all tables are either present
+ * or absent, or for a known two-table predecessor. Partial storage and
+ * current-marker data loss always fail closed.
  *
  * @return true|WP_Error
  */
@@ -245,7 +246,7 @@ function yotm_job_storage_ready() {
 	$presence       = yotm_job_table_presence();
 	$all_present    = $presence['jobs'] && $presence['items'] && $presence['sources'];
 	$all_absent     = ! $presence['jobs'] && ! $presence['items'] && ! $presence['sources'];
-	$predecessor    = YOTM_JOB_DB_PRE_SOURCE_VERSION === $stored_version
+	$predecessor    = in_array( $stored_version, array( '1.0.1', YOTM_JOB_DB_PRE_SOURCE_VERSION ), true )
 		&& $presence['jobs']
 		&& $presence['items']
 		&& ! $presence['sources'];

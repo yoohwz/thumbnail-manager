@@ -186,7 +186,10 @@ class YOTM_Job_Storage_Installation_Test extends WP_UnitTestCase {
 		$this->assertSame( 9, $this->count_presence_queries() );
 	}
 
-	public function test_two_table_predecessor_adds_source_table_without_losing_data() {
+	/**
+	 * @dataProvider two_table_predecessor_provider
+	 */
+	public function test_two_table_predecessor_adds_source_table_without_losing_data( $stored_version ) {
 		$job = yotm_job_create(
 			'prune',
 			array( 'proof' => 'two-table-predecessor' ),
@@ -196,14 +199,27 @@ class YOTM_Job_Storage_Installation_Test extends WP_UnitTestCase {
 			)
 		);
 		$this->assertIsArray( $job );
+		$this->assertTrue( yotm_job_add_item( $job['id'], 'two-table-item', array( 'proof' => $stored_version ), 'queued', 17 ) );
 		$this->drop_tables( array( 'sources' ) );
-		update_option( 'yotm_job_db_version', YOTM_JOB_DB_PRE_SOURCE_VERSION, false );
+		if ( '1.0.1' === $stored_version ) {
+			$this->drop_concurrency_columns();
+		}
+		update_option( 'yotm_job_db_version', $stored_version, false );
 		$this->reset_request_state();
 
 		$this->assertTrue( yotm_job_storage_ready() );
 		$this->assertTrue( yotm_job_tables_exist() );
 		$this->assertSame( 'two-table-predecessor', yotm_job_get_by_id( $job['id'] )['payload']['proof'] );
+		$this->assertSame( $stored_version, yotm_job_get_item_by_key( $job['id'], 'two-table-item' )['payload']['proof'] );
+		$this->assertSame( 17, yotm_job_get_item_by_key( $job['id'], 'two-table-item' )['bytes'] );
 		$this->assertSame( YOTM_JOB_DB_VERSION, get_option( 'yotm_job_db_version' ) );
+	}
+
+	public function two_table_predecessor_provider() {
+		return array(
+			'first persistent schema' => array( '1.0.1' ),
+			'pre-source schema'       => array( YOTM_JOB_DB_PRE_SOURCE_VERSION ),
+		);
 	}
 
 	public function test_failed_install_is_memoized_for_later_operations_in_same_request() {

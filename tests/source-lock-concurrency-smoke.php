@@ -189,6 +189,52 @@ if ( 'setup' === $smoke_role ) {
 
 $state = yotm_source_lock_smoke_state( $state_path );
 
+if ( 'hold_baseline' === $smoke_role ) {
+	$barrier = static function ( $attachment_id, $aliases, $attachment_lock ) use ( $state_path, $state ) {
+		unset( $attachment_id, $aliases, $attachment_lock );
+		$state['baseline_ready'] = 1;
+		yotm_source_lock_smoke_write( $state_path, $state );
+		sleep( 3 );
+	};
+	$result  = yotm_media_source_sync_attachment( $state['other_id'], $barrier );
+	yotm_source_lock_smoke_assert( true === $result, 'Held baseline could not complete after the contended mutation.' );
+	yotm_source_lock_smoke_assert( true === yotm_media_source_path_is_authoritative( $state['other'] ), 'Held baseline lost the original source.' );
+	yotm_source_lock_smoke_assert( false === yotm_media_source_path_is_authoritative( $state['candidate'] ), 'Held baseline installed the blocked candidate.' );
+	echo "S-first baseline completed without a stale replacement.\n";
+	return;
+}
+
+if ( 'contend_baseline' === $smoke_role ) {
+	$before = get_post_meta( $state['other_id'], '_wp_attached_file', true );
+	yotm_source_lock_smoke_assert( false === update_metadata_by_mid( 'post', $state['meta_id'], $state['relative_candidate'], false ), 'By-mid mutation bypassed the held attachment baseline lock.' );
+	yotm_source_lock_smoke_assert( isset( $GLOBALS['yotm_media_source_last_error'] ) && is_wp_error( $GLOBALS['yotm_media_source_last_error'] ), 'Contended baseline mutation did not report a guard error.' );
+	yotm_source_lock_smoke_assert( 'yotm_media_attachment_busy' === $GLOBALS['yotm_media_source_last_error']->get_error_code(), 'Contended baseline mutation reported the wrong lock error.' );
+	yotm_source_lock_smoke_assert( get_post_meta( $state['other_id'], '_wp_attached_file', true ) === $before, 'Contended baseline mutation changed the authoritative row.' );
+	echo "S-first contention: source mutation blocked by attachment lock.\n";
+	return;
+}
+
+if ( 'promote_source' === $smoke_role ) {
+	yotm_source_lock_smoke_assert( true === update_metadata_by_mid( 'post', $state['meta_id'], $state['relative_candidate'], false ), 'M-first source promotion failed.' );
+	yotm_source_lock_smoke_assert( true === yotm_media_source_path_is_authoritative( $state['candidate'] ), 'M-first source promotion was not indexed.' );
+	echo "M-first mutation committed and indexed.\n";
+	return;
+}
+
+if ( 'baseline_after_promotion' === $smoke_role ) {
+	yotm_source_lock_smoke_assert( true === yotm_media_source_sync_attachment( $state['other_id'] ), 'M-first follow-up baseline failed.' );
+	yotm_source_lock_smoke_assert( true === yotm_media_source_path_is_authoritative( $state['candidate'] ), 'M-first follow-up baseline removed the committed source.' );
+	echo "M-first baseline retained the committed source.\n";
+	return;
+}
+
+if ( 'reset_source' === $smoke_role ) {
+	yotm_source_lock_smoke_assert( true === update_metadata_by_mid( 'post', $state['meta_id'], $state['relative_other'], false ), 'Could not reset the source-lock fixture.' );
+	yotm_source_lock_smoke_assert( false === yotm_media_source_path_is_authoritative( $state['candidate'] ), 'Reset source still protects the candidate.' );
+	echo "Source-lock fixture reset.\n";
+	return;
+}
+
 if ( 'hold_delete' === $smoke_role ) {
 	global $wpdb;
 	$job    = yotm_job_get( $state['token'] );
