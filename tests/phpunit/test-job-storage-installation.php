@@ -244,33 +244,75 @@ class YOTM_Job_Storage_Installation_Test extends WP_UnitTestCase {
 		}
 	}
 
-	public function test_request_cache_is_scoped_by_table_prefix() {
+	public function test_multisite_storage_state_is_isolated_between_sites() {
 		global $wpdb;
 
-		$original_prefix  = $wpdb->prefix;
-		$alternate_prefix = $original_prefix . 'yotm_aud_';
-		$alternate_tables = array(
-			$alternate_prefix . 'yotm_jobs',
-			$alternate_prefix . 'yotm_job_items',
+		if ( ! is_multisite() ) {
+			$this->markTestSkipped( 'Requires WordPress Multisite.' );
+		}
+
+		$primary_blog_id = get_current_blog_id();
+		$primary_tables  = yotm_job_table_names();
+		$primary_failure = array(
+			'version'   => YOTM_JOB_DB_VERSION,
+			'failed_at' => 111,
 		);
+		$second_blog_id  = self::factory()->blog->create();
+
+		$this->assertNotWPError( $second_blog_id );
 
 		$this->reset_request_state();
 		$this->assertTrue( yotm_job_storage_ready() );
+		$this->assertSame( YOTM_JOB_DB_VERSION, get_option( 'yotm_job_db_version' ) );
+		set_transient( 'yotm_job_db_migration_failure', $primary_failure, YOTM_JOB_DB_MIGRATION_BACKOFF );
 
 		try {
-			$wpdb->prefix = $alternate_prefix;
-			delete_option( 'yotm_job_db_version' );
-			$this->assertTrue( yotm_job_storage_ready() );
-			$this->assertSame( $alternate_tables[0], yotm_job_table_names()['jobs'] );
-			$this->assertTrue( yotm_job_tables_exist() );
-		} finally {
-			$wpdb->prefix = $original_prefix;
-			foreach ( $alternate_tables as $table ) {
-				$wpdb->query( "DROP TABLE IF EXISTS {$table}" );
-			}
-		}
+			switch_to_blog( $second_blog_id );
 
-		$this->assertTrue( yotm_job_storage_ready() );
+			$second_tables = yotm_job_table_names();
+			$this->drop_tables( array( 'jobs', 'items' ) );
+			delete_option( 'yotm_job_db_version' );
+			delete_transient( 'yotm_job_db_migration_failure' );
+
+			$this->assertSame( $wpdb->get_blog_prefix( $second_blog_id ) . 'yotm_jobs', $second_tables['jobs'] );
+			$this->assertNotSame( $primary_tables['jobs'], $second_tables['jobs'] );
+			$this->assertFalse( get_option( 'yotm_job_db_version', false ) );
+			$this->assertFalse( get_transient( 'yotm_job_db_migration_failure' ) );
+			$this->assertFalse( yotm_job_tables_exist() );
+
+			$this->assertTrue( yotm_job_storage_ready() );
+			$this->assertSame( YOTM_JOB_DB_VERSION, get_option( 'yotm_job_db_version' ) );
+			$this->assertTrue( yotm_job_tables_exist() );
+
+			set_transient(
+				'yotm_job_db_migration_failure',
+				array(
+					'version'   => YOTM_JOB_DB_VERSION,
+					'failed_at' => 222,
+				),
+				YOTM_JOB_DB_MIGRATION_BACKOFF
+			);
+			restore_current_blog();
+
+			$this->assertSame( $primary_blog_id, get_current_blog_id() );
+			$this->assertSame( $primary_tables, yotm_job_table_names() );
+			$this->assertSame( YOTM_JOB_DB_VERSION, get_option( 'yotm_job_db_version' ) );
+			$this->assertSame( $primary_failure, get_transient( 'yotm_job_db_migration_failure' ) );
+			$this->assertTrue( yotm_job_storage_ready() );
+		} finally {
+			if ( get_current_blog_id() !== $primary_blog_id ) {
+				restore_current_blog();
+			}
+
+			switch_to_blog( $second_blog_id );
+			$this->drop_tables( array( 'jobs', 'items' ) );
+			delete_option( 'yotm_job_db_version' );
+			delete_transient( 'yotm_job_db_migration_failure' );
+			restore_current_blog();
+			wp_delete_site( $second_blog_id );
+			delete_transient( 'yotm_job_db_migration_failure' );
+			$this->reset_request_state();
+		}
 	}
 
 	public function capture_query( $query ) {
