@@ -87,18 +87,23 @@ function yotm_regenerate_prepare() {
 	$job    = yotm_job_create(
 		'regenerate',
 		array(
-			'only_missing'   => $only_missing ? 1 : 0,
-			'force_all'      => $force_all ? 1 : 0,
-			'scope'          => $scope,
-			'scope_label'    => $scope_label,
-			'subpath'        => $subpath,
-			'cursor_mode'    => $cursor_mode ? 1 : 0,
-			'discovery_done' => $cursor_mode ? 0 : 1,
-			'query_args'     => $query_args,
+			'only_missing'             => $only_missing ? 1 : 0,
+			'force_all'                => $force_all ? 1 : 0,
+			'scan_phase'               => $force_all ? 'source_index' : 'regenerate',
+			'source_index_initialized' => 0,
+			'source_index_complete'    => 0,
+			'source_index_cursor'      => 0,
+			'source_index_max_id'      => 0,
+			'scope'                    => $scope,
+			'scope_label'              => $scope_label,
+			'subpath'                  => $subpath,
+			'cursor_mode'              => $cursor_mode ? 1 : 0,
+			'discovery_done'           => $cursor_mode ? 0 : 1,
+			'query_args'               => $query_args,
 		),
 		array(
 			'status'       => 'running',
-			'phase'        => 'regenerate',
+			'phase'        => $force_all ? 'source_index' : 'regenerate',
 			'counter_mode' => 'item_v2',
 			'total'        => $total,
 			'max_id'       => $max_id,
@@ -165,7 +170,7 @@ function yotm_regenerate_batch() {
 		wp_send_json_error( array( 'msg' => __( 'This regeneration job is not runnable.', 'thumbnail-manager' ) ), 409 );
 	}
 
-	$worker = yotm_job_acquire_worker( $job['id'], array( 'running' ), array( 'regenerate' ) );
+	$worker = yotm_job_acquire_worker( $job['id'], array( 'running' ), array( 'source_index', 'regenerate' ) );
 	if ( is_wp_error( $worker ) ) {
 		if ( 'yotm_job_worker_busy' !== $worker->get_error_code() ) {
 			wp_send_json_error( array( 'msg' => $worker->get_error_message() ), 503 );
@@ -179,6 +184,15 @@ function yotm_regenerate_batch() {
 	}
 
 	$job = yotm_job_get_by_id( $job['id'] );
+	if ( 'source_index' === $job['phase'] ) {
+		$indexed = yotm_prune_source_index_batch( $job, $batch, $worker );
+		if ( is_wp_error( $indexed ) ) {
+			wp_send_json_error( array( 'msg' => $indexed->get_error_message() ), 503 );
+		}
+		$response                   = yotm_build_regenerate_response( $indexed['job'], false );
+		$response['retry_after_ms'] = 50;
+		wp_send_json_success( $response );
+	}
 	if ( 'item_v2' === $job['counter_mode'] ) {
 		wp_send_json_success( yotm_regenerate_item_batch( $job, $worker, $batch ) );
 	}
@@ -258,15 +272,19 @@ function yotm_regenerate_item_batch( $job, $worker, $batch ) {
 			continue;
 		}
 
-		$result = yotm_regenerate_attachment( $attachment_id, ! empty( $payload['only_missing'] ), ! empty( $payload['force_all'] ) );
+		$result = ! empty( $payload['force_all'] )
+			? yotm_regenerate_force_attachment( $attachment_id, $item, $worker )
+			: yotm_regenerate_attachment( $attachment_id, ! empty( $payload['only_missing'] ), false );
 		if ( 'regenerated' === $result['status'] ) {
 			yotm_job_finish_item( $item, 'done' );
 		} elseif ( 'skipped' === $result['status'] ) {
 			yotm_job_finish_item( $item, 'skipped', (string) $result['message'] );
+		} elseif ( 'retry' === $result['status'] ) {
+			yotm_job_release_item_claim( $item );
 		} else {
 			yotm_job_finish_item( $item, 'failed', (string) $result['message'] );
 		}
-	}
+	}//end foreach
 
 	$job      = yotm_job_sync_item_counters( $job['id'] );
 	$counters = yotm_job_item_counters( $job['id'] );
@@ -345,7 +363,9 @@ function yotm_regenerate_legacy_batch( $job, $worker, $batch ) {
 		}
 
 		$last_id = max( $last_id, $attachment_id );
-		$result  = yotm_regenerate_attachment( $attachment_id, ! empty( $payload['only_missing'] ), ! empty( $payload['force_all'] ) );
+		$result  = ! empty( $payload['force_all'] )
+			? yotm_regenerate_failure( __( 'This legacy Force job predates transactional regeneration. Start a new Force job.', 'thumbnail-manager' ) )
+			: yotm_regenerate_attachment( $attachment_id, ! empty( $payload['only_missing'] ), false );
 		++$processed_now;
 
 		if ( 'regenerated' === $result['status'] ) {
@@ -415,6 +435,9 @@ function yotm_regenerate_legacy_batch( $job, $worker, $batch ) {
  * @return array{status:string,message:string}
  */
 function yotm_regenerate_attachment( $attachment_id, $only_missing, $force_all ) {
+	if ( $force_all ) {
+		return yotm_regenerate_failure( __( 'Force regeneration requires a persistent claimed job item.', 'thumbnail-manager' ) );
+	}
 	$file = get_attached_file( $attachment_id );
 	$mime = get_post_mime_type( $attachment_id );
 
@@ -482,10 +505,6 @@ function yotm_regenerate_attachment( $attachment_id, $only_missing, $force_all )
 			'status'  => 'failed',
 			'message' => __( 'Could not update attachment metadata.', 'thumbnail-manager' ),
 		);
-	}
-
-	if ( $force_all && is_array( $old_metadata ) ) {
-		yotm_cleanup_obsolete_generated_files( $file, $source_file, $old_metadata, $metadata );
 	}
 
 	return array(

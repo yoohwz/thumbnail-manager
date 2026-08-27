@@ -318,19 +318,65 @@ function yotm_prune_scan_batch() {
  * @return array{done:bool,job:array}|WP_Error
  */
 function yotm_prune_source_index_batch( $job, $limit, $worker ) {
-	$payload = $job['payload'];
+	$payload    = $job['payload'];
+	$next_phase = 'regenerate' === ( $job['type'] ?? '' ) ? 'regenerate' : 'metadata';
 	if ( empty( $payload['source_index_initialized'] ) ) {
-		$cleared = yotm_media_source_clear_index();
-		if ( is_wp_error( $cleared ) ) {
-			return $cleared;
+		$complete = yotm_media_reference_require_complete_index();
+		if ( true === $complete ) {
+			$state                               = yotm_media_reference_index_state();
+			$payload['source_index_initialized'] = 1;
+			$payload['source_index_complete']    = 1;
+			$payload['source_index_generation']  = YOTM_MEDIA_REFERENCE_GENERATION;
+			$payload['source_index_token']       = $state['baseline_token'];
+			$payload['scan_phase']               = $next_phase;
+			if ( ! yotm_job_worker_update(
+				$worker,
+				array(
+					'payload' => $payload,
+					'phase'   => $next_phase,
+					'cursor'  => 0,
+				)
+			) ) {
+				return yotm_job_storage_error();
+			}
+			return array(
+				'done' => true,
+				'job'  => yotm_job_get_by_id( $job['id'] ),
+			);
+		}//end if
+
+		$begun = yotm_media_reference_baseline_begin();
+		if ( is_wp_error( $begun ) ) {
+			return $begun;
 		}
 		$payload['source_index_initialized'] = 1;
+		$payload['source_index_complete']    = 0;
 		$payload['source_index_cursor']      = 0;
 		$payload['source_index_max_id']      = yotm_get_max_image_attachment_id( array() );
+		$payload['source_index_generation']  = YOTM_MEDIA_REFERENCE_GENERATION;
+		$payload['source_index_token']       = $begun['baseline_token'];
 		if ( ! yotm_job_worker_update( $worker, array( 'payload' => $payload ) ) ) {
 			return yotm_job_storage_error();
 		}
-	}
+	} else {
+		$state = yotm_media_reference_index_state();
+		if (
+			is_wp_error( $state )
+			|| 'building' !== $state['status']
+			|| YOTM_MEDIA_REFERENCE_GENERATION !== absint( $payload['source_index_generation'] ?? 0 )
+			|| ! hash_equals( (string) $state['baseline_token'], (string) ( $payload['source_index_token'] ?? '' ) )
+		) {
+			$payload['source_index_initialized'] = 0;
+			$payload['source_index_complete']    = 0;
+			$payload['source_index_cursor']      = 0;
+			$payload['source_index_max_id']      = 0;
+			yotm_job_worker_update( $worker, array( 'payload' => $payload ) );
+			return array(
+				'done' => false,
+				'job'  => yotm_job_get_by_id( $job['id'] ),
+			);
+		}
+	}//end if
 
 	$source_ids = yotm_get_image_attachment_ids_after(
 		array(),
@@ -355,31 +401,57 @@ function yotm_prune_source_index_batch( $job, $limit, $worker ) {
 		);
 	}
 
-	$dirty = yotm_media_source_dirty_state();
-	if ( is_wp_error( $dirty ) ) {
-		return $dirty;
+	$source_fence = yotm_media_source_fence_acquire();
+	if ( is_wp_error( $source_fence ) ) {
+		return $source_fence;
 	}
-	if ( ! empty( $dirty['entries'] ) ) {
-		$payload['source_index_initialized'] = 0;
-		$payload['source_index_complete']    = 0;
-		$payload['source_index_cursor']      = 0;
-		$payload['source_index_max_id']      = 0;
-		if ( ! yotm_job_worker_update( $worker, array( 'payload' => $payload ) ) ) {
-			return yotm_job_storage_error();
+	try {
+		$dirty = yotm_media_source_dirty_state();
+		if ( is_wp_error( $dirty ) ) {
+			return $dirty;
 		}
-		return array(
-			'done' => false,
-			'job'  => yotm_job_get_by_id( $job['id'] ),
-		);
-	}
+		if ( ! empty( $dirty['entries'] ) ) {
+			$payload['source_index_initialized'] = 0;
+			$payload['source_index_complete']    = 0;
+			$payload['source_index_cursor']      = 0;
+			$payload['source_index_max_id']      = 0;
+			if ( ! yotm_job_worker_update( $worker, array( 'payload' => $payload ) ) ) {
+				return yotm_job_storage_error();
+			}
+			return array(
+				'done' => false,
+				'job'  => yotm_job_get_by_id( $job['id'] ),
+			);
+		}
 
-	$payload['source_index_complete'] = 1;
-	$payload['scan_phase']            = 'metadata';
+		$current_max = yotm_get_max_image_attachment_id( array() );
+		if ( $current_max > absint( $payload['source_index_max_id'] ?? 0 ) ) {
+			$payload['source_index_max_id'] = $current_max;
+			if ( ! yotm_job_worker_update( $worker, array( 'payload' => $payload ) ) ) {
+				return yotm_job_storage_error();
+			}
+			return array(
+				'done' => false,
+				'job'  => yotm_job_get_by_id( $job['id'] ),
+			);
+		}
+
+		$completed = yotm_media_reference_baseline_complete( $payload['source_index_token'] ?? '' );
+		if ( is_wp_error( $completed ) ) {
+			return $completed;
+		}
+	} finally {
+		yotm_media_source_fence_release( $source_fence );
+	}//end try
+
+	$payload['source_index_complete']   = 1;
+	$payload['source_index_generation'] = YOTM_MEDIA_REFERENCE_GENERATION;
+	$payload['scan_phase']              = $next_phase;
 	if ( ! yotm_job_worker_update(
 		$worker,
 		array(
 			'payload' => $payload,
-			'phase'   => 'metadata',
+			'phase'   => $next_phase,
 			'cursor'  => 0,
 		)
 	) ) {
@@ -699,9 +771,30 @@ function yotm_collect_metadata_prune_candidates_for_ids( $ids, $scan_bases, $kee
 
 	foreach ( $ids as $attachment_id ) {
 		$attachment_id = absint( $attachment_id );
-		$file          = get_attached_file( $attachment_id );
-
-		if ( ! $attachment_id || ! $file ) {
+		if ( ! $attachment_id ) {
+			continue;
+		}
+		$attached_rows = yotm_media_reference_raw_postmeta_rows( $attachment_id, '_wp_attached_file' );
+		$metadata_rows = yotm_media_reference_raw_postmeta_rows( $attachment_id, '_wp_attachment_metadata' );
+		if (
+			is_wp_error( $attached_rows )
+			|| is_wp_error( $metadata_rows )
+			|| 1 !== count( $attached_rows )
+			|| 1 !== count( $metadata_rows )
+			|| ! is_string( $attached_rows[0]['value'] )
+			|| '' === $attached_rows[0]['value']
+			|| ! is_array( $metadata_rows[0]['value'] )
+		) {
+			$orphan_summary['source_errors'] = (int) ( $orphan_summary['source_errors'] ?? 0 ) + 1;
+			continue;
+		}
+		$uploads  = wp_get_upload_dir();
+		$base     = (string) ( $uploads['basedir'] ?? '' );
+		$raw_file = $attached_rows[0]['value'];
+		$file     = preg_match( '#^(?:[A-Za-z]:)?/#', $raw_file ) ? $raw_file : trailingslashit( $base ) . ltrim( $raw_file, '/\\' );
+		$file     = yotm_media_source_canonical_path( $file );
+		if ( is_wp_error( $file ) ) {
+			$orphan_summary['source_errors'] = (int) ( $orphan_summary['source_errors'] ?? 0 ) + 1;
 			continue;
 		}
 
@@ -711,16 +804,20 @@ function yotm_collect_metadata_prune_candidates_for_ids( $ids, $scan_bases, $kee
 			continue;
 		}
 
-		$metadata = wp_get_attachment_metadata( $attachment_id );
+		$metadata = $metadata_rows[0]['value'];
 		if ( empty( $metadata['sizes'] ) || ! is_array( $metadata['sizes'] ) ) {
 			continue;
 		}
 
-		$uploads       = wp_get_upload_dir();
 		$metadata_file = ! empty( $metadata['file'] ) && is_string( $metadata['file'] )
-			? trailingslashit( (string) ( $uploads['basedir'] ?? '' ) ) . ltrim( $metadata['file'], '/\\' )
+			? trailingslashit( $base ) . ltrim( $metadata['file'], '/\\' )
 			: $original_path;
-		$upload_dir    = trailingslashit( dirname( yotm_normalize_filesystem_path( $metadata_file ) ) );
+		$metadata_file = yotm_media_source_canonical_path( $metadata_file );
+		if ( is_wp_error( $metadata_file ) ) {
+			$orphan_summary['source_errors'] = (int) ( $orphan_summary['source_errors'] ?? 0 ) + 1;
+			continue;
+		}
+		$upload_dir = trailingslashit( dirname( yotm_normalize_filesystem_path( $metadata_file ) ) );
 
 		foreach ( $metadata['sizes'] as $size_name => $size_data ) {
 			if ( ! is_array( $size_data ) ) {

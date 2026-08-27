@@ -37,6 +37,9 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 	/** @var callable|null */
 	private $filtered_source_callback;
 
+	/** @var array */
+	private $metadata_filter_fixture = array();
+
 	public function setUp(): void {
 		parent::setUp();
 		unset( $GLOBALS['yotm_job_storage_readiness'], $GLOBALS['yotm_media_source_last_error'] );
@@ -48,6 +51,9 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 		$this->test_dir     = $this->uploads_base . 'yotm-source-' . wp_generate_uuid4();
 		wp_mkdir_p( $this->test_dir );
 		yotm_media_source_clear_index();
+		$state = yotm_media_reference_index_state();
+		$this->assertIsArray( $state );
+		$this->assertTrue( yotm_media_reference_baseline_complete( $state['baseline_token'] ) );
 	}
 
 	public function tearDown(): void {
@@ -61,6 +67,7 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 		remove_filter( 'update_post_metadata', array( $this, 'nest_by_mid_inside_regular_update' ), 10 );
 		remove_filter( 'update_post_metadata_by_mid', array( $this, 'nest_regular_inside_by_mid_update' ), 10 );
 		remove_filter( 'get_attached_file', array( $this, 'supply_attached_file_for_fallback' ), 10 );
+		remove_filter( 'get_post_metadata', array( $this, 'filter_authoritative_metadata' ), 10 );
 		if ( is_callable( $this->filtered_source_callback ) ) {
 			remove_filter( 'get_attached_file', $this->filtered_source_callback, 10 );
 		}
@@ -78,6 +85,7 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 			@rmdir( $this->test_dir );
 		}
 		delete_option( YOTM_MEDIA_SOURCE_DIRTY_OPTION );
+		delete_option( YOTM_MEDIA_REFERENCE_STATE_OPTION );
 		parent::tearDown();
 	}
 
@@ -115,6 +123,274 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 
 		$this->assertTrue( yotm_media_source_path_is_authoritative( $fixture['thumbnail'] ) );
 		$this->assertSame( array(), $this->collect_candidates( $fixture['attachment_id'] ) );
+	}
+
+	public function test_generated_ownership_is_not_a_source_veto_but_remains_queryable() {
+		$fixture = $this->create_attachment_with_thumbnail( 'generated-owner.jpg', 'generated-owner-150x150.jpg' );
+		$this->assertFalse( yotm_media_source_path_is_authoritative( $fixture['thumbnail'] ) );
+		$owners = yotm_media_reference_path_owners( $fixture['thumbnail'] );
+		$this->assertIsArray( $owners );
+		$this->assertSame( array(), $owners['protected'] );
+		$this->assertSame( $fixture['attachment_id'], $owners['generated'][0]['attachment_id'] );
+		$this->assertSame( 'thumbnail', $owners['generated'][0]['size'] );
+	}
+
+	public function test_filtered_metadata_cannot_hide_or_mint_destructive_ownership() {
+		$fixture      = $this->create_attachment_with_thumbnail( 'raw-owner.jpg', 'raw-owner-150x150.jpg' );
+		$virtual_full = trailingslashit( $this->test_dir ) . 'virtual-full.jpg';
+		$virtual      = trailingslashit( $this->test_dir ) . 'virtual-150x150.jpg';
+		$this->write_file( $virtual_full, 'virtual-full' );
+		$this->write_file( $virtual, 'virtual' );
+		$this->metadata_filter_fixture = array(
+			'attachment_id' => $fixture['attachment_id'],
+			'metadata'      => array(
+				'file'  => $this->relative_path( $virtual_full ),
+				'sizes' => array(
+					'virtual' => array(
+						'file'      => wp_basename( $virtual ),
+						'width'     => 150,
+						'height'    => 150,
+						'mime-type' => 'image/jpeg',
+					),
+				),
+			),
+		);
+		add_filter( 'get_post_metadata', array( $this, 'filter_authoritative_metadata' ), 10, 5 );
+
+		$this->assertTrue( yotm_media_source_sync_attachment( $fixture['attachment_id'], null, true ) );
+		$real_owners = yotm_media_reference_path_owners( $fixture['thumbnail'] );
+		$this->assertIsArray( $real_owners );
+		$this->assertSame( $fixture['attachment_id'], $real_owners['generated'][0]['attachment_id'] );
+		$this->assertTrue( yotm_media_source_path_is_authoritative( $fixture['original'] ) );
+		$this->assertTrue( yotm_media_source_path_is_authoritative( $virtual_full ) );
+
+		$virtual_owners = yotm_media_reference_path_owners( $virtual );
+		$this->assertIsArray( $virtual_owners );
+		$this->assertSame( array(), $virtual_owners['generated'] );
+
+		$candidates = $this->collect_candidates( $fixture['attachment_id'] );
+		$this->assertArrayHasKey( yotm_normalize_filesystem_path( $fixture['thumbnail'] ), $candidates );
+		$this->assertArrayNotHasKey( yotm_normalize_filesystem_path( $virtual ), $candidates );
+	}
+
+	public function test_source_image_and_edit_backup_are_protected_companions() {
+		$fixture      = $this->create_attachment_with_thumbnail( 'companions.jpg', 'companions-150x150.jpg' );
+		$source_image = trailingslashit( $this->test_dir ) . 'companions-source.heic';
+		$edit_backup  = trailingslashit( $this->test_dir ) . 'companions-e123.jpg';
+		$this->write_file( $source_image, 'source-image' );
+		$this->write_file( $edit_backup, 'edit-backup' );
+		$metadata                 = get_post_meta( $fixture['attachment_id'], '_wp_attachment_metadata', true );
+		$metadata['source_image'] = wp_basename( $source_image );
+		$this->assertNotFalse( update_post_meta( $fixture['attachment_id'], '_wp_attachment_metadata', $metadata ) );
+		$this->assertNotFalse(
+			update_post_meta(
+				$fixture['attachment_id'],
+				'_wp_attachment_backup_sizes',
+				array(
+					'full-orig' => array(
+						'file'   => wp_basename( $edit_backup ),
+						'width'  => 800,
+						'height' => 600,
+					),
+				)
+			)
+		);
+		$this->assertTrue( yotm_media_source_path_is_authoritative( $source_image ) );
+		$this->assertTrue( yotm_media_source_path_is_authoritative( $edit_backup ) );
+	}
+
+	public function test_filtered_attached_file_cannot_bypass_authoritative_mutation_guards() {
+		$fixture = $this->create_attachment_with_thumbnail( 'hidden-guard.jpg', 'hidden-guard-150x150.jpg' );
+		$paths   = array();
+		foreach ( array( 'add', 'regular-update', 'by-mid-update', 'by-mid-delete' ) as $name ) {
+			$paths[ $name ] = trailingslashit( $this->test_dir ) . 'hidden-guard-' . $name . '.jpg';
+			$this->write_file( $paths[ $name ], $name );
+		}
+		$backup = static function ( $path ) {
+			return array(
+				'full-orig' => array(
+					'file'   => wp_basename( $path ),
+					'width'  => 800,
+					'height' => 600,
+				),
+			);
+		};
+		$filter = static function ( $file, $attachment_id ) use ( $fixture ) {
+			return $fixture['attachment_id'] === (int) $attachment_id ? false : $file;
+		};
+
+		add_filter( 'get_attached_file', $filter, 10, 2 );
+		try {
+			$meta_id = add_post_meta( $fixture['attachment_id'], '_wp_attachment_backup_sizes', $backup( $paths['add'] ) );
+			$this->assertIsInt( $meta_id );
+			$this->assertTrue( yotm_media_source_path_is_authoritative( $paths['add'] ) );
+
+			$this->assertNotFalse( update_post_meta( $fixture['attachment_id'], '_wp_attachment_backup_sizes', $backup( $paths['regular-update'] ) ) );
+			$this->assertFalse( yotm_media_source_path_is_authoritative( $paths['add'] ) );
+			$this->assertTrue( yotm_media_source_path_is_authoritative( $paths['regular-update'] ) );
+
+			$this->assertTrue( update_metadata_by_mid( 'post', $meta_id, $backup( $paths['by-mid-update'] ), false ) );
+			$this->assertFalse( yotm_media_source_path_is_authoritative( $paths['regular-update'] ) );
+			$this->assertTrue( yotm_media_source_path_is_authoritative( $paths['by-mid-update'] ) );
+
+			$this->assertTrue( delete_post_meta( $fixture['attachment_id'], '_wp_attachment_backup_sizes' ) );
+			$this->assertFalse( yotm_media_source_path_is_authoritative( $paths['by-mid-update'] ) );
+
+			$meta_id = add_post_meta( $fixture['attachment_id'], '_wp_attachment_backup_sizes', $backup( $paths['by-mid-delete'] ) );
+			$this->assertIsInt( $meta_id );
+			$this->assertTrue( yotm_media_source_path_is_authoritative( $paths['by-mid-delete'] ) );
+			$this->assertTrue( delete_metadata_by_mid( 'post', $meta_id ) );
+			$this->assertFalse( yotm_media_source_path_is_authoritative( $paths['by-mid-delete'] ) );
+			$this->assertTrue( yotm_media_source_require_clean_index() );
+			$this->assert_guard_state_clean();
+		} finally {
+			remove_filter( 'get_attached_file', $filter, 10 );
+		}
+	}
+
+	public function test_import_attachments_are_fenced_when_mutations_create_image_applicability() {
+		$add_path    = trailingslashit( $this->test_dir ) . 'import-add.jpg';
+		$old_path    = trailingslashit( $this->test_dir ) . 'import-old.txt';
+		$update_path = trailingslashit( $this->test_dir ) . 'import-update.jpg';
+		$by_mid_path = trailingslashit( $this->test_dir ) . 'import-by-mid.jpg';
+		foreach ( array( $add_path, $old_path, $update_path, $by_mid_path ) as $path ) {
+			$this->write_file( $path, wp_basename( $path ) );
+		}
+
+		$add_id  = $this->create_import_attachment();
+		$meta_id = add_post_meta( $add_id, '_wp_attached_file', $this->relative_path( $add_path ) );
+		$this->assertIsInt( $meta_id );
+		$this->assertTrue( yotm_media_source_path_is_authoritative( $add_path ) );
+
+		$update_id = $this->create_import_attachment();
+		$this->assertIsInt( add_post_meta( $update_id, '_wp_attached_file', $this->relative_path( $old_path ) ) );
+		$this->assertNotFalse( update_post_meta( $update_id, '_wp_attached_file', $this->relative_path( $update_path ) ) );
+		$this->assertFalse( yotm_media_source_path_is_authoritative( $old_path ) );
+		$this->assertTrue( yotm_media_source_path_is_authoritative( $update_path ) );
+
+		$by_mid_id = $this->create_import_attachment();
+		$meta_id   = add_post_meta( $by_mid_id, 'yotm_import_transition', 'ordinary' );
+		$this->assertIsInt( $meta_id );
+		$this->assertTrue( update_metadata_by_mid( 'post', $meta_id, $this->relative_path( $by_mid_path ), '_wp_attached_file' ) );
+		$this->assertTrue( yotm_media_source_path_is_authoritative( $by_mid_path ) );
+		$this->assertTrue( yotm_media_source_require_clean_index() );
+		$this->assert_guard_state_clean();
+	}
+
+	public function test_ambiguous_import_attached_file_rows_fail_closed() {
+		$attachment_id = $this->create_import_attachment();
+		$first         = trailingslashit( $this->test_dir ) . 'import-multi-first.txt';
+		$second        = trailingslashit( $this->test_dir ) . 'import-multi-second.txt';
+		$proposed      = trailingslashit( $this->test_dir ) . 'import-multi-proposed.jpg';
+		foreach ( array( $first, $second, $proposed ) as $path ) {
+			$this->write_file( $path, wp_basename( $path ) );
+		}
+
+		global $wpdb;
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.SlowDBQuery.slow_db_query_meta_key,WordPress.DB.SlowDBQuery.slow_db_query_meta_value -- The fixture intentionally creates an ambiguous authoritative raw state outside the guarded API.
+		foreach ( array( $first, $second ) as $path ) {
+			$inserted = $wpdb->insert(
+				$wpdb->postmeta,
+				array(
+					'post_id'    => $attachment_id,
+					'meta_key'   => '_wp_attached_file',
+					'meta_value' => $this->relative_path( $path ),
+				),
+				array( '%d', '%s', '%s' )
+			);
+			$this->assertSame( 1, $inserted );
+		}
+		// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.SlowDBQuery.slow_db_query_meta_key,WordPress.DB.SlowDBQuery.slow_db_query_meta_value
+		wp_cache_delete( $attachment_id, 'post_meta' );
+		$this->assertTrue( yotm_media_source_sync_attachment( $attachment_id, null, true ) );
+
+		$this->assertFalse( update_post_meta( $attachment_id, '_wp_attached_file', $this->relative_path( $proposed ) ) );
+		$this->assertWPError( $GLOBALS['yotm_media_source_last_error'] );
+		$rows = yotm_media_reference_raw_postmeta_rows( $attachment_id, '_wp_attached_file' );
+		$this->assertIsArray( $rows );
+		$this->assertCount( 2, $rows );
+		$this->assertSame( array( $this->relative_path( $first ), $this->relative_path( $second ) ), wp_list_pluck( $rows, 'value' ) );
+		$this->assertFalse( yotm_media_source_path_is_authoritative( $proposed ) );
+		$this->assertTrue( yotm_media_source_require_clean_index() );
+		$this->assert_guard_state_clean();
+	}
+
+	public function test_stateful_metadata_accessor_cannot_turn_raw_update_into_unfenced_write() {
+		$fixture  = $this->create_attachment_with_thumbnail( 'stateful-write.jpg', 'stateful-write-150x150.jpg' );
+		$old      = $this->relative_path( $fixture['original'] );
+		$new_path = trailingslashit( $this->test_dir ) . 'stateful-write-new.jpg';
+		$new      = $this->relative_path( $new_path );
+		$this->write_file( $new_path, 'new' );
+		$calls  = 0;
+		$filter = static function ( $check, $object_id, $meta_key ) use ( &$calls, $fixture, $old, $new ) {
+			if ( $fixture['attachment_id'] !== (int) $object_id || '_wp_attached_file' !== $meta_key ) {
+				return $check;
+			}
+			++$calls;
+			return array( 1 === $calls ? $new : $old );
+		};
+
+		add_filter( 'get_post_metadata', $filter, 10, 3 );
+		try {
+			$this->assertNotFalse( update_post_meta( $fixture['attachment_id'], '_wp_attached_file', $new ) );
+			$this->assertGreaterThanOrEqual( 2, $calls );
+			$rows = yotm_media_reference_raw_postmeta_rows( $fixture['attachment_id'], '_wp_attached_file' );
+			$this->assertIsArray( $rows );
+			$this->assertSame( $new, $rows[0]['value'] );
+			$this->assertTrue( yotm_media_source_path_is_authoritative( $new_path ) );
+			$this->assertTrue( yotm_media_source_require_clean_index() );
+			$this->assert_guard_state_clean();
+		} finally {
+			remove_filter( 'get_post_metadata', $filter, 10 );
+		}
+		$this->assertTrue( yotm_media_source_sync_attachment( $fixture['attachment_id'], null, true ) );
+		$this->assertTrue( yotm_media_source_path_is_authoritative( $new_path ) );
+	}
+
+	public function test_stateful_metadata_accessor_no_write_reconciles_without_permanent_dirty_state() {
+		$fixture  = $this->create_attachment_with_thumbnail( 'stateful-no-write.jpg', 'stateful-no-write-150x150.jpg' );
+		$old      = array(
+			'full-orig' => array(
+				'file'   => 'stateful-no-write-old.jpg',
+				'width'  => 800,
+				'height' => 600,
+			),
+		);
+		$new      = array(
+			'full-orig' => array(
+				'file'   => 'stateful-no-write-new.jpg',
+				'width'  => 800,
+				'height' => 600,
+			),
+		);
+		$old_path = trailingslashit( $this->test_dir ) . $old['full-orig']['file'];
+		$this->write_file( $old_path, 'old' );
+		$this->write_file( trailingslashit( $this->test_dir ) . $new['full-orig']['file'], 'new' );
+		$this->assertNotFalse( update_post_meta( $fixture['attachment_id'], '_wp_attachment_backup_sizes', $old ) );
+		$calls  = 0;
+		$filter = static function ( $check, $object_id, $meta_key ) use ( &$calls, $fixture, $old, $new ) {
+			if ( $fixture['attachment_id'] !== (int) $object_id || '_wp_attachment_backup_sizes' !== $meta_key ) {
+				return $check;
+			}
+			++$calls;
+			return array( 1 === $calls ? $new : $old );
+		};
+
+		add_filter( 'get_post_metadata', $filter, 10, 3 );
+		try {
+			$this->assertFalse( update_post_meta( $fixture['attachment_id'], '_wp_attachment_backup_sizes', $new ) );
+		} finally {
+			remove_filter( 'get_post_metadata', $filter, 10 );
+		}
+		$this->assertSame( 1, $calls );
+		$this->assertNotEmpty( $GLOBALS['yotm_media_source_frames'] );
+		yotm_media_source_shutdown_cleanup();
+		$rows = yotm_media_reference_raw_postmeta_rows( $fixture['attachment_id'], '_wp_attachment_backup_sizes' );
+		$this->assertIsArray( $rows );
+		$this->assertSame( $old, $rows[0]['value'] );
+		$this->assertTrue( yotm_media_source_path_is_authoritative( $old_path ) );
+		$this->assertTrue( yotm_media_source_require_clean_index() );
+		$this->assert_guard_state_clean();
 	}
 
 	public function test_source_baseline_is_bounded_resumable_and_completes_before_metadata_phase() {
@@ -410,7 +686,7 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 		remove_filter( 'update_post_metadata_by_mid', array( $this, 'nest_regular_inside_by_mid_update' ), 10 );
 
 		$this->assertTrue( $this->nested_guard['nested_result'] );
-		$this->assertTrue( $this->nested_guard['outer_held'] );
+		$this->assertFalse( $this->nested_guard['outer_held'] );
 		$this->assertSame( 1, $this->nested_guard['outer_attachment_refs'] );
 		$this->assertSame( $this->relative_path( $outer ), get_post_meta( $fixture['attachment_id'], '_wp_attached_file', true ) );
 		$this->assertTrue( yotm_media_source_path_is_authoritative( $outer ) );
@@ -753,8 +1029,8 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 		$this->assertSame( $this->relative_path( $raw ), get_post_meta( $other_id, '_wp_attached_file', true ) );
 		$this->assertWPError( $GLOBALS['yotm_media_source_last_error'] );
 		$table = yotm_job_table_names()['sources'];
-		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Test proves the failed P2 upsert left no positive source row.
-		$this->assertSame( 0, (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$table} WHERE path_hash = %s", $this->failed_source_hash ) ) );
+		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- A conservative pre-write positive may remain, but the unresolved mutation must stay dirty.
+		$this->assertGreaterThanOrEqual( 1, (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$table} WHERE path_hash = %s", $this->failed_source_hash ) ) );
 		$this->assertNotEmpty( yotm_media_source_dirty_state()['entries'] );
 
 		yotm_media_source_shutdown_cleanup();
@@ -977,6 +1253,21 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 		return $this->fallback_attachment_id === (int) $attachment_id && empty( $file ) ? $this->fallback_file : $file;
 	}
 
+	public function filter_authoritative_metadata( $check, $object_id, $meta_key, $single, $meta_type ) {
+		unset( $meta_type, $single );
+		if ( (int) ( $this->metadata_filter_fixture['attachment_id'] ?? 0 ) !== (int) $object_id ) {
+			return $check;
+		}
+		if ( '_wp_attached_file' === $meta_key ) {
+			return array( '' );
+		}
+		if ( '_wp_attachment_metadata' === $meta_key ) {
+			$value = $this->metadata_filter_fixture['metadata'];
+			return array( $value );
+		}
+		return $check;
+	}
+
 	public function force_named_lock_contention( $query ) {
 		return preg_match( '/^SELECT GET_LOCK\(/i', ltrim( $query ) ) ? 'SELECT 0' : $query;
 	}
@@ -1097,6 +1388,19 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 			$this->assertNotFalse( update_attached_file( $attachment_id, $file ) );
 		}
 		$this->assertNotFalse( wp_update_attachment_metadata( $attachment_id, $metadata ) );
+		return $attachment_id;
+	}
+
+	private function create_import_attachment() {
+		$attachment_id = wp_insert_attachment(
+			array(
+				'post_mime_type' => 'import',
+				'post_title'     => 'YOTM import source test',
+				'post_status'    => 'inherit',
+			)
+		);
+		$this->assertIsInt( $attachment_id );
+		$this->attachments[] = $attachment_id;
 		return $attachment_id;
 	}
 

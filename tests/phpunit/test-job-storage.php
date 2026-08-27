@@ -28,6 +28,11 @@ class YOTM_Job_Storage_Test extends WP_UnitTestCase {
 	public function setUp(): void {
 		parent::setUp();
 		yotm_install_job_tables();
+		delete_option( YOTM_MEDIA_SOURCE_DIRTY_OPTION );
+		$this->assertTrue( yotm_media_source_clear_index() );
+		$reference_state = yotm_media_reference_index_state();
+		$this->assertIsArray( $reference_state );
+		$this->assertTrue( yotm_media_reference_baseline_complete( $reference_state['baseline_token'] ) );
 		$this->administrator_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
 		wp_set_current_user( $this->administrator_id );
 		$this->clear_jobs();
@@ -36,6 +41,7 @@ class YOTM_Job_Storage_Test extends WP_UnitTestCase {
 	public function tearDown(): void {
 		remove_filter( 'query', array( $this, 'fail_named_lock_query' ) );
 		remove_filter( 'query', array( $this, 'fail_worker_cas_query' ) );
+		remove_filter( 'query', array( $this, 'force_named_lock_contention' ) );
 		$this->clear_jobs();
 		foreach ( array_unique( $this->files ) as $file ) {
 			if ( file_exists( $file ) ) {
@@ -48,6 +54,8 @@ class YOTM_Job_Storage_Test extends WP_UnitTestCase {
 			}
 		}
 		wp_set_current_user( 0 );
+		delete_option( YOTM_MEDIA_REFERENCE_STATE_OPTION );
+		delete_option( YOTM_MEDIA_SOURCE_DIRTY_OPTION );
 		parent::tearDown();
 	}
 
@@ -77,6 +85,20 @@ class YOTM_Job_Storage_Test extends WP_UnitTestCase {
 		$regenerate = yotm_job_create( 'regenerate', array(), array( 'status' => 'running' ) );
 		$this->assertWPError( $regenerate );
 		$this->assertSame( 'yotm_job_locked', $regenerate->get_error_code() );
+	}
+
+	public function test_force_source_index_phase_can_materialize_explicit_items() {
+		$job = yotm_job_create(
+			'regenerate',
+			array( 'force_all' => 1 ),
+			array(
+				'status' => 'running',
+				'phase'  => 'source_index',
+			)
+		);
+		$this->assertIsArray( $job );
+		$this->assertTrue( yotm_job_add_item( $job['id'], 'force-explicit-17', array( 'attachment_id' => 17 ) ) );
+		$this->assertTrue( yotm_job_item_exists( $job['id'], 'force-explicit-17' ) );
 	}
 
 	public function test_only_one_active_job_per_user_site_and_type() {
@@ -266,6 +288,24 @@ class YOTM_Job_Storage_Test extends WP_UnitTestCase {
 		$this->assertSame( 'cancelled', yotm_job_get_by_id( $job['id'] )['status'] );
 
 		yotm_job_release_worker( $worker );
+	}
+
+	public function test_cancel_is_retryable_while_worker_lock_is_contended() {
+		$job = yotm_job_create(
+			'recommendation',
+			array(),
+			array(
+				'status'    => 'scanning',
+				'phase'     => 'metadata',
+				'exclusive' => false,
+			)
+		);
+		add_filter( 'query', array( $this, 'force_named_lock_contention' ) );
+		$result = yotm_job_cancel( $job );
+		remove_filter( 'query', array( $this, 'force_named_lock_contention' ) );
+		$this->assertWPError( $result );
+		$this->assertSame( 'yotm_job_cancel_busy', $result->get_error_code() );
+		$this->assertSame( 'scanning', yotm_job_get_by_id( $job['id'] )['status'] );
 	}
 
 	public function test_expired_active_job_is_retained_before_terminal_cleanup() {
@@ -679,5 +719,9 @@ class YOTM_Job_Storage_Test extends WP_UnitTestCase {
 		}
 
 		return $query;
+	}
+
+	public function force_named_lock_contention( $query ) {
+		return preg_match( '/^SELECT GET_LOCK\(/i', ltrim( $query ) ) ? 'SELECT 0' : $query;
 	}
 }

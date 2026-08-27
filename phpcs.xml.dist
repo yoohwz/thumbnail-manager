@@ -15,6 +15,7 @@
 	<file>inc/handle-delete.php</file>
 	<file>inc/media-source-index.php</file>
 	<file>inc/handle-regenerate.php</file>
+	<file>inc/regenerate-transaction.php</file>
 	<file>inc/handle-recommendations.php</file>
 	<file>tests</file>
 

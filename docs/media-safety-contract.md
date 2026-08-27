@@ -28,6 +28,10 @@ Regeneration cleanup may remove generated files that are no longer referenced by
 
 Filename heuristics alone are never sufficient evidence that a file is safe to delete.
 
+Known Core image companions are protected references, including `original_image`, `source_image`, legacy `thumb`, `animated_video`, `animated_video_poster`, and `_wp_attachment_backup_sizes[*].file`. `source_image` is protect-only and is not automatically selected as a regeneration input. Force regeneration selects a valid `original_image` when declared; otherwise it uses the current full image.
+
+Force regeneration replaces sub-sizes transactionally rather than replaying the initial-upload pipeline against live files. It generates into same-filesystem private staging, evaluates the two metadata update filter surfaces once, validates the exact final destination map, journals promotion before live mutation, persists the exact filtered metadata, and performs exact obsolete cleanup only after commit. An existing unreferenced destination is disk-only content and must never be overwritten; only an absent unreferenced destination or a path owned exclusively by the attachment's exact old generated-size evidence is replaceable.
+
 ## 2. Filesystem containment
 
 A destructive candidate must resolve inside the current WordPress uploads base before deletion.
@@ -94,6 +98,10 @@ If the file is already absent, reconciliation may remove a stale matching metada
 
 A deletion failure must not cause broad metadata cleanup unrelated to the exact candidate.
 
+The site-wide reverse-reference index has a versioned semantic generation and completeness marker. Destructive reference decisions require a complete current generation and an empty mutation-dirty set. Source/companion reference kinds are blanket vetoes. Raw `sizes[*].file` entries are generated-owner tuples and are validated against exact candidate or regeneration evidence rather than treated as source vetoes. Here, raw authority means exact uncached rows read directly from the postmeta table with preserved row cardinality; short-circuitable metadata accessors cannot mint or hide destructive ownership or prove a Force metadata commit. Filtered aliases may add conservative source/protected vetoes only.
+
+Writes and deletes of `_wp_attached_file`, `_wp_attachment_metadata`, and `_wp_attachment_backup_sizes` must remain fenced through regular and by-meta-ID mutation paths. Unknown/malformed rows, stale index/live disagreement, unsupported filtered by-meta-ID accessors, or an incomplete generation fail closed.
+
 ## 9. Bounded and resumable execution
 
 Large scans, manifest construction, regeneration, and deletion must remain bounded. A single request must not assume it can process an unbounded Media Library safely within one PHP request.
@@ -125,6 +133,8 @@ A Controlled change touching this contract must preserve or deliberately update 
 - original/full-size preservation;
 - exact thumbnail metadata reconciliation;
 - regeneration cleanup preserving current/source files;
+- transactional Force staging, exact filtered payload commit, promotion rollback/recovery, and existing-unreferenced destination preservation;
+- current-generation reverse-reference completeness, known companion protection, and cross-attachment generated ownership;
 - job ownership;
 - destructive-job locking;
 - manifest immutability and hash matching;

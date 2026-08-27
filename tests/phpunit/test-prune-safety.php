@@ -23,6 +23,11 @@ class YOTM_Prune_Safety_Test extends WP_UnitTestCase {
 		parent::setUp();
 		unset( $GLOBALS['yotm_job_storage_readiness'] );
 		$this->assertTrue( yotm_run_job_table_migration() );
+		delete_option( YOTM_MEDIA_SOURCE_DIRTY_OPTION );
+		$this->assertTrue( yotm_media_source_clear_index() );
+		$reference_state = yotm_media_reference_index_state();
+		$this->assertIsArray( $reference_state );
+		$this->assertTrue( yotm_media_reference_baseline_complete( $reference_state['baseline_token'] ) );
 		$uploads            = wp_get_upload_dir();
 		$this->uploads_base = trailingslashit( $uploads['basedir'] );
 		$this->test_dir     = $this->uploads_base . 'yotm-phpunit-' . wp_generate_uuid4();
@@ -46,6 +51,8 @@ class YOTM_Prune_Safety_Test extends WP_UnitTestCase {
 				@rmdir( $directory );
 			}
 		}
+		delete_option( YOTM_MEDIA_REFERENCE_STATE_OPTION );
+		delete_option( YOTM_MEDIA_SOURCE_DIRTY_OPTION );
 
 		parent::tearDown();
 	}
