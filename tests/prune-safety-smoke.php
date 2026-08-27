@@ -21,6 +21,9 @@ $base    = trailingslashit( $uploads['basedir'] );
 $dir     = $base . 'yotm-smoke-' . wp_generate_uuid4();
 $orig    = trailingslashit( $dir ) . 'image-300x300.jpg';
 $thumb   = trailingslashit( $dir ) . 'image-300x300-150x150.jpg';
+$sidecar = $thumb . '.webp';
+$backup  = preg_replace( '/\.jpg$/', '.bak.jpg', $thumb );
+$temp    = preg_replace( '/\.jpg$/', '.tmp.jpg', $thumb );
 $outside = trailingslashit( sys_get_temp_dir() ) . 'yotm-outside-' . wp_generate_uuid4() . '.jpg';
 $stale   = trailingslashit( $dir ) . 'force-image-100x100.jpg';
 $current = trailingslashit( $dir ) . 'force-image-200x200.jpg';
@@ -29,10 +32,14 @@ $scope_month = trailingslashit( $scope_year ) . '08';
 $id      = 0;
 
 try {
+	yotm_smoke_assert( true === yotm_install_job_tables(), 'Could not install current prune storage.' );
 	wp_mkdir_p( $dir );
 	wp_mkdir_p( $scope_month );
 	file_put_contents( $orig, 'original' );
 	file_put_contents( $thumb, 'thumb' );
+	file_put_contents( $sidecar, 'sidecar' );
+	file_put_contents( $backup, 'backup' );
+	file_put_contents( $temp, 'temp' );
 	file_put_contents( $outside, 'outside' );
 
 	$delete_guard = yotm_prune_validate_delete_meta(
@@ -86,6 +93,7 @@ try {
 			],
 		]
 	);
+	yotm_smoke_assert( true === yotm_media_source_sync_attachment( $id ), 'Could not index the smoke attachment source.' );
 
 	$candidates     = [];
 	$orphan_summary = yotm_initial_orphan_summary();
@@ -109,6 +117,9 @@ try {
 	$paths = array_column( array_values( $candidates ), 'path' );
 	yotm_smoke_assert( ! in_array( yotm_normalize_filesystem_path( $orig ), $paths, true ), 'Original image-300x300.jpg must not be a prune candidate.' );
 	yotm_smoke_assert( in_array( yotm_normalize_filesystem_path( $thumb ), $paths, true ), 'Metadata thumbnail should be a prune candidate.' );
+	yotm_smoke_assert( ! in_array( yotm_normalize_filesystem_path( $sidecar ), $paths, true ), 'Unverified WebP sidecar must remain report-only.' );
+	yotm_smoke_assert( ! in_array( yotm_normalize_filesystem_path( $backup ), $paths, true ), 'Backup sibling must remain report-only.' );
+	yotm_smoke_assert( ! in_array( yotm_normalize_filesystem_path( $temp ), $paths, true ), 'Temporary sibling must remain report-only.' );
 
 	$thumb_candidate = null;
 	foreach ( $candidates as $candidate ) {
@@ -125,6 +136,7 @@ try {
 
 	yotm_smoke_assert( ! empty( $delete_result['deleted'] ), 'Thumbnail candidate should be deleted.' );
 	yotm_smoke_assert( file_exists( $orig ), 'Original should still exist after thumbnail delete.' );
+	yotm_smoke_assert( file_exists( $sidecar ) && file_exists( $backup ) && file_exists( $temp ), 'Unverified sibling files should remain after exact thumbnail delete.' );
 	yotm_smoke_assert( empty( $metadata['sizes']['thumbnail'] ), 'Deleted thumbnail metadata should be removed.' );
 
 	file_put_contents( $stale, 'stale' );
@@ -154,7 +166,7 @@ try {
 		wp_delete_post( $id, true );
 	}
 
-	foreach ( [ $orig, $thumb, $outside, $stale, $current ] as $file ) {
+	foreach ( [ $orig, $thumb, $sidecar, $backup, $temp, $outside, $stale, $current ] as $file ) {
 		if ( $file && file_exists( $file ) ) {
 			wp_delete_file( $file );
 		}

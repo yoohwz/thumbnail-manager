@@ -419,10 +419,10 @@
     }
     const found = summary.found ? Object.keys(summary.found).length : 0;
     const marked = Array.isArray(summary.delete) ? summary.delete.length : 0;
-    if (!found && !marked && !summary.unmapped && !summary.skipped_original) {
+    if (!found && !marked && !summary.unmapped && !summary.skipped_original && !summary.protected_sources && !summary.source_errors && !summary.unverified_sidecars && !summary.ambiguous_siblings) {
       return '';
     }
-    return '<div class="notice notice-info inline"><p><strong>' + escapeHtml(t('orphanDiscovery', 'Orphan discovery:')) + '</strong> ' + found + ' ' + escapeHtml(t('distinctDimsFound', 'distinct dimensions found.')) + '<br><strong>' + escapeHtml(t('metadataOrphanDimsDelete', 'Metadata orphan dimensions marked for deletion:')) + '</strong> ' + marked + '<br><strong>' + escapeHtml(t('originalFilesProtected', 'Original files protected:')) + '</strong> ' + escapeHtml(summary.skipped_original || 0) + '<br><strong>' + escapeHtml(t('unmappedDiskSkipped', 'Unmapped disk candidates skipped:')) + '</strong> ' + escapeHtml(Math.max(summary.unmapped || 0, summary.unmapped_skipped || 0)) + '</p></div>';
+    return '<div class="notice notice-info inline"><p><strong>' + escapeHtml(t('orphanDiscovery', 'Orphan discovery:')) + '</strong> ' + found + ' ' + escapeHtml(t('distinctDimsFound', 'distinct dimensions found.')) + '<br><strong>' + escapeHtml(t('metadataOrphanDimsDelete', 'Metadata orphan dimensions marked for deletion:')) + '</strong> ' + marked + '<br><strong>' + escapeHtml(t('originalFilesProtected', 'Original files protected:')) + '</strong> ' + escapeHtml(summary.skipped_original || 0) + '<br><strong>' + escapeHtml(t('protectedSources', 'Authoritative source paths protected:')) + '</strong> ' + escapeHtml(summary.protected_sources || 0) + '<br><strong>' + escapeHtml(t('sourceErrors', 'Indeterminate source checks preserved:')) + '</strong> ' + escapeHtml(summary.source_errors || 0) + '<br><strong>' + escapeHtml(t('unverifiedSidecars', 'Unverified format sidecars preserved:')) + '</strong> ' + escapeHtml(summary.unverified_sidecars || 0) + '<br><strong>' + escapeHtml(t('ambiguousSiblings', 'Ambiguous sibling files preserved:')) + '</strong> ' + escapeHtml(summary.ambiguous_siblings || 0) + '<br><strong>' + escapeHtml(t('unmappedDiskSkipped', 'Unmapped disk candidates skipped:')) + '</strong> ' + escapeHtml(Math.max(summary.unmapped || 0, summary.unmapped_skipped || 0)) + '</p></div>';
   }
 
   function loadManifest(page) {
@@ -450,9 +450,11 @@
         $body.append('<tr><td colspan="4">' + escapeHtml(t('manifestEmpty', 'No manifest items match this filter.')) + '</td></tr>');
       } else {
         data.items.forEach(function(item){
-          const attachment = item.attachment_id ? '#' + item.attachment_id : '—';
-          const sizeSource = [item.size, item.source].filter(Boolean).join(' / ') || '—';
-          $body.append('<tr><td><code>' + escapeHtml(item.path || t('unknownPath', 'Unknown item')) + '</code></td><td>' + escapeHtml(attachment) + '</td><td>' + escapeHtml(sizeSource) + '</td><td>' + escapeHtml(formatBytes(item.estimated_bytes || item.bytes)) + '</td></tr>');
+          const proof = Array.isArray(item.ownership_evidence) && item.ownership_evidence.length ? item.ownership_evidence[0] : {};
+          const attachmentId = proof.attachment_id || item.attachment_id;
+          const attachment = attachmentId ? '#' + attachmentId : '—';
+          const evidence = attachmentId ? [t('attachmentMetadata', 'Attachment metadata'), '#' + attachmentId, proof.size || item.size, proof.filename].filter(Boolean).join(' / ') : '—';
+          $body.append('<tr><td><code>' + escapeHtml(item.path || t('unknownPath', 'Unknown item')) + '</code></td><td>' + escapeHtml(attachment) + '</td><td>' + escapeHtml(evidence) + '</td><td>' + escapeHtml(formatBytes(item.estimated_bytes || item.bytes)) + '</td></tr>');
         });
       }
       $('#yotm_manifest_count').text(data.total + ' ' + t('matchedFiles', 'matched files'));
@@ -563,6 +565,9 @@
       let indeterminate = false;
       if (data.scan_phase === 'disk') {
         label = String(t('scanningDiskCount', 'Scanning uploads folders… %s entries checked')).replace('%s', data.disk_entries_processed || 0);
+        indeterminate = true;
+      } else if (data.scan_phase === 'source_index') {
+        label = t('indexingSources', 'Indexing authoritative media sources…');
         indeterminate = true;
       } else if (data.scan_phase === 'manifest') {
         label = t('buildingManifest', 'Building immutable manifest…');

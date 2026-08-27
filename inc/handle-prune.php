@@ -49,33 +49,38 @@ function yotm_prune_prepare() {
 	$job         = yotm_job_create(
 		'prune',
 		array(
-			'scan_base'              => $scan_bases[0],
-			'scan_bases'             => $scan_bases,
-			'scan_subpaths'          => $limit_subpaths,
-			'scan_base_label'        => $scope_label,
-			'scan_base_labels'       => array_map(
+			'scan_base'                => $scan_bases[0],
+			'scan_bases'               => $scan_bases,
+			'scan_subpaths'            => $limit_subpaths,
+			'scan_base_label'          => $scope_label,
+			'scan_base_labels'         => array_map(
 				static function ( $scan_base ) use ( $base ) {
 					return yotm_uploads_relative_label( $base, $scan_base );
 				},
 				$scan_bases
 			),
-			'base'                   => $base,
-			'query_args'             => $query_args,
-			'scan_processed'         => 0,
-			'scan_total_attachments' => $scan_total,
-			'scan_phase'             => 'metadata',
-			'sample'                 => array(),
-			'keep'                   => $keep,
-			'remove'                 => $to_remove,
-			'sizes'                  => $sizes,
-			'discover_orphans'       => $discover_orphans ? 1 : 0,
-			'orphan_summary'         => yotm_initial_orphan_summary(),
-			'disk_queue'             => array(),
-			'disk_entries_processed' => 0,
+			'base'                     => $base,
+			'query_args'               => $query_args,
+			'scan_processed'           => 0,
+			'scan_total_attachments'   => $scan_total,
+			'scan_phase'               => 'source_index',
+			'ownership_schema'         => 'generated_file_v1',
+			'source_index_initialized' => 0,
+			'source_index_complete'    => 0,
+			'source_index_cursor'      => 0,
+			'source_index_max_id'      => 0,
+			'sample'                   => array(),
+			'keep'                     => $keep,
+			'remove'                   => $to_remove,
+			'sizes'                    => $sizes,
+			'discover_orphans'         => $discover_orphans ? 1 : 0,
+			'orphan_summary'           => yotm_initial_orphan_summary(),
+			'disk_queue'               => array(),
+			'disk_entries_processed'   => 0,
 		),
 		array(
 			'status'       => 'scanning',
-			'phase'        => 'metadata',
+			'phase'        => 'source_index',
 			'counter_mode' => 'item_v2',
 			'max_id'       => yotm_get_max_image_attachment_id( $query_args ),
 			'ttl'          => DAY_IN_SECONDS,
@@ -126,7 +131,7 @@ function yotm_prune_scan_batch() {
 		wp_send_json_error( array( 'msg' => __( 'This prune job is not scannable.', 'thumbnail-manager' ) ), 409 );
 	}
 
-	$worker = yotm_job_acquire_worker( $job['id'], array( 'scanning' ), array( 'metadata', 'disk', 'manifest' ) );
+	$worker = yotm_job_acquire_worker( $job['id'], array( 'scanning' ), array( 'source_index', 'metadata', 'disk', 'manifest' ) );
 	if ( is_wp_error( $worker ) ) {
 		if ( 'yotm_job_worker_busy' !== $worker->get_error_code() ) {
 			wp_send_json_error( array( 'msg' => $worker->get_error_message() ), 503 );
@@ -142,9 +147,25 @@ function yotm_prune_scan_batch() {
 	$job = yotm_job_get_by_id( $job['id'] );
 
 	$payload = $job['payload'];
-	$phase   = $payload['scan_phase'] ?? 'metadata';
+	$phase   = $payload['scan_phase'] ?? 'source_index';
+
+	if ( 'source_index' === $phase ) {
+		$indexed = yotm_prune_source_index_batch( $job, $batch, $worker );
+		if ( is_wp_error( $indexed ) ) {
+			wp_send_json_error( array( 'msg' => $indexed->get_error_message() ), 503 );
+		}
+		$job = $indexed['job'];
+		if ( ! $indexed['done'] ) {
+			wp_send_json_success( yotm_build_prune_scan_response( $job, false ) );
+		}
+		$payload = $job['payload'];
+		$phase   = 'metadata';
+	}//end if
 
 	if ( 'metadata' === $phase ) {
+		if ( empty( $payload['source_index_complete'] ) ) {
+			wp_send_json_error( array( 'msg' => __( 'The authoritative source index is incomplete. Run a new scan.', 'thumbnail-manager' ) ), 409 );
+		}
 		$ids = yotm_get_image_attachment_ids_after(
 			is_array( $payload['query_args'] ?? null ) ? $payload['query_args'] : array(),
 			$job['cursor'],
@@ -170,6 +191,7 @@ function yotm_prune_scan_batch() {
 					continue;
 				}
 
+				$candidate                    = yotm_prune_normalize_candidate_evidence( $candidate );
 				$path                         = yotm_normalize_filesystem_path( $candidate['path'] );
 				$item_key                     = hash( 'sha256', $path );
 				$bytes                        = is_file( $path ) ? filesize( $path ) : 0;
@@ -184,7 +206,7 @@ function yotm_prune_scan_batch() {
 				if ( $inserted && count( $payload['sample'] ) < 300 ) {
 					$payload['sample'][] = $path;
 				}
-			}
+			}//end foreach
 
 			$payload['scan_processed'] = (int) ( $payload['scan_processed'] ?? 0 ) + count( $ids );
 			$cursor                    = max( array_map( 'absint', $ids ) );
@@ -288,6 +310,111 @@ function yotm_prune_scan_batch() {
 }
 
 /**
+ * Build the complete site-wide source baseline in bounded resumable batches.
+ *
+ * @param array $job Prune job.
+ * @param int   $limit Attachment batch size.
+ * @param array $worker Current worker ownership.
+ * @return array{done:bool,job:array}|WP_Error
+ */
+function yotm_prune_source_index_batch( $job, $limit, $worker ) {
+	$payload = $job['payload'];
+	if ( empty( $payload['source_index_initialized'] ) ) {
+		$cleared = yotm_media_source_clear_index();
+		if ( is_wp_error( $cleared ) ) {
+			return $cleared;
+		}
+		$payload['source_index_initialized'] = 1;
+		$payload['source_index_cursor']      = 0;
+		$payload['source_index_max_id']      = yotm_get_max_image_attachment_id( array() );
+		if ( ! yotm_job_worker_update( $worker, array( 'payload' => $payload ) ) ) {
+			return yotm_job_storage_error();
+		}
+	}
+
+	$source_ids = yotm_get_image_attachment_ids_after(
+		array(),
+		absint( $payload['source_index_cursor'] ?? 0 ),
+		max( 1, min( 500, absint( $limit ) ) ),
+		absint( $payload['source_index_max_id'] ?? 0 )
+	);
+	if ( ! empty( $source_ids ) ) {
+		foreach ( $source_ids as $source_id ) {
+			$synced = yotm_media_source_sync_attachment( $source_id, null, true );
+			if ( is_wp_error( $synced ) ) {
+				return $synced;
+			}
+		}
+		$payload['source_index_cursor'] = max( array_map( 'absint', $source_ids ) );
+		if ( ! yotm_job_worker_update( $worker, array( 'payload' => $payload ) ) ) {
+			return yotm_job_storage_error();
+		}
+		return array(
+			'done' => false,
+			'job'  => yotm_job_get_by_id( $job['id'] ),
+		);
+	}
+
+	$dirty = yotm_media_source_dirty_state();
+	if ( is_wp_error( $dirty ) ) {
+		return $dirty;
+	}
+	if ( ! empty( $dirty['entries'] ) ) {
+		$payload['source_index_initialized'] = 0;
+		$payload['source_index_complete']    = 0;
+		$payload['source_index_cursor']      = 0;
+		$payload['source_index_max_id']      = 0;
+		if ( ! yotm_job_worker_update( $worker, array( 'payload' => $payload ) ) ) {
+			return yotm_job_storage_error();
+		}
+		return array(
+			'done' => false,
+			'job'  => yotm_job_get_by_id( $job['id'] ),
+		);
+	}
+
+	$payload['source_index_complete'] = 1;
+	$payload['scan_phase']            = 'metadata';
+	if ( ! yotm_job_worker_update(
+		$worker,
+		array(
+			'payload' => $payload,
+			'phase'   => 'metadata',
+			'cursor'  => 0,
+		)
+	) ) {
+		return yotm_job_storage_error();
+	}
+	return array(
+		'done' => true,
+		'job'  => yotm_job_get_by_id( $job['id'] ),
+	);
+}
+
+/**
+ * Deduplicate and sort immutable ownership evidence before persistence.
+ *
+ * @param array $candidate Candidate payload.
+ * @return array
+ */
+function yotm_prune_normalize_candidate_evidence( $candidate ) {
+	foreach ( array( 'metadata_refs', 'ownership_evidence' ) as $field ) {
+		$normalized = array();
+		foreach ( (array) ( $candidate[ $field ] ?? array() ) as $entry ) {
+			if ( ! is_array( $entry ) ) {
+				continue;
+			}
+			$key                = absint( $entry['attachment_id'] ?? 0 ) . ':' . sanitize_key( $entry['size'] ?? '' ) . ':' . sanitize_file_name( $entry['filename'] ?? '' ) . ':' . sanitize_key( $entry['selection'] ?? '' );
+			$normalized[ $key ] = $entry;
+		}
+		ksort( $normalized );
+		$candidate[ $field ] = array_values( $normalized );
+	}
+
+	return $candidate;
+}
+
+/**
  * Scan disk entries with a persisted breadth-first directory cursor.
  *
  * @param array      $job Job row.
@@ -369,6 +496,12 @@ function yotm_prune_scan_disk_batch( $job, $limit = 100, $worker = null ) {
 						$summary['found'][ $dim ] = (int) ( $summary['found'][ $dim ] ?? 0 ) + 1;
 
 						if ( ! yotm_job_item_exists( $job['id'], hash( 'sha256', $path ) ) ) {
+							$filename = wp_basename( $path );
+							if ( preg_match( '/\.(?:jpe?g|png|gif)\.(?:webp|avif)$/i', $filename ) ) {
+								$summary['unverified_sidecars'] = (int) ( $summary['unverified_sidecars'] ?? 0 ) + 1;
+							} elseif ( preg_match( '/(?:\.(?:bak|backup|orig|original|old|tmp|temp)(?:\.|$)|@\d+x|-\d+\.)/i', $filename ) ) {
+								$summary['ambiguous_siblings'] = (int) ( $summary['ambiguous_siblings'] ?? 0 ) + 1;
+							}
 							$summary['unmapped']         = (int) ( $summary['unmapped'] ?? 0 ) + 1;
 							$summary['unmapped_skipped'] = (int) ( $summary['unmapped_skipped'] ?? 0 ) + 1;
 							if ( count( $summary['unmapped_sample'] ) < 20 ) {
@@ -376,7 +509,7 @@ function yotm_prune_scan_disk_batch( $job, $limit = 100, $worker = null ) {
 							}
 						}
 					}
-				}
+				}//end if
 			}//end if
 		}//end while
 
@@ -422,7 +555,7 @@ function yotm_build_prune_scan_response( $job, $done ) {
 
 	if ( $done ) {
 		$percent = 100;
-	} elseif ( 'metadata' === $phase ) {
+	} elseif ( in_array( $phase, array( 'source_index', 'metadata' ), true ) ) {
 		$percent = min( ! empty( $payload['discover_orphans'] ) ? 90 : 98, ( $processed / $scan_total ) * 90 );
 	} elseif ( 'disk' === $phase ) {
 		$percent = 95;
@@ -469,6 +602,10 @@ function yotm_initial_orphan_summary() {
 		'unmapped'                => 0,
 		'unmapped_sample'         => array(),
 		'unmapped_skipped'        => 0,
+		'unverified_sidecars'     => 0,
+		'ambiguous_siblings'      => 0,
+		'protected_sources'       => 0,
+		'source_errors'           => 0,
 	);
 }
 
@@ -480,7 +617,14 @@ function yotm_initial_orphan_summary() {
  * @param array  $args Candidate metadata.
  */
 function yotm_add_prune_candidate( &$candidates, $path, $args = array() ) {
-	$path = yotm_normalize_filesystem_path( $path );
+	$path  = yotm_normalize_filesystem_path( $path );
+	$proof = array(
+		'attachment_id' => absint( $args['attachment_id'] ?? 0 ),
+		'size'          => sanitize_key( $args['size'] ?? '' ),
+		'filename'      => wp_basename( $path ),
+		'mime'          => sanitize_mime_type( $args['mime'] ?? '' ),
+		'selection'     => sanitize_key( $args['selection'] ?? '' ),
+	);
 
 	if ( isset( $candidates[ $path ] ) ) {
 		if ( ! empty( $args['remove_metadata'] ) ) {
@@ -502,17 +646,21 @@ function yotm_add_prune_candidate( &$candidates, $path, $args = array() ) {
 				'filename'      => wp_basename( $path ),
 			);
 		}
+		$candidates[ $path ]['ownership_evidence'][] = $proof;
 
 		return;
 	}//end if
 
 	$candidates[ $path ] = array(
-		'path'            => $path,
-		'attachment_id'   => isset( $args['attachment_id'] ) ? absint( $args['attachment_id'] ) : 0,
-		'size'            => isset( $args['size'] ) ? sanitize_key( $args['size'] ) : '',
-		'source'          => isset( $args['source'] ) ? sanitize_key( $args['source'] ) : 'metadata',
-		'remove_metadata' => ! empty( $args['remove_metadata'] ) ? 1 : 0,
-		'metadata_refs'   => ! empty( $args['attachment_id'] ) && ! empty( $args['size'] ) && ! empty( $args['remove_metadata'] )
+		'path'               => $path,
+		'attachment_id'      => isset( $args['attachment_id'] ) ? absint( $args['attachment_id'] ) : 0,
+		'size'               => isset( $args['size'] ) ? sanitize_key( $args['size'] ) : '',
+		'source'             => isset( $args['source'] ) ? sanitize_key( $args['source'] ) : 'metadata',
+		'ownership_schema'   => 'generated_file_v1',
+		'ownership'          => 'metadata_size',
+		'ownership_evidence' => array( $proof ),
+		'remove_metadata'    => ! empty( $args['remove_metadata'] ) ? 1 : 0,
+		'metadata_refs'      => ! empty( $args['attachment_id'] ) && ! empty( $args['size'] ) && ! empty( $args['remove_metadata'] )
 			? array(
 				array(
 					'attachment_id' => absint( $args['attachment_id'] ),
@@ -568,7 +716,11 @@ function yotm_collect_metadata_prune_candidates_for_ids( $ids, $scan_bases, $kee
 			continue;
 		}
 
-		$upload_dir = trailingslashit( dirname( $original_path ) );
+		$uploads       = wp_get_upload_dir();
+		$metadata_file = ! empty( $metadata['file'] ) && is_string( $metadata['file'] )
+			? trailingslashit( (string) ( $uploads['basedir'] ?? '' ) ) . ltrim( $metadata['file'], '/\\' )
+			: $original_path;
+		$upload_dir    = trailingslashit( dirname( yotm_normalize_filesystem_path( $metadata_file ) ) );
 
 		foreach ( $metadata['sizes'] as $size_name => $size_data ) {
 			if ( ! is_array( $size_data ) ) {
@@ -614,26 +766,32 @@ function yotm_collect_metadata_prune_candidates_for_ids( $ids, $scan_bases, $kee
 				continue;
 			}
 
-			foreach ( yotm_get_thumbnail_file_variants( $thumb_path ) as $variant_path ) {
-				if (
-					$variant_path === $original_path
-					|| ! yotm_is_path_inside_any_dir( $variant_path, $scan_bases )
-					|| ! is_file( $variant_path )
-				) {
-					continue;
-				}
-
-				yotm_add_prune_candidate(
-					$candidates,
-					$variant_path,
-					array(
-						'attachment_id'   => $attachment_id,
-						'size'            => (string) $size_name,
-						'source'          => $variant_path === $thumb_path ? $source : $source . '_variant',
-						'remove_metadata' => $variant_path === $thumb_path,
-					)
-				);
+			if ( ! is_file( $thumb_path ) ) {
+				continue;
 			}
+
+			$protected = yotm_media_source_path_is_authoritative( $thumb_path );
+			if ( is_wp_error( $protected ) ) {
+				$orphan_summary['source_errors'] = (int) ( $orphan_summary['source_errors'] ?? 0 ) + 1;
+				continue;
+			}
+			if ( $protected ) {
+				$orphan_summary['protected_sources'] = (int) ( $orphan_summary['protected_sources'] ?? 0 ) + 1;
+				continue;
+			}
+
+			yotm_add_prune_candidate(
+				$candidates,
+				$thumb_path,
+				array(
+					'attachment_id'   => $attachment_id,
+					'size'            => (string) $size_name,
+					'source'          => $source,
+					'remove_metadata' => true,
+					'mime'            => (string) ( $size_data['mime-type'] ?? '' ),
+					'selection'       => $registered_remove ? 'registered_remove' : 'metadata_orphan',
+				)
+			);
 		}//end foreach
 	}//end foreach
 
@@ -688,34 +846,6 @@ function yotm_dimension_matches_keep( $dim, $keep_dims ) {
  */
 function yotm_get_thumbnail_file_variants( $thumb_path ) {
 	$thumb_path = yotm_normalize_filesystem_path( $thumb_path );
-	$dir        = dirname( $thumb_path );
 
-	if ( ! is_dir( $dir ) ) {
-		return is_file( $thumb_path ) ? array( $thumb_path ) : array();
-	}
-
-	$stem = pathinfo( $thumb_path, PATHINFO_FILENAME );
-	$rx   = '/^' . preg_quote( $stem, '/' ) . '(?:\.(?:jpg|jpeg|png|gif|webp|avif|bak|backup|orig|original|old|tmp|temp))+$/i';
-	$out  = is_file( $thumb_path ) ? array( $thumb_path ) : array();
-
-	try {
-		$it = new DirectoryIterator( $dir );
-		foreach ( $it as $file_info ) {
-			if ( ! $file_info->isFile() ) {
-				continue;
-			}
-
-			if ( preg_match( $rx, $file_info->getFilename() ) ) {
-				$out[] = yotm_normalize_filesystem_path( $file_info->getPathname() );
-			}
-		}
-	} catch ( Throwable $error ) {
-		// Return the primary file when the directory cannot be enumerated.
-		$out = array_values( array_unique( $out ) );
-	}
-
-	$out = array_values( array_unique( $out ) );
-	sort( $out );
-
-	return $out;
+	return is_file( $thumb_path ) ? array( $thumb_path ) : array();
 }

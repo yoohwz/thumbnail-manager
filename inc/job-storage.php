@@ -10,7 +10,11 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 if ( ! defined( 'YOTM_JOB_DB_VERSION' ) ) {
-	define( 'YOTM_JOB_DB_VERSION', '1.1.0' );
+	define( 'YOTM_JOB_DB_VERSION', '1.2.0' );
+}
+
+if ( ! defined( 'YOTM_JOB_DB_PRE_SOURCE_VERSION' ) ) {
+	define( 'YOTM_JOB_DB_PRE_SOURCE_VERSION', '1.1.0' );
 }
 
 if ( ! defined( 'YOTM_JOB_DB_MIGRATION_BACKOFF' ) ) {
@@ -28,21 +32,22 @@ if ( ! defined( 'YOTM_JOB_AUDIT_RETENTION_SECONDS' ) ) {
 /**
  * Return the persistent job table names for the current site.
  *
- * @return array{jobs:string,items:string}
+ * @return array{jobs:string,items:string,sources:string}
  */
 function yotm_job_table_names() {
 	global $wpdb;
 
 	return array(
-		'jobs'  => $wpdb->prefix . 'yotm_jobs',
-		'items' => $wpdb->prefix . 'yotm_job_items',
+		'jobs'    => $wpdb->prefix . 'yotm_jobs',
+		'items'   => $wpdb->prefix . 'yotm_job_items',
+		'sources' => $wpdb->prefix . 'yotm_media_sources',
 	);
 }
 
 /**
  * Return the physical presence of both job tables for the current site.
  *
- * @return array{jobs:bool,items:bool}
+ * @return array{jobs:bool,items:bool,sources:bool}
  */
 function yotm_job_table_presence() {
 	global $wpdb;
@@ -68,7 +73,7 @@ function yotm_job_table_presence() {
 function yotm_job_tables_exist() {
 	$presence = yotm_job_table_presence();
 
-	return $presence['jobs'] && $presence['items'];
+	return $presence['jobs'] && $presence['items'] && $presence['sources'];
 }
 
 /**
@@ -180,14 +185,28 @@ function yotm_run_job_table_migration() {
 		KEY job_status (job_id,status,id),
 		KEY job_claim (job_id,status,claim_expires_at,id)
 	) {$charset_collate};";
+	$sources_sql     = "CREATE TABLE {$tables['sources']} (
+		id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+		attachment_id bigint(20) unsigned NOT NULL,
+		source_kind varchar(24) NOT NULL,
+		path_hash char(64) NOT NULL,
+		path text NOT NULL,
+		updated_at datetime NOT NULL,
+		PRIMARY KEY  (id),
+		UNIQUE KEY attachment_source (attachment_id,source_kind,path_hash),
+		KEY path_attachment (path_hash,attachment_id),
+		KEY attachment_id (attachment_id)
+	) {$charset_collate};";
 
 	dbDelta( $jobs_sql );
 	$jobs_error = (string) $wpdb->last_error;
 	dbDelta( $items_sql );
 	$items_error = (string) $wpdb->last_error;
+	dbDelta( $sources_sql );
+	$sources_error = (string) $wpdb->last_error;
 
-	if ( '' !== $jobs_error || '' !== $items_error || ! yotm_job_tables_exist() ) {
-		$database_error = '' !== $jobs_error ? $jobs_error : $items_error;
+	if ( '' !== $jobs_error || '' !== $items_error || '' !== $sources_error || ! yotm_job_tables_exist() ) {
+		$database_error = '' !== $jobs_error ? $jobs_error : ( '' !== $items_error ? $items_error : $sources_error );
 
 		return yotm_job_storage_error( 'yotm_job_storage_unavailable', $database_error );
 	}
@@ -206,8 +225,9 @@ function yotm_run_job_table_migration() {
  * Ensure persistent job storage is ready for the current site.
  *
  * The result is memoized for the current site and request. Automatic DDL is
- * allowed only for an absent/older marker when both tables are either present
- * or absent. Partial storage and current-marker data loss always fail closed.
+ * allowed only for an absent/older marker when all tables are either present
+ * or absent, or for a known two-table predecessor. Partial storage and
+ * current-marker data loss always fail closed.
  *
  * @return true|WP_Error
  */
@@ -224,18 +244,22 @@ function yotm_job_storage_ready() {
 
 	$stored_version = get_option( 'yotm_job_db_version' );
 	$presence       = yotm_job_table_presence();
-	$both_present   = $presence['jobs'] && $presence['items'];
-	$both_absent    = ! $presence['jobs'] && ! $presence['items'];
+	$all_present    = $presence['jobs'] && $presence['items'] && $presence['sources'];
+	$all_absent     = ! $presence['jobs'] && ! $presence['items'] && ! $presence['sources'];
+	$predecessor    = in_array( $stored_version, array( '1.0.1', YOTM_JOB_DB_PRE_SOURCE_VERSION ), true )
+		&& $presence['jobs']
+		&& $presence['items']
+		&& ! $presence['sources'];
 	$is_current     = YOTM_JOB_DB_VERSION === $stored_version;
 
 	if ( $is_current ) {
-		$result                                        = $both_present ? true : yotm_job_storage_error( 'yotm_job_storage_inconsistent' );
+		$result                                        = $all_present ? true : yotm_job_storage_error( 'yotm_job_storage_inconsistent' );
 		$GLOBALS['yotm_job_storage_readiness'][ $key ] = $result;
 
 		return $result;
 	}
 
-	if ( ! $both_present && ! $both_absent ) {
+	if ( ! $all_present && ! $all_absent && ! $predecessor ) {
 		$result                                        = yotm_job_storage_error( 'yotm_job_storage_inconsistent' );
 		$GLOBALS['yotm_job_storage_readiness'][ $key ] = $result;
 
@@ -1206,8 +1230,9 @@ function yotm_job_merge_item_payload( $job_id, $item_key, $payload ) {
 		return false;
 	}
 
-	$current = yotm_job_decode_payload( $row->payload );
-	$refs    = array();
+	$current  = yotm_job_decode_payload( $row->payload );
+	$refs     = array();
+	$evidence = array();
 
 	foreach ( array_merge( (array) ( $current['metadata_refs'] ?? array() ), (array) ( $payload['metadata_refs'] ?? array() ) ) as $ref ) {
 		if ( ! is_array( $ref ) ) {
@@ -1223,6 +1248,37 @@ function yotm_job_merge_item_payload( $job_id, $item_key, $payload ) {
 	}
 
 	$current['metadata_refs'] = array_values( $refs );
+
+	foreach ( array_merge( (array) ( $current['ownership_evidence'] ?? array() ), (array) ( $payload['ownership_evidence'] ?? array() ) ) as $proof ) {
+		if ( ! is_array( $proof ) ) {
+			continue;
+		}
+
+		$attachment_id = absint( $proof['attachment_id'] ?? 0 );
+		$size          = sanitize_key( $proof['size'] ?? '' );
+		$filename      = sanitize_file_name( $proof['filename'] ?? '' );
+		$selection     = sanitize_key( $proof['selection'] ?? '' );
+		$key           = $attachment_id . ':' . $size . ':' . $filename . ':' . $selection;
+
+		if ( ! $attachment_id || '' === $size || '' === $filename || '' === $selection ) {
+			continue;
+		}
+
+		$evidence[ $key ] = array(
+			'attachment_id' => $attachment_id,
+			'size'          => $size,
+			'filename'      => $filename,
+			'mime'          => sanitize_mime_type( $proof['mime'] ?? '' ),
+			'selection'     => $selection,
+		);
+	}//end foreach
+
+	ksort( $refs );
+	ksort( $evidence );
+	$current['metadata_refs']      = array_values( $refs );
+	$current['ownership_evidence'] = array_values( $evidence );
+	$current['ownership_schema']   = sanitize_key( $payload['ownership_schema'] ?? ( $current['ownership_schema'] ?? '' ) );
+	$current['ownership']          = sanitize_key( $payload['ownership'] ?? ( $current['ownership'] ?? '' ) );
 
 	if ( empty( $current['remove_metadata'] ) && ! empty( $payload['remove_metadata'] ) ) {
 		$current['remove_metadata'] = 1;
@@ -1476,6 +1532,31 @@ function yotm_job_refresh_item_claim( $item ) {
 }
 
 /**
+ * Return a transiently blocked item to the queue for an immediate safe retry.
+ *
+ * @param array $item Claimed item.
+ * @return bool
+ */
+function yotm_job_release_item_claim( $item ) {
+	global $wpdb;
+
+	$tables = yotm_job_table_names();
+	// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Plugin-owned table name is derived from the trusted WordPress prefix; values use placeholders.
+	$sql = $wpdb->prepare(
+		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Plugin-owned table name is trusted; values use placeholders.
+		"UPDATE {$tables['items']} SET status = 'queued', claim_token = '', claim_expires_at = NULL, updated_at = %s
+		WHERE id = %d AND status = 'processing' AND claim_token = %s AND claim_generation = %d",
+		gmdate( 'Y-m-d H:i:s' ),
+		absint( $item['id'] ?? 0 ),
+		sanitize_text_field( $item['claim_token'] ?? '' ),
+		absint( $item['claim_generation'] ?? 0 )
+	);
+
+	// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Claim-fenced transient requeue must be uncached; prepared above.
+	return 1 === $wpdb->query( $sql );
+}
+
+/**
  * Finalize an item only for the current claim generation.
  *
  * @param array    $item Claimed item.
@@ -1686,15 +1767,18 @@ function yotm_job_get_items_page( $job_id, $page = 1, $per_page = 25, $search = 
 	foreach ( $rows as $row ) {
 		$payload = yotm_job_decode_payload( $row->payload );
 		$items[] = array(
-			'id'              => (int) $row->id,
-			'path'            => (string) ( $payload['path'] ?? '' ),
-			'attachment_id'   => absint( $payload['attachment_id'] ?? 0 ),
-			'size'            => (string) ( $payload['size'] ?? '' ),
-			'source'          => (string) ( $payload['source'] ?? '' ),
-			'status'          => (string) $row->status,
-			'error'           => (string) $row->error,
-			'estimated_bytes' => absint( $payload['estimated_bytes'] ?? $row->bytes ),
-			'bytes'           => (int) $row->bytes,
+			'id'                 => (int) $row->id,
+			'path'               => (string) ( $payload['path'] ?? '' ),
+			'attachment_id'      => absint( $payload['attachment_id'] ?? 0 ),
+			'size'               => (string) ( $payload['size'] ?? '' ),
+			'source'             => (string) ( $payload['source'] ?? '' ),
+			'ownership'          => (string) ( $payload['ownership'] ?? '' ),
+			'ownership_schema'   => (string) ( $payload['ownership_schema'] ?? '' ),
+			'ownership_evidence' => is_array( $payload['ownership_evidence'] ?? null ) ? $payload['ownership_evidence'] : array(),
+			'status'             => (string) $row->status,
+			'error'              => (string) $row->error,
+			'estimated_bytes'    => absint( $payload['estimated_bytes'] ?? $row->bytes ),
+			'bytes'              => (int) $row->bytes,
 		);
 	}
 

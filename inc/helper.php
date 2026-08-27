@@ -4,31 +4,6 @@ if (!defined('ABSPATH')) {
 	exit;
 }
 
-/** ===== Discovery helpers ===== */
-function yotm_discover_dims_in_folder($scan_base, $limit_preview=400){
-    // Returns ['dims'=>['300x300'=>count,...], 'sample'=>['300x300'=>['path1','path2'...]], 'total_files'=>N]
-    $dims = []; $sample=[]; $total=0;
-    $rx = '/-(\d+)x(\d+)(?:@\d+x)?(?:-\d+)?(?:\.(?:jpg|jpeg|png|gif|avif|bak|backup|orig|original|old|tmp|temp))*\.(?:jpg|jpeg|png|gif|webp|avif)$/i';
-    try {
-        $rii = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($scan_base, FilesystemIterator::SKIP_DOTS));
-        foreach ($rii as $f){
-            if (!$f->isFile()) continue;
-            $path = $f->getPathname();
-            if (strpos($path, DIRECTORY_SEPARATOR.'imagify-backups'.DIRECTORY_SEPARATOR)!==false) continue;
-            $total++;
-            if (preg_match($rx,$path,$m)){
-                $dim = $m[1].'x'.$m[2];
-                if (!isset($dims[$dim])) $dims[$dim]=0;
-                $dims[$dim]++;
-                if (!isset($sample[$dim])) $sample[$dim]=[];
-                if (count($sample[$dim]) < $limit_preview) $sample[$dim][] = $path;
-            }
-        }
-    } catch (Throwable $e) {}
-    arsort($dims); // most common first
-    return ['dims'=>$dims, 'sample'=>$sample, 'total_files'=>$total];
-}
-
 function yotm_keep_dims_from_sizes($keep_names, $sizes){
     // Returns ['exact'=>['300x300','1200x675'], 'width_any'=>[768, ...]]
     $exact=[]; $width_any=[];
@@ -41,16 +16,6 @@ function yotm_keep_dims_from_sizes($keep_names, $sizes){
         if ($h>0) $exact[] = "{$w}x{$h}"; else $width_any[]=$w;
     }
     return ['exact'=>$exact, 'width_any'=>$width_any];
-}
-
-function yotm_patterns_for_dims($dims_to_delete, $final_rx, $inner_rx){
-    $after = '(?:@\d+x)?(?:-\d+)?';
-    $tail  = '(?:\.(?:'.$inner_rx.'))*\.('.$final_rx.')$';
-    $patterns=[];
-    foreach ($dims_to_delete as $dim){
-        $patterns[]='/-'.preg_quote($dim,'/').$after.$tail.'/i';
-    }
-    return $patterns;
 }
 
 function yotm_normalize_filesystem_path( $path ) {
