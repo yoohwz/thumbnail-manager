@@ -43,7 +43,7 @@ function yotm_job_table_presence() {
 	$suppressing = $wpdb->suppress_errors();
 
 	foreach ( yotm_job_table_names() as $key => $table ) {
-		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table names are derived from the trusted WordPress prefix.
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Physical schema readiness cannot use the object cache; table names are derived from the trusted WordPress prefix.
 		$presence[ $key ] = ! empty( $wpdb->get_results( "DESCRIBE {$table}" ) );
 	}
 
