@@ -418,7 +418,10 @@ function yotm_job_worker_lock_name( $job_id ) {
 function yotm_job_acquire_named_lock( $lock_name ) {
 	global $wpdb;
 
-	return 1 === (int) $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK(%s, 0)', sanitize_text_field( $lock_name ) ) );
+	$sql = $wpdb->prepare( 'SELECT GET_LOCK(%s, 0)', sanitize_text_field( $lock_name ) );
+
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared -- Advisory locks are connection state and cannot use the object cache.
+	return 1 === (int) $wpdb->get_var( $sql );
 }
 
 /**
@@ -430,7 +433,10 @@ function yotm_job_acquire_named_lock( $lock_name ) {
 function yotm_job_release_named_lock( $lock_name ) {
 	global $wpdb;
 
-	return 1 === (int) $wpdb->get_var( $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', sanitize_text_field( $lock_name ) ) );
+	$sql = $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', sanitize_text_field( $lock_name ) );
+
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared -- Advisory locks are connection state and cannot use the object cache.
+	return 1 === (int) $wpdb->get_var( $sql );
 }
 
 /**
@@ -506,15 +512,17 @@ function yotm_job_acquire_worker( $job_id, $statuses, $phases = array() ) {
 		AND (worker_token = '' OR worker_lease_expires_at IS NULL OR worker_lease_expires_at < %s)";
 	$args[] = $now;
 	$args[] = $now;
-	$sql    = $wpdb->prepare(
+	// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Table/WHERE fragments are plugin-owned or built from fixed predicates; arguments are assembled above.
+	$sql = $wpdb->prepare(
 		"UPDATE {$tables['jobs']}
 		SET worker_token = %s, worker_generation = worker_generation + 1,
 		worker_lease_expires_at = %s, updated_at = %s
 		WHERE {$where}",
 		...$args
 	);
+	// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
 
-	// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Prepared above; table name is plugin-owned.
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Atomic worker ownership requires an uncached conditional update; prepared above.
 	$updated = $wpdb->query( $sql );
 	if ( 1 !== $updated ) {
 		yotm_job_release_named_lock( $lock_name );
@@ -573,12 +581,14 @@ function yotm_job_refresh_worker( $worker ) {
 
 	$where .= ' AND expires_at >= %s';
 	$args[] = $now;
-	$sql    = $wpdb->prepare(
+	// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Table/WHERE fragments are plugin-owned or built from fixed predicates; arguments are assembled above.
+	$sql = $wpdb->prepare(
 		"UPDATE {$tables['jobs']} SET worker_lease_expires_at = %s, updated_at = %s WHERE {$where}",
 		...$args
 	);
+	// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
 
-	// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Prepared above; table name is plugin-owned.
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Lease refresh requires an uncached conditional update; prepared above.
 	$updated = $wpdb->query( $sql );
 	if ( false === $updated ) {
 		return false;
@@ -612,16 +622,17 @@ function yotm_job_release_worker( $worker ) {
 	}
 
 	$tables = yotm_job_table_names();
-	$wpdb->query(
-		$wpdb->prepare(
-			"UPDATE {$tables['jobs']} SET worker_token = '', worker_lease_expires_at = NULL, updated_at = %s
-			WHERE id = %d AND worker_token = %s AND worker_generation = %d",
-			gmdate( 'Y-m-d H:i:s' ),
-			absint( $worker['job_id'] ?? 0 ),
-			sanitize_text_field( $worker['token'] ?? '' ),
-			absint( $worker['generation'] ?? 0 )
-		)
+	// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name is plugin-owned.
+	$sql = $wpdb->prepare(
+		"UPDATE {$tables['jobs']} SET worker_token = '', worker_lease_expires_at = NULL, updated_at = %s
+		WHERE id = %d AND worker_token = %s AND worker_generation = %d",
+		gmdate( 'Y-m-d H:i:s' ),
+		absint( $worker['job_id'] ?? 0 ),
+		sanitize_text_field( $worker['token'] ?? '' ),
+		absint( $worker['generation'] ?? 0 )
 	);
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Request shutdown must clear persisted ownership without caching; prepared above.
+	$wpdb->query( $sql );
 	yotm_job_release_named_lock( $worker['lock_name'] );
 
 	if ( isset( $GLOBALS['yotm_job_workers'][ $worker['lock_name'] ] ) ) {
@@ -726,15 +737,17 @@ function yotm_job_get_active_for_current_user( $type ) {
 	$statuses     = yotm_job_active_statuses();
 	$placeholders = implode( ',', array_fill( 0, count( $statuses ), '%s' ) );
 	$args         = array_merge( array( get_current_blog_id(), get_current_user_id(), sanitize_key( $type ) ), $statuses );
-	$sql          = $wpdb->prepare(
+	// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Table and placeholder list are plugin-owned; arguments are assembled above.
+	$sql = $wpdb->prepare(
 		"SELECT * FROM {$tables['jobs']}
 		WHERE blog_id = %d AND user_id = %d AND type = %s
 		AND status IN ({$placeholders})
 		ORDER BY id DESC LIMIT 1",
 		...$args
 	);
+	// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
 
-	// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- Prepared above; table names are plugin-owned.
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Active persistent jobs must be read uncached; prepared above.
 	$row         = $wpdb->get_row( $sql );
 	$query_error = yotm_job_last_database_error();
 
@@ -870,15 +883,17 @@ function yotm_job_find_destructive_lock() {
 	$statuses     = yotm_job_active_statuses();
 	$placeholders = implode( ',', array_fill( 0, count( $statuses ), '%s' ) );
 	$args         = array_merge( array( get_current_blog_id(), 'prune', 'regenerate' ), $statuses );
-	$sql          = $wpdb->prepare(
+	// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Table and placeholder list are plugin-owned; arguments are assembled above.
+	$sql = $wpdb->prepare(
 		"SELECT * FROM {$tables['jobs']}
 		WHERE blog_id = %d AND type IN (%s,%s)
 		AND status IN ({$placeholders})
 		ORDER BY id DESC LIMIT 1",
 		...$args
 	);
+	// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
 
-	// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- Prepared above; table names are plugin-owned.
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Destructive lock state must be read uncached; prepared above.
 	$row         = $wpdb->get_row( $sql );
 	$query_error = yotm_job_last_database_error();
 
@@ -989,14 +1004,14 @@ function yotm_job_update_where( $job_id, $fields, $conditions = array() ) {
 	}
 
 	$tables = yotm_job_table_names();
-	// phpcs:disable WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare,WordPress.DB.PreparedSQL.NotPrepared -- The query fragments contain allowlisted columns and the placeholders are assembled above.
+	// phpcs:disable WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare,WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- The query fragments contain allowlisted columns and the placeholders are assembled above.
 	$sql = $wpdb->prepare(
 		'UPDATE ' . $tables['jobs'] . ' SET ' . implode( ', ', $set ) . ' WHERE ' . implode( ' AND ', $where ),
 		...$args
 	);
-	// phpcs:enable WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare,WordPress.DB.PreparedSQL.NotPrepared
+	// phpcs:enable WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare,WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
 
-	// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Prepared above; columns and table are allowlisted/plugin-owned.
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Compare-and-swap persistence must be uncached; prepared from allowlisted columns above.
 	$updated = $wpdb->query( $sql );
 
 	return false !== $updated && ( empty( $conditions['require_match'] ) || 1 === $updated );
@@ -1327,7 +1342,8 @@ function yotm_job_claim_items( $worker, $limit = 100 ) {
 	$job_args[] = $now;
 	$args       = array( $claim_token, $claim_expires, $now, absint( $worker['job_id'] ?? 0 ), $now );
 	$args       = array_merge( $args, $job_args, array( $limit ) );
-	$sql        = $wpdb->prepare(
+	// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Tables and worker predicates are plugin-owned; arguments are assembled above.
+	$sql = $wpdb->prepare(
 		"UPDATE {$tables['items']}
 		SET status = 'processing', claim_token = %s, claim_generation = claim_generation + 1,
 		claim_expires_at = %s, attempts = attempts + 1, updated_at = %s
@@ -1338,8 +1354,9 @@ function yotm_job_claim_items( $worker, $limit = 100 ) {
 		ORDER BY id ASC LIMIT %d",
 		...$args
 	);
+	// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
 
-	// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Prepared above; tables are plugin-owned.
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Atomic queue claims must be uncached; prepared above.
 	$claimed = $wpdb->query( $sql );
 	if ( false === $claimed ) {
 		return yotm_job_storage_error( 'yotm_job_storage_unavailable', (string) $wpdb->last_error );
@@ -1349,13 +1366,14 @@ function yotm_job_claim_items( $worker, $limit = 100 ) {
 		return array();
 	}
 
-	$rows = $wpdb->get_results(
-		$wpdb->prepare(
-			"SELECT * FROM {$tables['items']} WHERE job_id = %d AND claim_token = %s ORDER BY id ASC",
-			absint( $worker['job_id'] ?? 0 ),
-			$claim_token
-		)
+	// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name is plugin-owned.
+	$sql = $wpdb->prepare(
+		"SELECT * FROM {$tables['items']} WHERE job_id = %d AND claim_token = %s ORDER BY id ASC",
+		absint( $worker['job_id'] ?? 0 ),
+		$claim_token
 	);
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Newly claimed persistent rows must be read uncached; prepared above.
+	$rows = $wpdb->get_results( $sql );
 	$out  = array();
 
 	foreach ( $rows as $row ) {
@@ -1378,7 +1396,8 @@ function yotm_job_refresh_item_claim( $item ) {
 	global $wpdb;
 
 	$tables = yotm_job_table_names();
-	$sql    = $wpdb->prepare(
+	// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name is plugin-owned.
+	$sql = $wpdb->prepare(
 		"UPDATE {$tables['items']} SET claim_expires_at = %s, updated_at = %s
 		WHERE id = %d AND status = 'processing' AND claim_token = %s AND claim_generation = %d",
 		gmdate( 'Y-m-d H:i:s', time() + YOTM_JOB_WORKER_LEASE_SECONDS ),
@@ -1387,7 +1406,7 @@ function yotm_job_refresh_item_claim( $item ) {
 		sanitize_text_field( $item['claim_token'] ?? '' ),
 		absint( $item['claim_generation'] ?? 0 )
 	);
-	// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Prepared above; table name is plugin-owned.
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Claim ownership refresh must be uncached; prepared above.
 	$updated = $wpdb->query( $sql );
 
 	if ( false === $updated ) {
@@ -1398,11 +1417,12 @@ function yotm_job_refresh_item_claim( $item ) {
 		return true;
 	}
 
+	// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name is plugin-owned.
 	$sql = $wpdb->prepare(
 		"SELECT status,claim_token,claim_generation FROM {$tables['items']} WHERE id = %d",
 		absint( $item['id'] ?? 0 )
 	);
-	// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Prepared above; table name is plugin-owned.
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Current claim ownership must be read uncached; prepared above.
 	$current = $wpdb->get_row( $sql, ARRAY_A );
 
 	return is_array( $current )
@@ -1444,13 +1464,15 @@ function yotm_job_finish_item( $item, $status, $error = '', $bytes = null ) {
 	$args[] = sanitize_text_field( $item['claim_token'] ?? '' );
 	$args[] = absint( $item['claim_generation'] ?? 0 );
 	$tables = yotm_job_table_names();
-	$sql    = $wpdb->prepare(
+	// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Table and SET fragments are plugin-owned; arguments are assembled above.
+	$sql = $wpdb->prepare(
 		"UPDATE {$tables['items']} SET {$set}
 		WHERE id = %d AND status = 'processing' AND claim_token = %s AND claim_generation = %d",
 		...$args
 	);
+	// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
 
-	// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Prepared above; set columns are fixed and table is plugin-owned.
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Claim-fenced result persistence must be uncached; prepared above.
 	return 1 === $wpdb->query( $sql );
 }
 
@@ -1464,19 +1486,19 @@ function yotm_job_item_counters( $job_id ) {
 	global $wpdb;
 
 	$tables = yotm_job_table_names();
-	$row    = $wpdb->get_row(
-		$wpdb->prepare(
-			"SELECT
-			SUM(CASE WHEN status IN ('done','skipped','failed') THEN 1 ELSE 0 END) processed,
-			SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) succeeded,
-			SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) failed,
-			SUM(CASE WHEN status = 'done' THEN bytes ELSE 0 END) bytes,
-			SUM(CASE WHEN status IN ('queued','processing') THEN 1 ELSE 0 END) remaining
-			FROM {$tables['items']} WHERE job_id = %d",
-			absint( $job_id )
-		),
-		ARRAY_A
+	// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name is plugin-owned.
+	$sql = $wpdb->prepare(
+		"SELECT
+		SUM(CASE WHEN status IN ('done','skipped','failed') THEN 1 ELSE 0 END) processed,
+		SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) succeeded,
+		SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) failed,
+		SUM(CASE WHEN status = 'done' THEN bytes ELSE 0 END) bytes,
+		SUM(CASE WHEN status IN ('queued','processing') THEN 1 ELSE 0 END) remaining
+		FROM {$tables['items']} WHERE job_id = %d",
+		absint( $job_id )
 	);
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Counters must reflect current terminal item rows; prepared above.
+	$row = $wpdb->get_row( $sql, ARRAY_A );
 
 	return array(
 		'processed' => (int) ( $row['processed'] ?? 0 ),
@@ -1752,13 +1774,15 @@ function yotm_cleanup_expired_jobs() {
 	$active_statuses     = yotm_job_active_statuses();
 	$active_placeholders = implode( ',', array_fill( 0, count( $active_statuses ), '%s' ) );
 	$active_args         = array_merge( $active_statuses, array( gmdate( 'Y-m-d H:i:s' ) ) );
-	$active_ids          = $wpdb->get_col(
-		$wpdb->prepare(
-			"SELECT id FROM {$tables['jobs']} WHERE status IN ({$active_placeholders}) AND expires_at < %s LIMIT 100",
-			...$active_args
-		)
+	// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Table and status placeholders are plugin-owned; arguments are assembled above.
+	$sql = $wpdb->prepare(
+		"SELECT id FROM {$tables['jobs']} WHERE status IN ({$active_placeholders}) AND expires_at < %s LIMIT 100",
+		...$active_args
 	);
-	$query_error         = yotm_job_last_database_error();
+	// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Expiry candidates must reflect current persistent state; prepared above.
+	$active_ids  = $wpdb->get_col( $sql );
+	$query_error = yotm_job_last_database_error();
 	if ( is_wp_error( $query_error ) ) {
 		return $query_error;
 	}
@@ -1770,13 +1794,14 @@ function yotm_cleanup_expired_jobs() {
 		}
 	}
 
-	$terminal_ids = $wpdb->get_col(
-		$wpdb->prepare(
-			"SELECT id FROM {$tables['jobs']}
-			WHERE status IN ('completed','cancelled','expired') AND expires_at < %s LIMIT 100",
-			gmdate( 'Y-m-d H:i:s' )
-		)
+	// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name is plugin-owned.
+	$sql = $wpdb->prepare(
+		"SELECT id FROM {$tables['jobs']}
+		WHERE status IN ('completed','cancelled','expired') AND expires_at < %s LIMIT 100",
+		gmdate( 'Y-m-d H:i:s' )
 	);
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Audit-retention cleanup must reflect current persistent state; prepared above.
+	$terminal_ids = $wpdb->get_col( $sql );
 	$query_error  = yotm_job_last_database_error();
 	if ( is_wp_error( $query_error ) ) {
 		return $query_error;
