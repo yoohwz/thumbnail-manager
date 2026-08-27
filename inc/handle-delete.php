@@ -327,43 +327,52 @@ function yotm_process_claimed_prune_item( $item, $job, $worker, $uploads_base, $
 		);
 	}
 
-	$path_lock = yotm_media_path_lock_acquire( $path );
-	if ( is_wp_error( $path_lock ) ) {
-		return $path_lock;
+	$source_fence = yotm_media_source_fence_acquire();
+	if ( is_wp_error( $source_fence ) ) {
+		return $source_fence;
 	}
 
 	try {
-		if ( is_callable( $barrier ) ) {
-			call_user_func( $barrier, $item, $job, $worker );
+		$path_lock = yotm_media_path_lock_acquire( $path );
+		if ( is_wp_error( $path_lock ) ) {
+			return $path_lock;
 		}
 
-		if ( ! yotm_job_refresh_worker( $worker ) || ! yotm_job_refresh_item_claim( $item ) ) {
-			return new WP_Error( 'yotm_job_worker_stale', __( 'This job worker no longer owns the current batch.', 'thumbnail-manager' ) );
-		}
+		try {
+			if ( is_callable( $barrier ) ) {
+				call_user_func( $barrier, $item, $job, $worker );
+			}
 
-		$protected = yotm_media_source_path_is_authoritative( $path );
-		if ( is_wp_error( $protected ) ) {
-			return array(
-				'deleted' => false,
-				'skipped' => false,
-				'bytes'   => 0,
-				'error'   => $protected->get_error_message(),
-			);
-		}
-		if ( $protected ) {
-			return array(
-				'deleted' => false,
-				'skipped' => true,
-				'bytes'   => 0,
-				'message' => __( 'The file is now an authoritative attachment source and was preserved.', 'thumbnail-manager' ),
-			);
-		}
+			if ( ! yotm_job_refresh_worker( $worker ) || ! yotm_job_refresh_item_claim( $item ) ) {
+				return new WP_Error( 'yotm_job_worker_stale', __( 'This job worker no longer owns the current batch.', 'thumbnail-manager' ) );
+			}
 
-		$payload         = $item['payload'];
-		$payload['path'] = $path;
-		return yotm_delete_prune_item( $payload, $uploads_base );
+			$protected = yotm_media_source_path_is_authoritative( $path );
+			if ( is_wp_error( $protected ) ) {
+				return array(
+					'deleted' => false,
+					'skipped' => false,
+					'bytes'   => 0,
+					'error'   => $protected->get_error_message(),
+				);
+			}
+			if ( $protected ) {
+				return array(
+					'deleted' => false,
+					'skipped' => true,
+					'bytes'   => 0,
+					'message' => __( 'The file is now an authoritative attachment source and was preserved.', 'thumbnail-manager' ),
+				);
+			}
+
+			$payload         = $item['payload'];
+			$payload['path'] = $path;
+			return yotm_delete_prune_item( $payload, $uploads_base );
+		} finally {
+			yotm_media_path_lock_release( $path_lock );
+		}//end try
 	} finally {
-		yotm_media_path_lock_release( $path_lock );
+		yotm_media_source_fence_release( $source_fence );
 	}//end try
 }
 

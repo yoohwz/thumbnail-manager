@@ -61,5 +61,6 @@ kill -KILL "$holder_pid"
 wait "$holder_pid" 2>/dev/null || true
 holder_pid=""
 "${wp_command[@]}" eval-file "$script_dir/source-lock-concurrency-smoke.php" promote_then_delete "$state_file"
+"${wp_command[@]}" eval-file "$script_dir/source-lock-concurrency-smoke.php" promote_metadata_then_delete "$state_file"
 
 echo "YOTM source-lock concurrency smoke tests passed."

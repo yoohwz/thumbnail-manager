@@ -85,9 +85,10 @@ function yotm_media_source_canonical_path( $path ) {
  * @param int         $attachment_id Attachment ID.
  * @param string|null $attached_value Attached-file value, null for live value.
  * @param array|null  $metadata_value Metadata value, null for live value.
+ * @param bool        $filter_proposed Whether to apply live WordPress filters to explicit proposed values.
  * @return array[]|WP_Error
  */
-function yotm_media_source_aliases( $attachment_id, $attached_value = null, $metadata_value = null ) {
+function yotm_media_source_aliases( $attachment_id, $attached_value = null, $metadata_value = null, $filter_proposed = false ) {
 	$attachment_id = absint( $attachment_id );
 	$uploads       = wp_get_upload_dir();
 	$base          = (string) ( $uploads['basedir'] ?? '' );
@@ -117,7 +118,17 @@ function yotm_media_source_aliases( $attachment_id, $attached_value = null, $met
 	} else {
 		$attached_values = is_string( $attached_value ) && '' !== $attached_value ? array( $attached_value ) : array();
 		$metadata_values = is_array( $metadata_value ) ? array( $metadata_value ) : array();
-	}
+		if ( $filter_proposed ) {
+			$filtered_file = yotm_media_source_filter_proposed_file( $attachment_id, $attached_value );
+			if ( is_string( $filtered_file ) && '' !== $filtered_file ) {
+				$attached_values[] = $filtered_file;
+			}
+			$filtered_metadata = yotm_media_source_filter_proposed_metadata( $attachment_id, $metadata_value );
+			if ( is_array( $filtered_metadata ) ) {
+				$metadata_values[] = $filtered_metadata;
+			}
+		}
+	}//end if
 
 	$raw = array();
 	foreach ( $attached_values as $value ) {
@@ -153,6 +164,14 @@ function yotm_media_source_aliases( $attachment_id, $attached_value = null, $met
 				'path' => $live_original,
 			);
 		}
+	} elseif ( $filter_proposed ) {
+		$proposed_original = yotm_media_source_filter_proposed_original( $attachment_id, $filtered_file ?? false, $filtered_metadata ?? false );
+		if ( is_string( $proposed_original ) && '' !== $proposed_original ) {
+			$raw[] = array(
+				'kind' => 'original',
+				'path' => $proposed_original,
+			);
+		}
 	}
 
 	$aliases = array();
@@ -174,6 +193,68 @@ function yotm_media_source_aliases( $attachment_id, $attached_value = null, $met
 
 	ksort( $aliases );
 	return array_values( $aliases );
+}
+
+/**
+ * Apply get_attached_file semantics to an explicit proposed raw value.
+ *
+ * @param int          $attachment_id Attachment ID.
+ * @param string|false $attached_value Proposed raw attached-file value.
+ * @return string|false
+ */
+function yotm_media_source_filter_proposed_file( $attachment_id, $attached_value ) {
+	$file = is_string( $attached_value ) && '' !== $attached_value ? $attached_value : false;
+	if ( $file && ! preg_match( '#^(?:[A-Za-z]:)?/#', $file ) ) {
+		$uploads = wp_get_upload_dir();
+		if ( false === ( $uploads['error'] ?? false ) ) {
+			$file = trailingslashit( (string) $uploads['basedir'] ) . ltrim( $file, '/\\' );
+		}
+	}
+
+	return apply_filters( 'get_attached_file', $file, absint( $attachment_id ) );
+}
+
+/**
+ * Apply wp_get_attachment_metadata semantics to an explicit proposed value.
+ *
+ * @param int   $attachment_id Attachment ID.
+ * @param mixed $metadata_value Proposed raw metadata value.
+ * @return array|false
+ */
+function yotm_media_source_filter_proposed_metadata( $attachment_id, $metadata_value ) {
+	if ( ! is_array( $metadata_value ) || empty( $metadata_value ) ) {
+		return false;
+	}
+
+	$metadata = apply_filters( 'wp_get_attachment_metadata', $metadata_value, absint( $attachment_id ) );
+	if ( ! is_array( $metadata ) ) {
+		return false;
+	}
+	if ( array_key_exists( 'sizes', $metadata ) && ! is_array( $metadata['sizes'] ) ) {
+		$metadata['sizes'] = array();
+	}
+
+	return $metadata;
+}
+
+/**
+ * Apply wp_get_original_image_path semantics to proposed filtered state.
+ *
+ * @param int          $attachment_id Attachment ID.
+ * @param string|false $filtered_file Proposed filtered attached file.
+ * @param array|false  $filtered_metadata Proposed filtered metadata.
+ * @return string|false
+ */
+function yotm_media_source_filter_proposed_original( $attachment_id, $filtered_file, $filtered_metadata ) {
+	if ( ! is_string( $filtered_file ) || '' === $filtered_file ) {
+		return false;
+	}
+
+	$original = empty( $filtered_metadata['original_image'] )
+		? $filtered_file
+		: path_join( dirname( $filtered_file ), $filtered_metadata['original_image'] );
+
+	return apply_filters( 'wp_get_original_image_path', $original, absint( $attachment_id ) );
 }
 
 /**
@@ -310,10 +391,76 @@ function yotm_media_path_lock_name( $canonical_path ) {
 }
 
 /**
+ * Return the site-scoped source-mutation/delete fence name.
+ *
+ * @return string
+ */
+function yotm_media_source_fence_lock_name() {
+	global $wpdb;
+
+	$database = defined( 'DB_NAME' ) ? DB_NAME : 'WordPress';
+	$scope    = $database . '|' . $wpdb->prefix . '|' . get_current_blog_id();
+
+	return 'yotm_source_fence_' . md5( $scope );
+}
+
+/**
+ * Acquire the re-entrant site-wide source-mutation/delete fence.
+ *
+ * @return array|WP_Error
+ */
+function yotm_media_source_fence_acquire() {
+	$name = yotm_media_source_fence_lock_name();
+	if ( ! isset( $GLOBALS['yotm_media_source_fence_locks'] ) || ! is_array( $GLOBALS['yotm_media_source_fence_locks'] ) ) {
+		$GLOBALS['yotm_media_source_fence_locks'] = array();
+		register_shutdown_function( 'yotm_media_source_shutdown_cleanup' );
+	}
+
+	if ( isset( $GLOBALS['yotm_media_source_fence_locks'][ $name ] ) ) {
+		++$GLOBALS['yotm_media_source_fence_locks'][ $name ]['refs'];
+		return array( 'name' => $name );
+	}
+
+	$acquired = yotm_job_acquire_named_lock( $name );
+	if ( is_wp_error( $acquired ) ) {
+		return new WP_Error( 'yotm_media_source_fence_failed', $acquired->get_error_message(), $acquired->get_error_data() );
+	}
+	if ( ! $acquired ) {
+		return new WP_Error( 'yotm_media_source_fence_busy', __( 'Media sources are being changed by another request. Retrying shortly.', 'thumbnail-manager' ) );
+	}
+
+	$GLOBALS['yotm_media_source_fence_locks'][ $name ] = array(
+		'name' => $name,
+		'refs' => 1,
+	);
+
+	return array( 'name' => $name );
+}
+
+/**
+ * Release one request-local site-wide source fence reference.
+ *
+ * @param array $handle Lock handle.
+ * @return void
+ */
+function yotm_media_source_fence_release( $handle ) {
+	$name = (string) ( $handle['name'] ?? '' );
+	if ( '' === $name || empty( $GLOBALS['yotm_media_source_fence_locks'][ $name ] ) ) {
+		return;
+	}
+
+	--$GLOBALS['yotm_media_source_fence_locks'][ $name ]['refs'];
+	if ( $GLOBALS['yotm_media_source_fence_locks'][ $name ]['refs'] <= 0 ) {
+		yotm_job_release_named_lock( $name );
+		unset( $GLOBALS['yotm_media_source_fence_locks'][ $name ] );
+	}
+}
+
+/**
  * Return a site-scoped named lock for one attachment source state.
  *
- * Lock ordering is job worker, then attachment source state, then sorted media
- * paths. Delete workers never acquire attachment locks while owning a path.
+ * Lock ordering is job worker, site-wide source fence, attachment source state,
+ * then sorted media paths. Delete workers use worker, source fence, then path.
  *
  * @param int $attachment_id Attachment ID.
  * @return string
@@ -515,7 +662,7 @@ function yotm_media_source_proposed_aliases( $attachment_id, $original_key, $eff
 		$metadata = is_array( $meta_value ) ? $meta_value : array();
 	}
 
-	return yotm_media_source_aliases( $attachment_id, $attached, $metadata );
+	return yotm_media_source_aliases( $attachment_id, $attached, $metadata, true );
 }
 
 /**
@@ -536,18 +683,26 @@ function yotm_media_source_begin_guard( $channel, $attachment_id, $original_key,
 		return '';
 	}
 
+	$source_fence = yotm_media_source_fence_acquire();
+	if ( is_wp_error( $source_fence ) ) {
+		return $source_fence;
+	}
+
 	$attachment_handle = yotm_media_attachment_lock_acquire( $attachment_id );
 	if ( is_wp_error( $attachment_handle ) ) {
+		yotm_media_source_fence_release( $source_fence );
 		return $attachment_handle;
 	}
 	$aliases = yotm_media_source_proposed_aliases( $attachment_id, $original_key, $effective_key, $meta_value );
 	if ( is_wp_error( $aliases ) ) {
 		yotm_media_attachment_lock_release( $attachment_handle );
+		yotm_media_source_fence_release( $source_fence );
 		return $aliases;
 	}
 	$handles = yotm_media_path_lock_aliases( $aliases );
 	if ( is_wp_error( $handles ) ) {
 		yotm_media_attachment_lock_release( $attachment_handle );
+		yotm_media_source_fence_release( $source_fence );
 		return $handles;
 	}
 
@@ -557,6 +712,7 @@ function yotm_media_source_begin_guard( $channel, $attachment_id, $original_key,
 			yotm_media_path_lock_release( $handle );
 		}
 		yotm_media_attachment_lock_release( $attachment_handle );
+		yotm_media_source_fence_release( $source_fence );
 		return $upserted;
 	}
 
@@ -589,6 +745,8 @@ function yotm_media_source_begin_guard( $channel, $attachment_id, $original_key,
 		'effective_key'      => (string) $effective_key,
 		'handles'            => $handles,
 		'attachment_handle'  => $attachment_handle,
+		'source_fence'       => $source_fence,
+		'protected_aliases'  => $aliases,
 		'had_meta'           => (bool) $had_meta,
 		'ready'              => false,
 		'fallback_parent_id' => $fallback_parent_id,
@@ -811,6 +969,7 @@ function yotm_media_source_release_guard_frame( $frame_id ) {
 			yotm_media_path_lock_release( $handle );
 		}
 		yotm_media_attachment_lock_release( $frame['attachment_handle'] ?? array() );
+		yotm_media_source_fence_release( $frame['source_fence'] ?? array() );
 		array_splice( $GLOBALS['yotm_media_source_frames'], $index, 1 );
 		return;
 	}
@@ -925,6 +1084,7 @@ function yotm_media_source_shutdown_cleanup() {
 				yotm_media_path_lock_release( $handle );
 			}
 			yotm_media_attachment_lock_release( $frame['attachment_handle'] ?? array() );
+			yotm_media_source_fence_release( $frame['source_fence'] ?? array() );
 		}
 		$GLOBALS['yotm_media_source_frames'] = array();
 	}
@@ -940,6 +1100,12 @@ function yotm_media_source_shutdown_cleanup() {
 			yotm_job_release_named_lock( $name );
 		}
 		$GLOBALS['yotm_media_attachment_locks'] = array();
+	}
+	if ( ! empty( $GLOBALS['yotm_media_source_fence_locks'] ) ) {
+		foreach ( array_keys( $GLOBALS['yotm_media_source_fence_locks'] ) as $name ) {
+			yotm_job_release_named_lock( $name );
+		}
+		$GLOBALS['yotm_media_source_fence_locks'] = array();
 	}
 }
 

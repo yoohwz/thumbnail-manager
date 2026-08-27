@@ -242,10 +242,13 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 		);
 		$worker = yotm_job_acquire_worker( $job['id'], array( 'deleting' ), array( 'delete' ) );
 		$this->assertIsArray( $worker );
-		$item = yotm_job_claim_items( $worker, 1 )[0];
+		$item         = yotm_job_claim_items( $worker, 1 )[0];
+		$source_fence = yotm_media_source_fence_acquire();
+		$this->assertIsArray( $source_fence );
 		add_filter( 'query', array( $this, 'force_named_lock_contention' ) );
 		$result = yotm_process_claimed_prune_item( $item, yotm_job_get_by_id( $job['id'] ), $worker, $this->uploads_base );
 		remove_filter( 'query', array( $this, 'force_named_lock_contention' ) );
+		yotm_media_source_fence_release( $source_fence );
 		$this->assertWPError( $result );
 		$this->assertSame( 'yotm_media_path_busy', $result->get_error_code() );
 		$this->assertFileExists( $fixture['thumbnail'] );
@@ -370,6 +373,93 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 		remove_filter( 'get_attached_file', array( $this, 'supply_attached_file_for_fallback' ), 10 );
 		$this->assertTrue( yotm_media_source_path_is_authoritative( $file ) );
 		$this->assert_guard_state_clean();
+	}
+
+	public function test_proposed_attached_file_uses_filtered_live_semantics_before_write() {
+		$fixture  = $this->create_attachment_with_thumbnail( 'filtered-file.jpg', 'filtered-file-150x150.jpg' );
+		$raw      = trailingslashit( $this->test_dir ) . 'filtered-file-raw.jpg';
+		$filtered = trailingslashit( $this->test_dir ) . 'filtered-file-authoritative.jpg';
+		$this->write_file( $raw, 'raw' );
+		$this->write_file( $filtered, 'filtered' );
+		$filter   = static function ( $file, $attachment_id ) use ( $fixture, $raw, $filtered ) {
+			return $fixture['attachment_id'] === (int) $attachment_id && wp_normalize_path( $raw ) === wp_normalize_path( (string) $file ) ? $filtered : $file;
+		};
+		$locked   = false;
+		$observer = static function ( $check, $object_id, $meta_key ) use ( &$locked, $fixture, $filtered ) {
+			if ( $fixture['attachment_id'] === (int) $object_id && '_wp_attached_file' === $meta_key ) {
+				$canonical_path = yotm_media_source_canonical_path( $filtered );
+				$path_lock      = yotm_media_path_lock_name( $canonical_path );
+				$frames         = $GLOBALS['yotm_media_source_frames'];
+				$frame          = end( $frames );
+				$locked         = isset( $GLOBALS['yotm_media_path_locks'][ $path_lock ] )
+					&& ! empty( $GLOBALS['yotm_media_source_fence_locks'] )
+					&& in_array( $canonical_path, wp_list_pluck( $frame['protected_aliases'] ?? array(), 'path' ), true );
+			}
+			return $check;
+		};
+		add_filter( 'get_attached_file', $filter, 10, 2 );
+		add_filter( 'update_post_metadata', $observer, 10, 3 );
+		try {
+			$proposed = yotm_media_source_proposed_aliases( $fixture['attachment_id'], '_wp_attached_file', '_wp_attached_file', $this->relative_path( $raw ) );
+			$this->assertIsArray( $proposed );
+			$this->assertContains( yotm_media_source_canonical_path( $filtered ), wp_list_pluck( $proposed, 'path' ) );
+			$this->assertNotFalse( update_post_meta( $fixture['attachment_id'], '_wp_attached_file', $this->relative_path( $raw ) ) );
+			$this->assertTrue( $locked );
+			$this->assert_live_aliases_were_protected( $fixture['attachment_id'], $proposed );
+			$this->assertTrue( yotm_media_source_path_is_authoritative( $filtered ) );
+			$this->assert_guard_state_clean();
+		} finally {
+			remove_filter( 'get_attached_file', $filter, 10 );
+			remove_filter( 'update_post_metadata', $observer, 10 );
+		}
+	}
+
+	public function test_proposed_attachment_metadata_uses_filtered_live_semantics_before_write() {
+		$fixture           = $this->create_attachment_with_thumbnail( 'filtered-meta.jpg', 'filtered-meta-150x150.jpg' );
+		$raw               = trailingslashit( $this->test_dir ) . 'filtered-meta-raw.jpg';
+		$filtered          = trailingslashit( $this->test_dir ) . 'filtered-meta-authoritative.jpg';
+		$raw_relative      = $this->relative_path( $raw );
+		$filtered_relative = $this->relative_path( $filtered );
+		$this->write_file( $raw, 'raw' );
+		$this->write_file( $filtered, 'filtered' );
+		$filter            = static function ( $metadata, $attachment_id ) use ( $fixture, $raw_relative, $filtered_relative ) {
+			if ( $fixture['attachment_id'] === (int) $attachment_id && ( $metadata['file'] ?? '' ) === $raw_relative ) {
+				$metadata['file'] = $filtered_relative;
+			}
+			return $metadata;
+		};
+		$locked            = false;
+		$observer          = static function ( $check, $object_id, $meta_key ) use ( &$locked, $fixture, $filtered ) {
+			if ( $fixture['attachment_id'] === (int) $object_id && '_wp_attachment_metadata' === $meta_key ) {
+				$canonical_path = yotm_media_source_canonical_path( $filtered );
+				$path_lock      = yotm_media_path_lock_name( $canonical_path );
+				$frames         = $GLOBALS['yotm_media_source_frames'];
+				$frame          = end( $frames );
+				$locked         = isset( $GLOBALS['yotm_media_path_locks'][ $path_lock ] )
+					&& ! empty( $GLOBALS['yotm_media_source_fence_locks'] )
+					&& in_array( $canonical_path, wp_list_pluck( $frame['protected_aliases'] ?? array(), 'path' ), true );
+			}
+			return $check;
+		};
+		$proposed_metadata = array(
+			'file'  => $raw_relative,
+			'sizes' => array(),
+		);
+		add_filter( 'wp_get_attachment_metadata', $filter, 10, 2 );
+		add_filter( 'update_post_metadata', $observer, 10, 3 );
+		try {
+			$proposed = yotm_media_source_proposed_aliases( $fixture['attachment_id'], '_wp_attachment_metadata', '_wp_attachment_metadata', $proposed_metadata );
+			$this->assertIsArray( $proposed );
+			$this->assertContains( yotm_media_source_canonical_path( $filtered ), wp_list_pluck( $proposed, 'path' ) );
+			$this->assertNotFalse( wp_update_attachment_metadata( $fixture['attachment_id'], $proposed_metadata ) );
+			$this->assertTrue( $locked );
+			$this->assert_live_aliases_were_protected( $fixture['attachment_id'], $proposed );
+			$this->assertTrue( yotm_media_source_path_is_authoritative( $filtered ) );
+			$this->assert_guard_state_clean();
+		} finally {
+			remove_filter( 'wp_get_attachment_metadata', $filter, 10 );
+			remove_filter( 'update_post_metadata', $observer, 10 );
+		}
 	}
 
 	public function test_aborted_attachment_delete_preserves_positive_source_rows() {
@@ -636,6 +726,18 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 		$this->assertArrayNotHasKey( $first['name'], $GLOBALS['yotm_media_attachment_locks'] );
 	}
 
+	public function test_source_fence_is_request_reentrant_and_balanced() {
+		$first  = yotm_media_source_fence_acquire();
+		$second = yotm_media_source_fence_acquire();
+		$this->assertIsArray( $first );
+		$this->assertSame( $first['name'], $second['name'] );
+		$this->assertSame( 2, $GLOBALS['yotm_media_source_fence_locks'][ $first['name'] ]['refs'] );
+		yotm_media_source_fence_release( $second );
+		$this->assertSame( 1, $GLOBALS['yotm_media_source_fence_locks'][ $first['name'] ]['refs'] );
+		yotm_media_source_fence_release( $first );
+		$this->assertArrayNotHasKey( $first['name'], $GLOBALS['yotm_media_source_fence_locks'] );
+	}
+
 	public function nest_by_mid_inside_regular_update( $check, $object_id, $meta_key, $meta_value, $prev_value ) {
 		unset( $meta_value, $prev_value );
 		if (
@@ -712,6 +814,19 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 		$this->assertEmpty( $GLOBALS['yotm_media_source_invocations'] ?? array() );
 		$this->assertEmpty( $GLOBALS['yotm_media_path_locks'] ?? array() );
 		$this->assertEmpty( $GLOBALS['yotm_media_attachment_locks'] ?? array() );
+		$this->assertEmpty( $GLOBALS['yotm_media_source_fence_locks'] ?? array() );
+	}
+
+	private function assert_live_aliases_were_protected( $attachment_id, $proposed ) {
+		$protected = array();
+		foreach ( $proposed as $alias ) {
+			$protected[] = $alias['source_kind'] . ':' . $alias['path_hash'];
+		}
+		$live = yotm_media_source_aliases( $attachment_id );
+		$this->assertIsArray( $live );
+		foreach ( $live as $alias ) {
+			$this->assertContains( $alias['source_kind'] . ':' . $alias['path_hash'], $protected );
+		}
 	}
 
 	private function collect_candidates( $attachment_id ) {
