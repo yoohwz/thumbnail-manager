@@ -55,5 +55,5 @@ class Yo_Thumbnail_Manager {
 
 new Yo_Thumbnail_Manager();
 
-register_activation_hook( __FILE__, 'yotm_install_job_tables' );
+register_activation_hook( __FILE__, 'yotm_activate_job_storage' );
 register_deactivation_hook( __FILE__, 'yotm_deactivate_job_cleanup' );
