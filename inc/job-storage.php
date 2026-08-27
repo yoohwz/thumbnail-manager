@@ -13,6 +13,10 @@ if ( ! defined( 'YOTM_JOB_DB_VERSION' ) ) {
 	define( 'YOTM_JOB_DB_VERSION', '1.0.1' );
 }
 
+if ( ! defined( 'YOTM_JOB_DB_MIGRATION_BACKOFF' ) ) {
+	define( 'YOTM_JOB_DB_MIGRATION_BACKOFF', 5 * MINUTE_IN_SECONDS );
+}
+
 /**
  * Return the persistent job table names for the current site.
  *
@@ -28,9 +32,91 @@ function yotm_job_table_names() {
 }
 
 /**
- * Install or update the job tables.
+ * Return the physical presence of both job tables for the current site.
+ *
+ * @return array{jobs:bool,items:bool}
  */
-function yotm_install_job_tables() {
+function yotm_job_table_presence() {
+	global $wpdb;
+
+	$presence    = array();
+	$suppressing = $wpdb->suppress_errors();
+
+	foreach ( yotm_job_table_names() as $key => $table ) {
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Physical schema readiness cannot use the object cache; table names are derived from the trusted WordPress prefix.
+		$presence[ $key ] = ! empty( $wpdb->get_results( "DESCRIBE {$table}" ) );
+	}
+
+	$wpdb->suppress_errors( $suppressing );
+
+	return $presence;
+}
+
+/**
+ * Check that both persistent storage tables exist.
+ *
+ * @return bool
+ */
+function yotm_job_tables_exist() {
+	$presence = yotm_job_table_presence();
+
+	return $presence['jobs'] && $presence['items'];
+}
+
+/**
+ * Return the request-local storage state key for the current site.
+ *
+ * @return string
+ */
+function yotm_job_storage_request_key() {
+	global $wpdb;
+
+	return get_current_blog_id() . '|' . $wpdb->prefix;
+}
+
+/**
+ * Build a fail-closed persistent-storage error.
+ *
+ * @param string $code Database error code.
+ * @param string $database_error Optional internal database error.
+ * @return WP_Error
+ */
+function yotm_job_storage_error( $code = 'yotm_job_storage_unavailable', $database_error = '' ) {
+	$message = 'yotm_job_storage_inconsistent' === $code
+		? __( 'Persistent job storage is incomplete. Restore the job database tables before continuing.', 'thumbnail-manager' )
+		: __( 'Persistent job storage is unavailable. Please try again later or ask an administrator to check the database.', 'thumbnail-manager' );
+
+	$data = array();
+	if ( '' !== $database_error ) {
+		$data['database_error'] = $database_error;
+	}
+
+	return new WP_Error( $code, $message, $data );
+}
+
+/**
+ * Return a persistence error for the most recent database query, if any.
+ *
+ * @return WP_Error|false
+ */
+function yotm_job_last_database_error() {
+	global $wpdb;
+
+	if ( '' === (string) $wpdb->last_error ) {
+		return false;
+	}
+
+	return yotm_job_storage_error( 'yotm_job_storage_unavailable', (string) $wpdb->last_error );
+}
+
+/**
+ * Run one additive job-table install or migration attempt.
+ *
+ * This low-level runner must only be called by yotm_job_storage_ready().
+ *
+ * @return true|WP_Error
+ */
+function yotm_run_job_table_migration() {
 	global $wpdb;
 
 	require_once ABSPATH . 'wp-admin/includes/upgrade.php';
@@ -78,50 +164,134 @@ function yotm_install_job_tables() {
 	) {$charset_collate};";
 
 	dbDelta( $jobs_sql );
+	$jobs_error = (string) $wpdb->last_error;
 	dbDelta( $items_sql );
+	$items_error = (string) $wpdb->last_error;
 
-	if ( ! yotm_job_tables_exist() ) {
-		return new WP_Error( 'yotm_job_tables_missing', __( 'Could not install the persistent job tables.', 'thumbnail-manager' ) );
+	if ( '' !== $jobs_error || '' !== $items_error || ! yotm_job_tables_exist() ) {
+		$database_error = '' !== $jobs_error ? $jobs_error : $items_error;
+
+		return yotm_job_storage_error( 'yotm_job_storage_unavailable', $database_error );
 	}
 
 	update_option( 'yotm_job_db_version', YOTM_JOB_DB_VERSION, false );
+	if ( YOTM_JOB_DB_VERSION !== get_option( 'yotm_job_db_version' ) ) {
+		return yotm_job_storage_error();
+	}
 
+	yotm_schedule_job_cleanup();
+
+	return true;
+}
+
+/**
+ * Ensure persistent job storage is ready for the current site.
+ *
+ * The result is memoized for the current site and request. Automatic DDL is
+ * allowed only for an absent/older marker when both tables are either present
+ * or absent. Partial storage and current-marker data loss always fail closed.
+ *
+ * @return true|WP_Error
+ */
+function yotm_job_storage_ready() {
+	$key = yotm_job_storage_request_key();
+
+	if ( ! isset( $GLOBALS['yotm_job_storage_readiness'] ) || ! is_array( $GLOBALS['yotm_job_storage_readiness'] ) ) {
+		$GLOBALS['yotm_job_storage_readiness'] = array();
+	}
+
+	if ( array_key_exists( $key, $GLOBALS['yotm_job_storage_readiness'] ) ) {
+		return $GLOBALS['yotm_job_storage_readiness'][ $key ];
+	}
+
+	$stored_version = get_option( 'yotm_job_db_version' );
+	$presence       = yotm_job_table_presence();
+	$both_present   = $presence['jobs'] && $presence['items'];
+	$both_absent    = ! $presence['jobs'] && ! $presence['items'];
+	$is_current     = YOTM_JOB_DB_VERSION === $stored_version;
+
+	if ( $is_current ) {
+		$result                                        = $both_present ? true : yotm_job_storage_error( 'yotm_job_storage_inconsistent' );
+		$GLOBALS['yotm_job_storage_readiness'][ $key ] = $result;
+
+		return $result;
+	}
+
+	if ( ! $both_present && ! $both_absent ) {
+		$result                                        = yotm_job_storage_error( 'yotm_job_storage_inconsistent' );
+		$GLOBALS['yotm_job_storage_readiness'][ $key ] = $result;
+
+		return $result;
+	}
+
+	$backoff = get_transient( 'yotm_job_db_migration_failure' );
+	if ( is_array( $backoff ) && YOTM_JOB_DB_VERSION === ( $backoff['version'] ?? '' ) ) {
+		$result                                        = yotm_job_storage_error();
+		$GLOBALS['yotm_job_storage_readiness'][ $key ] = $result;
+
+		return $result;
+	}
+
+	$result = yotm_run_job_table_migration();
+	if ( is_wp_error( $result ) ) {
+		set_transient(
+			'yotm_job_db_migration_failure',
+			array(
+				'version'   => YOTM_JOB_DB_VERSION,
+				'failed_at' => time(),
+			),
+			YOTM_JOB_DB_MIGRATION_BACKOFF
+		);
+	} else {
+		delete_transient( 'yotm_job_db_migration_failure' );
+	}
+
+	$GLOBALS['yotm_job_storage_readiness'][ $key ] = $result;
+
+	return $result;
+}
+
+/**
+ * Install or update job tables through the guarded readiness coordinator.
+ *
+ * @return true|WP_Error
+ */
+function yotm_install_job_tables() {
+	return yotm_job_storage_ready();
+}
+
+/**
+ * Schedule daily job cleanup once for the current site.
+ */
+function yotm_schedule_job_cleanup() {
 	if ( ! wp_next_scheduled( 'yotm_cleanup_jobs' ) ) {
 		wp_schedule_event( time() + HOUR_IN_SECONDS, 'daily', 'yotm_cleanup_jobs' );
 	}
-
-	return true;
 }
 
 /**
- * Check that both persistent storage tables exist.
+ * Prepare persistent storage and cleanup scheduling during activation.
  *
- * @return bool
+ * @return true|WP_Error
  */
-function yotm_job_tables_exist() {
-	global $wpdb;
+function yotm_activate_job_storage() {
+	$ready = yotm_job_storage_ready();
 
-	foreach ( yotm_job_table_names() as $table ) {
-		$found = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $table ) ) );
-		if ( $table !== $found ) {
-			return false;
-		}
+	if ( true === $ready ) {
+		yotm_schedule_job_cleanup();
 	}
 
-	return true;
+	return $ready;
 }
 
 /**
- * Install tables for existing activations after an upgrade.
+ * Backward-compatible readiness entrypoint for existing integrations.
+ *
+ * @return true|WP_Error
  */
 function yotm_maybe_install_job_tables() {
-	if ( YOTM_JOB_DB_VERSION !== get_option( 'yotm_job_db_version' ) || ! yotm_job_tables_exist() ) {
-		return yotm_install_job_tables();
-	}
-
-	return true;
+	return yotm_job_storage_ready();
 }
-add_action( 'plugins_loaded', 'yotm_maybe_install_job_tables', 5 );
 
 /**
  * Remove the scheduled cleanup event when deactivating the plugin.
@@ -211,9 +381,14 @@ function yotm_job_get_by_id( $job_id ) {
 function yotm_job_get( $token ) {
 	global $wpdb;
 
-	$tables = yotm_job_table_names();
-	$token  = sanitize_text_field( (string) $token );
-	$row    = $wpdb->get_row(
+	$ready = yotm_job_storage_ready();
+	if ( is_wp_error( $ready ) ) {
+		return $ready;
+	}
+
+	$tables      = yotm_job_table_names();
+	$token       = sanitize_text_field( (string) $token );
+	$row         = $wpdb->get_row(
 		$wpdb->prepare(
 			"SELECT * FROM {$tables['jobs']} WHERE token = %s AND blog_id = %d AND user_id = %d",
 			$token,
@@ -221,7 +396,12 @@ function yotm_job_get( $token ) {
 			get_current_user_id()
 		)
 	);
-	$job    = yotm_job_normalize_row( $row );
+	$query_error = yotm_job_last_database_error();
+	if ( is_wp_error( $query_error ) ) {
+		return $query_error;
+	}
+
+	$job = yotm_job_normalize_row( $row );
 
 	if ( false === $job ) {
 		return new WP_Error( 'yotm_job_missing', __( 'Job not found or it belongs to another user.', 'thumbnail-manager' ) );
@@ -246,7 +426,7 @@ function yotm_job_get( $token ) {
  * Find an active job owned by the current user.
  *
  * @param string $type Job type.
- * @return array|false
+ * @return array|false|WP_Error
  */
 function yotm_job_get_active_for_current_user( $type ) {
 	global $wpdb;
@@ -268,7 +448,10 @@ function yotm_job_get_active_for_current_user( $type ) {
 	);
 
 	// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- Prepared above; table names are plugin-owned.
-	return yotm_job_normalize_row( $wpdb->get_row( $sql ) );
+	$row         = $wpdb->get_row( $sql );
+	$query_error = yotm_job_last_database_error();
+
+	return is_wp_error( $query_error ) ? $query_error : yotm_job_normalize_row( $row );
 }
 
 /**
@@ -282,16 +465,23 @@ function yotm_job_get_active_for_current_user( $type ) {
 function yotm_job_create( $type, $payload = array(), $args = array() ) {
 	global $wpdb;
 
-	$installed = yotm_maybe_install_job_tables();
-	if ( is_wp_error( $installed ) ) {
-		return $installed;
+	$ready = yotm_job_storage_ready();
+	if ( is_wp_error( $ready ) ) {
+		return $ready;
 	}
-	yotm_cleanup_expired_jobs();
+
+	$cleanup = yotm_cleanup_expired_jobs();
+	if ( is_wp_error( $cleanup ) ) {
+		return $cleanup;
+	}
 
 	$type      = sanitize_key( $type );
 	$exclusive = isset( $args['exclusive'] ) ? (bool) $args['exclusive'] : in_array( $type, array( 'prune', 'regenerate' ), true );
 	$lock_name = '';
 	$active    = yotm_job_get_active_for_current_user( $type );
+	if ( is_wp_error( $active ) ) {
+		return $active;
+	}
 
 	if ( $active ) {
 		return new WP_Error(
@@ -314,6 +504,11 @@ function yotm_job_create( $type, $payload = array(), $args = array() ) {
 		}
 
 		$locked = yotm_job_find_destructive_lock();
+		if ( is_wp_error( $locked ) ) {
+			$wpdb->get_var( $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', $lock_name ) );
+
+			return $locked;
+		}
 
 		if ( $locked ) {
 			$message = get_current_user_id() === (int) $locked['user_id']
@@ -366,7 +561,7 @@ function yotm_job_create( $type, $payload = array(), $args = array() ) {
 	}
 
 	if ( false === $insert ) {
-		return new WP_Error( 'yotm_job_create_failed', __( 'Could not create the persistent job.', 'thumbnail-manager' ), array( 'database_error' => $insert_error ) );
+		return yotm_job_storage_error( 'yotm_job_storage_unavailable', $insert_error );
 	}
 
 	return yotm_job_get_by_id( (int) $wpdb->insert_id );
@@ -375,7 +570,7 @@ function yotm_job_create( $type, $payload = array(), $args = array() ) {
 /**
  * Find the current site-wide destructive job lock.
  *
- * @return array|false
+ * @return array|false|WP_Error
  */
 function yotm_job_find_destructive_lock() {
 	global $wpdb;
@@ -393,7 +588,10 @@ function yotm_job_find_destructive_lock() {
 	);
 
 	// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- Prepared above; table names are plugin-owned.
-	return yotm_job_normalize_row( $wpdb->get_row( $sql ) );
+	$row         = $wpdb->get_row( $sql );
+	$query_error = yotm_job_last_database_error();
+
+	return is_wp_error( $query_error ) ? $query_error : yotm_job_normalize_row( $row );
 }
 
 /**
@@ -851,18 +1049,31 @@ function yotm_job_delete( $job_id ) {
 
 /**
  * Delete expired jobs and their queues.
+ *
+ * @return true|WP_Error
  */
 function yotm_cleanup_expired_jobs() {
 	global $wpdb;
 
-	$tables = yotm_job_table_names();
-	$ids    = $wpdb->get_col(
+	$ready = yotm_job_storage_ready();
+	if ( is_wp_error( $ready ) ) {
+		return $ready;
+	}
+
+	$tables      = yotm_job_table_names();
+	$ids         = $wpdb->get_col(
 		$wpdb->prepare( "SELECT id FROM {$tables['jobs']} WHERE expires_at < %s LIMIT 100", gmdate( 'Y-m-d H:i:s' ) )
 	);
+	$query_error = yotm_job_last_database_error();
+	if ( is_wp_error( $query_error ) ) {
+		return $query_error;
+	}
 
 	foreach ( $ids as $job_id ) {
 		yotm_job_delete( (int) $job_id );
 	}
+
+	return true;
 }
 add_action( 'yotm_cleanup_jobs', 'yotm_cleanup_expired_jobs' );
 
@@ -925,13 +1136,18 @@ function yotm_job_public_data( $job ) {
  * Return recent jobs owned by the current user on this site.
  *
  * @param int $limit Maximum rows.
- * @return array[]
+ * @return array[]|WP_Error
  */
 function yotm_job_get_recent_for_current_user( $limit = 10 ) {
 	global $wpdb;
 
-	$tables = yotm_job_table_names();
-	$rows   = $wpdb->get_results(
+	$ready = yotm_job_storage_ready();
+	if ( is_wp_error( $ready ) ) {
+		return $ready;
+	}
+
+	$tables      = yotm_job_table_names();
+	$rows        = $wpdb->get_results(
 		$wpdb->prepare(
 			"SELECT * FROM {$tables['jobs']} WHERE blog_id = %d AND user_id = %d ORDER BY id DESC LIMIT %d",
 			get_current_blog_id(),
@@ -939,7 +1155,12 @@ function yotm_job_get_recent_for_current_user( $limit = 10 ) {
 			max( 1, min( 25, absint( $limit ) ) )
 		)
 	);
-	$out    = array();
+	$query_error = yotm_job_last_database_error();
+	if ( is_wp_error( $query_error ) ) {
+		return $query_error;
+	}
+
+	$out = array();
 
 	foreach ( $rows as $row ) {
 		$job = yotm_job_normalize_row( $row );
@@ -1050,7 +1271,13 @@ function yotm_job_ajax_recent() {
 	}
 
 	check_ajax_referer( 'yotm_prune_nonce', 'nonce' );
-	wp_send_json_success( array( 'jobs' => yotm_job_get_recent_for_current_user( 10 ) ) );
+	$jobs = yotm_job_get_recent_for_current_user( 10 );
+
+	if ( is_wp_error( $jobs ) ) {
+		wp_send_json_error( array( 'msg' => $jobs->get_error_message() ), 503 );
+	}
+
+	wp_send_json_success( array( 'jobs' => $jobs ) );
 }
 add_action( 'wp_ajax_yotm_jobs_recent', 'yotm_job_ajax_recent' );
 
