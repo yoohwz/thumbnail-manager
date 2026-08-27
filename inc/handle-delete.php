@@ -214,6 +214,10 @@ function yotm_prune_validate_review_job( $job, $manifest_hash, $confirmed ) {
 	if ( ! is_array( $job ) || 'prune' !== ( $job['type'] ?? '' ) || 'awaiting_approval' !== ( $job['status'] ?? '' ) ) {
 		return new WP_Error( 'yotm_scan_not_reviewable', __( 'The prune scan is not ready for approval.', 'thumbnail-manager' ) );
 	}
+	$clean = yotm_media_source_require_clean_index();
+	if ( is_wp_error( $clean ) ) {
+		return $clean;
+	}
 
 	if ( ! $confirmed ) {
 		return new WP_Error( 'yotm_confirmation_required', __( 'Explicit delete confirmation is required.', 'thumbnail-manager' ) );
@@ -244,6 +248,10 @@ function yotm_prune_validate_review_job( $job, $manifest_hash, $confirmed ) {
 function yotm_prune_validate_delete_job( $job, $manifest_hash ) {
 	if ( ! is_array( $job ) || 'prune' !== ( $job['type'] ?? '' ) || ! in_array( $job['status'] ?? '', array( 'approved', 'deleting' ), true ) ) {
 		return new WP_Error( 'yotm_not_delete_mode', __( 'This job has not been approved for deletion.', 'thumbnail-manager' ) );
+	}
+	$clean = yotm_media_source_require_clean_index();
+	if ( is_wp_error( $clean ) ) {
+		return $clean;
 	}
 
 	if ( empty( $job['manifest_hash'] ) || empty( $manifest_hash ) || ! hash_equals( $job['manifest_hash'], $manifest_hash ) ) {

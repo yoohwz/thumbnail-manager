@@ -38,7 +38,10 @@ done
 grep -q '"baseline_ready":1' "$state_file"
 kill -0 "$holder_pid"
 "${wp_command[@]}" eval-file "$script_dir/source-lock-concurrency-smoke.php" contend_baseline "$state_file"
-wait "$holder_pid"
+if ! wait "$holder_pid"; then
+  sed -n '1,240p' "$holder_log" >&2
+  exit 1
+fi
 holder_pid=""
 "${wp_command[@]}" eval-file "$script_dir/source-lock-concurrency-smoke.php" promote_source "$state_file"
 "${wp_command[@]}" eval-file "$script_dir/source-lock-concurrency-smoke.php" baseline_after_promotion "$state_file"

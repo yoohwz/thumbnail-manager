@@ -137,6 +137,8 @@ if ( 'setup' === $smoke_role ) {
 		),
 		'Could not persist the smoke attachment metadata.'
 	);
+	yotm_concurrency_smoke_assert( true === yotm_media_source_sync_attachment( $attachment_id, null, true ), 'Could not repair the source index after fixture setup.' );
+	yotm_concurrency_smoke_assert( true === yotm_media_source_require_clean_index(), 'Fixture setup left the durable source index dirty.' );
 
 	$job = yotm_job_create(
 		'prune',

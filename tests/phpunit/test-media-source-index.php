@@ -31,10 +31,17 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 	/** @var string */
 	private $fallback_file = '';
 
+	/** @var string */
+	private $failed_source_hash = '';
+
+	/** @var callable|null */
+	private $filtered_source_callback;
+
 	public function setUp(): void {
 		parent::setUp();
 		unset( $GLOBALS['yotm_job_storage_readiness'], $GLOBALS['yotm_media_source_last_error'] );
 		yotm_media_source_shutdown_cleanup();
+		delete_option( YOTM_MEDIA_SOURCE_DIRTY_OPTION );
 		$this->assertTrue( yotm_run_job_table_migration() );
 		$uploads            = wp_get_upload_dir();
 		$this->uploads_base = trailingslashit( $uploads['basedir'] );
@@ -48,10 +55,15 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 		remove_filter( 'query', array( $this, 'fail_second_named_lock' ) );
 		remove_filter( 'query', array( $this, 'force_source_upsert_failure' ) );
 		remove_filter( 'query', array( $this, 'force_source_resync_failure' ) );
+		remove_filter( 'query', array( $this, 'force_filtered_source_upsert_failure' ) );
+		remove_filter( 'query', array( $this, 'force_dirty_state_persist_failure' ) );
 		remove_filter( 'update_post_metadata', array( $this, 'short_circuit_source_update' ), PHP_INT_MAX - 1 );
 		remove_filter( 'update_post_metadata', array( $this, 'nest_by_mid_inside_regular_update' ), 10 );
 		remove_filter( 'update_post_metadata_by_mid', array( $this, 'nest_regular_inside_by_mid_update' ), 10 );
 		remove_filter( 'get_attached_file', array( $this, 'supply_attached_file_for_fallback' ), 10 );
+		if ( is_callable( $this->filtered_source_callback ) ) {
+			remove_filter( 'get_attached_file', $this->filtered_source_callback, 10 );
+		}
 		remove_action( 'delete_attachment', array( $this, 'abort_attachment_deletion' ), PHP_INT_MAX );
 		yotm_media_source_shutdown_cleanup();
 		foreach ( array_reverse( $this->attachments ) as $attachment_id ) {
@@ -65,6 +77,7 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 		if ( is_dir( $this->test_dir ) ) {
 			@rmdir( $this->test_dir );
 		}
+		delete_option( YOTM_MEDIA_SOURCE_DIRTY_OPTION );
 		parent::tearDown();
 	}
 
@@ -108,6 +121,11 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 		$first  = $this->create_attachment_with_thumbnail( 'batch-first.jpg', 'batch-first-150x150.jpg' );
 		$second = $this->create_attachment_with_thumbnail( 'batch-second.jpg', 'batch-second-150x150.jpg' );
 		$this->assertTrue( yotm_media_source_clear_index() );
+		$source_fence = yotm_media_source_fence_acquire();
+		$this->assertIsArray( $source_fence );
+		$this->assertTrue( yotm_media_source_dirty_mark( 'yotm-test-baseline-repair', $first['attachment_id'] ) );
+		yotm_media_source_fence_release( $source_fence );
+		$this->assertWPError( yotm_media_source_require_clean_index() );
 		$job    = yotm_job_create(
 			'prune',
 			array(
@@ -141,6 +159,52 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 		$this->assertTrue( yotm_media_source_path_is_authoritative( $first['original'] ) );
 		$this->assertTrue( yotm_media_source_path_is_authoritative( $second['original'] ) );
 		$this->assertTrue( yotm_media_source_path_is_authoritative( $after_prepare['original'] ) );
+		$this->assertTrue( yotm_media_source_require_clean_index() );
+		yotm_job_release_worker( $worker );
+	}
+
+	public function test_source_baseline_restarts_for_dirty_attachment_outside_snapshot() {
+		$first = $this->create_attachment_with_thumbnail( 'restart-first.jpg', 'restart-first-150x150.jpg' );
+		$this->assertTrue( yotm_media_source_clear_index() );
+		$job    = yotm_job_create(
+			'prune',
+			array(
+				'scan_phase'               => 'source_index',
+				'source_index_initialized' => 0,
+				'source_index_complete'    => 0,
+				'source_index_cursor'      => 0,
+				'source_index_max_id'      => 0,
+			),
+			array(
+				'status' => 'scanning',
+				'phase'  => 'source_index',
+			)
+		);
+		$worker = yotm_job_acquire_worker( $job['id'], array( 'scanning' ), array( 'source_index', 'metadata' ) );
+		$this->assertIsArray( $worker );
+		$batch = yotm_prune_source_index_batch( $job, 500, $worker );
+		$this->assertFalse( $batch['done'] );
+
+		$late         = $this->create_attachment_with_thumbnail( 'restart-late.jpg', 'restart-late-150x150.jpg' );
+		$source_fence = yotm_media_source_fence_acquire();
+		$this->assertIsArray( $source_fence );
+		$this->assertTrue( yotm_media_source_dirty_mark( 'yotm-test-late-dirty', $late['attachment_id'] ) );
+		yotm_media_source_fence_release( $source_fence );
+		$batch = yotm_prune_source_index_batch( $batch['job'], 500, $worker );
+		$this->assertFalse( $batch['done'] );
+		$this->assertSame( 0, $batch['job']['payload']['source_index_initialized'] );
+		$this->assertSame( 0, $batch['job']['payload']['source_index_complete'] );
+
+		$current = $batch['job'];
+		do {
+			$batch   = yotm_prune_source_index_batch( $current, 500, $worker );
+			$current = $batch['job'];
+		} while ( ! $batch['done'] );
+
+		$this->assertSame( 1, $current['payload']['source_index_complete'] );
+		$this->assertTrue( yotm_media_source_require_clean_index() );
+		$this->assertTrue( yotm_media_source_path_is_authoritative( $first['original'] ) );
+		$this->assertTrue( yotm_media_source_path_is_authoritative( $late['original'] ) );
 		yotm_job_release_worker( $worker );
 	}
 
@@ -568,6 +632,26 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 		$wpdb->last_error = '';
 	}
 
+	public function test_dirty_state_persistence_failure_aborts_source_mutation() {
+		$fixture = $this->create_attachment_with_thumbnail( 'dirty-persist.jpg', 'dirty-persist-150x150.jpg' );
+		$before  = get_post_meta( $fixture['attachment_id'], '_wp_attached_file', true );
+		global $wpdb;
+		$suppressing = $wpdb->suppress_errors();
+		add_filter( 'query', array( $this, 'force_dirty_state_persist_failure' ) );
+		try {
+			$this->assertFalse( update_post_meta( $fixture['attachment_id'], '_wp_attached_file', $this->relative_path( $fixture['thumbnail'] ) ) );
+		} finally {
+			remove_filter( 'query', array( $this, 'force_dirty_state_persist_failure' ) );
+			$wpdb->suppress_errors( $suppressing );
+		}
+		$this->assertSame( $before, get_post_meta( $fixture['attachment_id'], '_wp_attached_file', true ) );
+		$this->assertWPError( $GLOBALS['yotm_media_source_last_error'] );
+		$this->assertSame( 'yotm_media_source_dirty_persist_failed', $GLOBALS['yotm_media_source_last_error']->get_error_code() );
+		$this->assertTrue( yotm_media_source_require_clean_index() );
+		$this->assert_guard_state_clean();
+		$wpdb->last_error = '';
+	}
+
 	public function test_later_short_circuit_retains_positive_rows_until_shutdown_cleanup() {
 		$fixture = $this->create_attachment_with_thumbnail( 'short-circuit.jpg', 'short-circuit-150x150.jpg' );
 		$before  = get_post_meta( $fixture['attachment_id'], '_wp_attached_file', true );
@@ -577,6 +661,7 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 		$this->assertSame( $before, get_post_meta( $fixture['attachment_id'], '_wp_attached_file', true ) );
 		$this->assertCount( 1, $GLOBALS['yotm_media_source_frames'] );
 		$this->assertFalse( $GLOBALS['yotm_media_source_frames'][0]['ready'] );
+		$this->assertWPError( yotm_media_source_require_clean_index() );
 		$lock_names            = array_keys( $GLOBALS['yotm_media_path_locks'] );
 		$attachment_lock_names = array_keys( $GLOBALS['yotm_media_attachment_locks'] );
 		global $wpdb;
@@ -593,6 +678,7 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 		foreach ( $attachment_lock_names as $lock_name ) {
 			$this->assertSame( '1', (string) $wpdb->get_var( $wpdb->prepare( 'SELECT IS_FREE_LOCK(%s)', $lock_name ) ) );
 		}
+		$this->assertTrue( yotm_media_source_require_clean_index() );
 		$this->assert_guard_state_clean();
 	}
 
@@ -608,6 +694,9 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 		$this->assertSame( $this->relative_path( $fixture['thumbnail'] ), get_post_meta( $fixture['attachment_id'], '_wp_attached_file', true ) );
 		$this->assertNotEmpty( $GLOBALS['yotm_media_source_frames'] );
 		$this->assertWPError( $GLOBALS['yotm_media_source_last_error'] );
+		$dirty = yotm_media_source_require_clean_index();
+		$this->assertWPError( $dirty );
+		$this->assertSame( 'yotm_media_source_index_dirty', $dirty->get_error_code() );
 		$lock_names            = array_keys( $GLOBALS['yotm_media_path_locks'] );
 		$attachment_lock_names = array_keys( $GLOBALS['yotm_media_attachment_locks'] );
 		yotm_media_source_shutdown_cleanup();
@@ -618,7 +707,111 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 			$this->assertSame( '1', (string) $wpdb->get_var( $wpdb->prepare( 'SELECT IS_FREE_LOCK(%s)', $lock_name ) ) );
 		}
 		$this->assert_guard_state_clean();
+		$dirty = yotm_media_source_require_clean_index();
+		$this->assertWPError( $dirty );
+		$this->assertSame( 'yotm_media_source_index_dirty', $dirty->get_error_code() );
+		$this->assertTrue( yotm_media_source_sync_attachment( $fixture['attachment_id'], null, true ) );
+		$this->assertTrue( yotm_media_source_require_clean_index() );
 		$wpdb->last_error = '';
+	}
+
+	public function test_nondeterministic_filtered_alias_failure_stays_dirty_until_repair() {
+		$owner      = $this->create_attachment_with_thumbnail( 'dirty-owner.jpg', 'dirty-owner-150x150.jpg' );
+		$candidates = $this->collect_candidates( $owner['attachment_id'] );
+		$candidate  = reset( $candidates );
+		$initial    = trailingslashit( $this->test_dir ) . 'dirty-other.jpg';
+		$raw        = trailingslashit( $this->test_dir ) . 'dirty-raw.jpg';
+		$p1         = trailingslashit( $this->test_dir ) . 'dirty-filter-p1.jpg';
+		$p2         = $owner['thumbnail'];
+		$this->write_file( $initial, 'initial' );
+		$this->write_file( $raw, 'raw' );
+		$this->write_file( $p1, 'p1' );
+		$other_id = $this->create_attachment( $initial, array( 'file' => $this->relative_path( $initial ) ) );
+		$calls    = 0;
+		$filter   = static function ( $file, $attachment_id ) use ( &$calls, $other_id, $raw, $p1, $p2 ) {
+			if ( $other_id === (int) $attachment_id && wp_normalize_path( $raw ) === wp_normalize_path( (string) $file ) ) {
+				++$calls;
+				return 1 === $calls ? $p1 : $p2;
+			}
+			return $file;
+		};
+
+		$this->failed_source_hash       = hash( 'sha256', yotm_media_source_canonical_path( $p2 ) );
+		$this->filtered_source_callback = $filter;
+		add_filter( 'get_attached_file', $filter, 10, 2 );
+		global $wpdb;
+		$suppressing = $wpdb->suppress_errors();
+		add_filter( 'query', array( $this, 'force_filtered_source_upsert_failure' ) );
+		try {
+			$this->assertNotFalse( update_post_meta( $other_id, '_wp_attached_file', $this->relative_path( $raw ) ) );
+		} finally {
+			remove_filter( 'query', array( $this, 'force_filtered_source_upsert_failure' ) );
+			$wpdb->suppress_errors( $suppressing );
+		}
+
+		$this->assertGreaterThanOrEqual( 2, $calls );
+		$this->assertSame( $this->relative_path( $raw ), get_post_meta( $other_id, '_wp_attached_file', true ) );
+		$this->assertWPError( $GLOBALS['yotm_media_source_last_error'] );
+		$table = yotm_job_table_names()['sources'];
+		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Test proves the failed P2 upsert left no positive source row.
+		$this->assertSame( 0, (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$table} WHERE path_hash = %s", $this->failed_source_hash ) ) );
+		$this->assertNotEmpty( yotm_media_source_dirty_state()['entries'] );
+
+		yotm_media_source_shutdown_cleanup();
+		wp_cache_delete( YOTM_MEDIA_SOURCE_DIRTY_OPTION, 'options' );
+		$this->assertNotEmpty( yotm_media_source_dirty_state()['entries'] );
+		$protected = yotm_media_source_path_is_authoritative( $p2 );
+		$this->assertWPError( $protected );
+		$this->assertSame( 'yotm_media_source_index_dirty', $protected->get_error_code() );
+		$this->assertSame( array(), $this->collect_candidates( $owner['attachment_id'] ) );
+
+		$job = yotm_job_create(
+			'prune',
+			array(
+				'base'                  => $this->uploads_base,
+				'ownership_schema'      => 'generated_file_v1',
+				'source_index_complete' => 1,
+			),
+			array(
+				'status' => 'scanning',
+				'phase'  => 'metadata',
+			)
+		);
+		$this->assertIsArray( $job );
+		$this->assertTrue( yotm_job_add_item( $job['id'], hash( 'sha256', $candidate['path'] ), $candidate ) );
+		$this->assertTrue(
+			yotm_job_update(
+				$job['id'],
+				array(
+					'status' => 'deleting',
+					'phase'  => 'delete',
+					'total'  => 1,
+				)
+			)
+		);
+		$delete_validation = yotm_prune_validate_delete_job( yotm_job_get_by_id( $job['id'] ), 'dirty-index' );
+		$this->assertWPError( $delete_validation );
+		$this->assertSame( 'yotm_media_source_index_dirty', $delete_validation->get_error_code() );
+		$worker = yotm_job_acquire_worker( $job['id'], array( 'deleting' ), array( 'delete' ) );
+		$this->assertIsArray( $worker );
+		$item   = yotm_job_claim_items( $worker, 1 )[0];
+		$result = yotm_process_claimed_prune_item( $item, yotm_job_get_by_id( $job['id'] ), $worker, $this->uploads_base );
+		$this->assertIsArray( $result );
+		$this->assertFalse( $result['deleted'] );
+		$this->assertFalse( $result['skipped'] );
+		$this->assertFileExists( $p2 );
+		yotm_job_release_item_claim( $item );
+		yotm_job_release_worker( $worker );
+
+		$this->assertTrue( yotm_media_source_sync_attachment( $other_id, null, true ) );
+		$this->assertTrue( yotm_media_source_require_clean_index() );
+		$this->assertTrue( yotm_media_source_path_is_authoritative( $p2 ) );
+		$this->assertFalse( yotm_media_source_path_is_authoritative( $p1 ) );
+		$this->assert_guard_state_clean();
+		remove_filter( 'get_attached_file', $filter, 10 );
+		$this->filtered_source_callback = null;
+		$this->failed_source_hash       = '';
+		$wpdb->last_error               = '';
 	}
 
 	public function test_multi_alias_lock_order_is_deterministic_and_partial_acquisition_is_released() {
@@ -803,6 +996,22 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 
 	public function force_source_resync_failure( $query ) {
 		return false !== strpos( $query, 'SELECT id,source_kind,path_hash FROM ' . yotm_job_table_names()['sources'] ) ? 'SELECT * FROM yotm_missing_source_table' : $query;
+	}
+
+	public function force_filtered_source_upsert_failure( $query ) {
+		return '' !== $this->failed_source_hash
+			&& false !== strpos( $query, 'INSERT INTO ' . yotm_job_table_names()['sources'] )
+			&& false !== strpos( $query, $this->failed_source_hash )
+			? 'SELECT * FROM yotm_missing_source_table'
+			: $query;
+	}
+
+	public function force_dirty_state_persist_failure( $query ) {
+		global $wpdb;
+
+		return false !== strpos( $query, $wpdb->options ) && false !== strpos( $query, YOTM_MEDIA_SOURCE_DIRTY_OPTION )
+			? 'SELECT * FROM yotm_missing_source_table'
+			: $query;
 	}
 
 	public function short_circuit_source_update() {

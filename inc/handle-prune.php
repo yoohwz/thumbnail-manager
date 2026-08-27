@@ -340,12 +340,30 @@ function yotm_prune_source_index_batch( $job, $limit, $worker ) {
 	);
 	if ( ! empty( $source_ids ) ) {
 		foreach ( $source_ids as $source_id ) {
-			$synced = yotm_media_source_sync_attachment( $source_id );
+			$synced = yotm_media_source_sync_attachment( $source_id, null, true );
 			if ( is_wp_error( $synced ) ) {
 				return $synced;
 			}
 		}
 		$payload['source_index_cursor'] = max( array_map( 'absint', $source_ids ) );
+		if ( ! yotm_job_worker_update( $worker, array( 'payload' => $payload ) ) ) {
+			return yotm_job_storage_error();
+		}
+		return array(
+			'done' => false,
+			'job'  => yotm_job_get_by_id( $job['id'] ),
+		);
+	}
+
+	$dirty = yotm_media_source_dirty_state();
+	if ( is_wp_error( $dirty ) ) {
+		return $dirty;
+	}
+	if ( ! empty( $dirty['entries'] ) ) {
+		$payload['source_index_initialized'] = 0;
+		$payload['source_index_complete']    = 0;
+		$payload['source_index_cursor']      = 0;
+		$payload['source_index_max_id']      = 0;
 		if ( ! yotm_job_worker_update( $worker, array( 'payload' => $payload ) ) ) {
 			return yotm_job_storage_error();
 		}
