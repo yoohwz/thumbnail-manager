@@ -46,9 +46,25 @@ When a task ID or PR/issue reference is supplied, do not ask the Human to repeat
 - `Review <TASK-ID>` means ChatGPT recovers and reviews the newest applicable durable handoff rather than asking the Human which review stage applies.
 - If durable state is missing, contradictory, stale, or genuinely ambiguous, stop and report the specific missing/ambiguous state instead of guessing.
 
-At the end of a handoff/review response, include one concise copy-ready next-step hint whenever there is a clear next action:
+### Mandatory `Next:` hint
+
+Every **final user-visible workflow response** from ChatGPT or Codex that has a clear next action must end with exactly one concise copy-ready hint:
 
 `Next: <Target> - <short command>`
+
+When that response also creates or updates a durable GitHub handoff, the issue/PR handoff comment must also end with the same `Next:` hint. The durable handoff and the user-visible final response must route to the same next owner and action.
+
+Do not omit `Next:` merely because the preceding workflow status appears to make the next step obvious. Progress/intermediate updates are exempt; they should not emit a `Next:` hint unless they are also ending the current workflow turn.
+
+Canonical handoff routing is:
+
+- `PLAN_REVIEW_REQUIRED: <TASK-ID>` -> `Next: ChatGPT - Review <TASK-ID>`
+- `TECHNICAL_REVIEW_REQUIRED: <TASK-ID>` -> `Next: ChatGPT - Review <TASK-ID>`
+- `TECHNICAL_CHANGES_REQUIRED: <TASK-ID>` -> `Next: Codex - Continue <TASK-ID>`
+- `READY_FOR_HUMAN_MERGE` -> `Next: Human - Merge PR #<N>`
+- `HUMAN_DECISION_REQUIRED: <TASK-ID>` -> `Next: Human - Decide <TASK-ID>`
+
+Other clear transitions use the same format. For example, after an approved Human merge, if the next roadmap task is unambiguous, use `Next: Codex - Continue <NEXT-TASK-ID>`.
 
 Examples:
 
@@ -57,7 +73,7 @@ Examples:
 - `Next: Human - Merge PR #19`
 - `Next: Human - Decide TM-AUD-0008`
 
-`Next:` is Human UX only. It is not a workflow status, does not replace the durable GitHub handoff, and must not introduce a new state outside the status protocol below.
+`Next:` is Human UX only. It is not a workflow status, does not replace the durable GitHub handoff, and must not introduce a new state outside the status protocol below. If there is genuinely no clear next action, no `Next:` line is required.
 
 ## Task brief
 
