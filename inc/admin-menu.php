@@ -65,6 +65,7 @@ add_action( 'admin_enqueue_scripts', function( $hook ) {
 		                'networkApproval'              => __( 'Network error while approving the manifest.', 'thumbnail-manager' ),
 		                'manifestHash'                 => __( 'Manifest:', 'thumbnail-manager' ),
 		                'scanningDisk'                 => __( 'Scanning uploads folders…', 'thumbnail-manager' ),
+		                'indexingSources'              => __( 'Indexing authoritative media sources…', 'thumbnail-manager' ),
 		                'buildingManifest'             => __( 'Building immutable manifest…', 'thumbnail-manager' ),
 		                'failedFiles'                  => __( 'Failed files:', 'thumbnail-manager' ),
 	                'noMatchingThumbnails'         => __( 'No matching thumbnails found. Try enabling orphan discovery or widen the folder scope.', 'thumbnail-manager' ),
@@ -93,6 +94,10 @@ add_action( 'admin_enqueue_scripts', function( $hook ) {
 	                'metadataOrphanDimsDelete'     => __( 'Metadata orphan dims marked for deletion:', 'thumbnail-manager' ),
 	                'originalFilesProtected'       => __( 'Original files protected:', 'thumbnail-manager' ),
 	                'unmappedDiskSkipped'          => __( 'Unmapped disk candidates skipped:', 'thumbnail-manager' ),
+	                'unverifiedSidecars'           => __( 'Unverified format sidecars preserved:', 'thumbnail-manager' ),
+	                'ambiguousSiblings'            => __( 'Ambiguous sibling files preserved:', 'thumbnail-manager' ),
+	                'protectedSources'             => __( 'Authoritative source paths protected:', 'thumbnail-manager' ),
+	                'sourceErrors'                 => __( 'Indeterminate source checks preserved:', 'thumbnail-manager' ),
 	                'sampleMatches'                => __( 'Sample matches', 'thumbnail-manager' ),
 	                'shown'                        => __( 'shown', 'thumbnail-manager' ),
 	                'scope'                        => __( 'Scope:', 'thumbnail-manager' ),
@@ -107,6 +112,7 @@ add_action( 'admin_enqueue_scripts', function( $hook ) {
 	                'no'                           => __( 'No', 'thumbnail-manager' ),
 	                'noRecommendationData'         => __( 'No recommendation data found.', 'thumbnail-manager' ),
 	                'unknown'                      => __( 'Unknown', 'thumbnail-manager' ),
+	                'attachmentMetadata'           => __( 'Attachment metadata', 'thumbnail-manager' ),
 	                'size'                         => __( 'Size', 'thumbnail-manager' ),
 	                'dimensions'                   => __( 'Dimensions', 'thumbnail-manager' ),
 	                'status'                       => __( 'Status', 'thumbnail-manager' ),
@@ -577,7 +583,7 @@ function yotm_manage_thumbnails_page() {
                             <th><?php echo esc_html__( 'Size name', 'thumbnail-manager' ); ?></th>
                             <th style="width:120px;"><?php echo esc_html__( 'Target (WxH)', 'thumbnail-manager' ); ?></th>
                             <th style="width:4ch;"><?php echo esc_html__( 'Crop', 'thumbnail-manager' ); ?></th>
-                            <th><?php echo esc_html__( 'File variants', 'thumbnail-manager' ); ?></th>
+	                            <th><?php echo esc_html__( 'Deletion evidence', 'thumbnail-manager' ); ?></th>
                             <th style="width:160px;"><?php echo esc_html__( 'Status', 'thumbnail-manager' ); ?></th>
                         </tr>
                     </thead>
@@ -591,7 +597,7 @@ function yotm_manage_thumbnails_page() {
                         }
                         $crop = ! empty( $def['crop'] );
 
-                        $note = __( 'Uses attachment metadata, plus @2x / -1 / .webp / .bak variants when present', 'thumbnail-manager' );
+	                        $note = __( 'Deletes only the exact generated filename recorded in attachment metadata; unverified sidecars and siblings are report-only.', 'thumbnail-manager' );
 
                         $is_disabled = in_array( $name, $disabled_now, true );
                         ?>
@@ -688,7 +694,7 @@ function yotm_manage_thumbnails_page() {
 							<tr>
 								<th><?php echo esc_html__( 'File path', 'thumbnail-manager' ); ?></th>
 								<th><?php echo esc_html__( 'Attachment', 'thumbnail-manager' ); ?></th>
-								<th><?php echo esc_html__( 'Size / source', 'thumbnail-manager' ); ?></th>
+								<th><?php echo esc_html__( 'Ownership evidence', 'thumbnail-manager' ); ?></th>
 								<th><?php echo esc_html__( 'Estimated size', 'thumbnail-manager' ); ?></th>
 							</tr>
 						</thead>

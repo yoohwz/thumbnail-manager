@@ -140,7 +140,11 @@ if ( 'setup' === $smoke_role ) {
 
 	$job = yotm_job_create(
 		'prune',
-		array( 'base' => $uploads['basedir'] ),
+		array(
+			'base'                  => $uploads['basedir'],
+			'ownership_schema'      => 'generated_file_v1',
+			'source_index_complete' => 1,
+		),
 		array(
 			'status'       => 'scanning',
 			'phase'        => 'metadata',
@@ -154,15 +158,26 @@ if ( 'setup' === $smoke_role ) {
 
 	$item_key = hash( 'sha256', wp_normalize_path( $candidate ) );
 	$payload  = array(
-		'path'            => $candidate,
-		'attachment_id'   => $attachment_id,
-		'size'            => 'yotm_smoke',
-		'remove_metadata' => 1,
-		'metadata_refs'   => array(
+		'path'               => $candidate,
+		'ownership_schema'   => 'generated_file_v1',
+		'ownership'          => 'metadata_size',
+		'attachment_id'      => $attachment_id,
+		'size'               => 'yotm_smoke',
+		'remove_metadata'    => 1,
+		'metadata_refs'      => array(
 			array(
 				'attachment_id' => $attachment_id,
 				'size'          => 'yotm_smoke',
 				'filename'      => wp_basename( $candidate ),
+			),
+		),
+		'ownership_evidence' => array(
+			array(
+				'attachment_id' => $attachment_id,
+				'size'          => 'yotm_smoke',
+				'filename'      => wp_basename( $candidate ),
+				'mime'          => 'image/png',
+				'selection'     => 'registered_remove',
 			),
 		),
 	);

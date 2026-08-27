@@ -21,6 +21,8 @@ class YOTM_Prune_Safety_Test extends WP_UnitTestCase {
 
 	public function setUp(): void {
 		parent::setUp();
+		unset( $GLOBALS['yotm_job_storage_readiness'] );
+		$this->assertTrue( yotm_run_job_table_migration() );
 		$uploads            = wp_get_upload_dir();
 		$this->uploads_base = trailingslashit( $uploads['basedir'] );
 		$this->test_dir     = $this->uploads_base . 'yotm-phpunit-' . wp_generate_uuid4();

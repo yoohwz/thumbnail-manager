@@ -123,11 +123,14 @@ function yotm_prune_delete_batch() {
 
 	$deleted_now = 0;
 	$failed_now  = 0;
+	$retry       = false;
 	$base        = (string) ( $job['payload']['base'] ?? ( wp_get_upload_dir()['basedir'] ?? '' ) );
 
 	foreach ( $items as $item ) {
 		$result = yotm_process_claimed_prune_item( $item, $job, $worker, $base );
 		if ( is_wp_error( $result ) ) {
+			yotm_job_release_item_claim( $item );
+			$retry = true;
 			break;
 		}
 
@@ -157,7 +160,7 @@ function yotm_prune_delete_batch() {
 		);
 	}
 
-	wp_send_json_success( yotm_build_prune_delete_response( yotm_job_get_by_id( $job['id'] ), $deleted_now, $failed_now ) );
+	wp_send_json_success( yotm_build_prune_delete_response( yotm_job_get_by_id( $job['id'] ), $deleted_now, $failed_now, $retry ) );
 }
 
 /**
@@ -224,6 +227,10 @@ function yotm_prune_validate_review_job( $job, $manifest_hash, $confirmed ) {
 		return new WP_Error( 'yotm_empty_manifest', __( 'There are no files in this manifest.', 'thumbnail-manager' ) );
 	}
 
+	if ( 'generated_file_v1' !== ( $job['payload']['ownership_schema'] ?? '' ) || empty( $job['payload']['source_index_complete'] ) ) {
+		return new WP_Error( 'yotm_prune_ownership_upgrade_required', __( 'This prune manifest predates the current media-safety rules. Run and review a new scan.', 'thumbnail-manager' ) );
+	}
+
 	return true;
 }
 
@@ -245,6 +252,10 @@ function yotm_prune_validate_delete_job( $job, $manifest_hash ) {
 
 	if ( strtotime( $job['expires_at'] . ' UTC' ) < time() ) {
 		return new WP_Error( 'yotm_delete_grant_expired', __( 'The delete approval has expired. Run and review a new scan.', 'thumbnail-manager' ) );
+	}
+
+	if ( 'generated_file_v1' !== ( $job['payload']['ownership_schema'] ?? '' ) || empty( $job['payload']['source_index_complete'] ) ) {
+		return new WP_Error( 'yotm_prune_ownership_upgrade_required', __( 'This prune manifest predates the current media-safety rules. Run and review a new scan.', 'thumbnail-manager' ) );
 	}
 
 	return true;
@@ -306,15 +317,108 @@ function yotm_process_claimed_prune_item( $item, $job, $worker, $uploads_base, $
 		return new WP_Error( 'yotm_job_worker_stale', __( 'This job worker no longer owns the current batch.', 'thumbnail-manager' ) );
 	}
 
-	if ( is_callable( $barrier ) ) {
-		call_user_func( $barrier, $item, $job, $worker );
+	$path = yotm_validate_prune_item_ownership( $item['payload'] ?? array(), $uploads_base );
+	if ( is_wp_error( $path ) ) {
+		return array(
+			'deleted' => false,
+			'skipped' => false,
+			'bytes'   => 0,
+			'error'   => $path->get_error_message(),
+		);
 	}
 
-	if ( ! yotm_job_refresh_worker( $worker ) || ! yotm_job_refresh_item_claim( $item ) ) {
-		return new WP_Error( 'yotm_job_worker_stale', __( 'This job worker no longer owns the current batch.', 'thumbnail-manager' ) );
+	$path_lock = yotm_media_path_lock_acquire( $path );
+	if ( is_wp_error( $path_lock ) ) {
+		return $path_lock;
 	}
 
-	return yotm_delete_prune_item( $item['payload'], $uploads_base );
+	try {
+		if ( is_callable( $barrier ) ) {
+			call_user_func( $barrier, $item, $job, $worker );
+		}
+
+		if ( ! yotm_job_refresh_worker( $worker ) || ! yotm_job_refresh_item_claim( $item ) ) {
+			return new WP_Error( 'yotm_job_worker_stale', __( 'This job worker no longer owns the current batch.', 'thumbnail-manager' ) );
+		}
+
+		$protected = yotm_media_source_path_is_authoritative( $path );
+		if ( is_wp_error( $protected ) ) {
+			return array(
+				'deleted' => false,
+				'skipped' => false,
+				'bytes'   => 0,
+				'error'   => $protected->get_error_message(),
+			);
+		}
+		if ( $protected ) {
+			return array(
+				'deleted' => false,
+				'skipped' => true,
+				'bytes'   => 0,
+				'message' => __( 'The file is now an authoritative attachment source and was preserved.', 'thumbnail-manager' ),
+			);
+		}
+
+		$payload         = $item['payload'];
+		$payload['path'] = $path;
+		return yotm_delete_prune_item( $payload, $uploads_base );
+	} finally {
+		yotm_media_path_lock_release( $path_lock );
+	}//end try
+}
+
+/**
+ * Validate immutable exact generated-file ownership before a side effect.
+ *
+ * @param array  $item Item payload.
+ * @param string $uploads_base Uploads base path.
+ * @return string|WP_Error Canonical candidate path.
+ */
+function yotm_validate_prune_item_ownership( $item, $uploads_base ) {
+	if ( ! is_array( $item ) || 'generated_file_v1' !== ( $item['ownership_schema'] ?? '' ) || 'metadata_size' !== ( $item['ownership'] ?? '' ) ) {
+		return new WP_Error( 'yotm_prune_ownership_invalid', __( 'The prune item lacks exact generated-file ownership evidence.', 'thumbnail-manager' ) );
+	}
+
+	$path = yotm_media_source_canonical_path( $item['path'] ?? '' );
+	if ( is_wp_error( $path ) || ! yotm_is_path_inside_dir( is_wp_error( $path ) ? '' : $path, $uploads_base ) ) {
+		return is_wp_error( $path ) ? $path : new WP_Error( 'yotm_prune_path_invalid', __( 'File path is outside uploads.', 'thumbnail-manager' ) );
+	}
+
+	$filename = wp_basename( $path );
+	$evidence = is_array( $item['ownership_evidence'] ?? null ) ? $item['ownership_evidence'] : array();
+	$refs     = is_array( $item['metadata_refs'] ?? null ) ? $item['metadata_refs'] : array();
+	if ( empty( $evidence ) || empty( $refs ) ) {
+		return new WP_Error( 'yotm_prune_ownership_invalid', __( 'The prune item lacks exact generated-file ownership evidence.', 'thumbnail-manager' ) );
+	}
+
+	$proof_keys = array();
+	foreach ( $evidence as $proof ) {
+		if (
+			empty( $proof['attachment_id'] )
+			|| '' === sanitize_key( $proof['size'] ?? '' )
+			|| ! hash_equals( $filename, wp_basename( (string) ( $proof['filename'] ?? '' ) ) )
+			|| ! in_array( $proof['selection'] ?? '', array( 'registered_remove', 'metadata_orphan' ), true )
+		) {
+			return new WP_Error( 'yotm_prune_ownership_invalid', __( 'The prune item contains malformed ownership evidence.', 'thumbnail-manager' ) );
+		}
+		$proof_keys[ absint( $proof['attachment_id'] ) . ':' . sanitize_key( $proof['size'] ) . ':' . $filename ] = true;
+	}
+
+	$ref_keys = array();
+	foreach ( $refs as $ref ) {
+		if ( empty( $ref['attachment_id'] ) || '' === sanitize_key( $ref['size'] ?? '' ) || ! hash_equals( $filename, wp_basename( (string) ( $ref['filename'] ?? '' ) ) ) ) {
+			return new WP_Error( 'yotm_prune_ownership_invalid', __( 'The prune item contains a mismatched metadata reference.', 'thumbnail-manager' ) );
+		}
+		$ref_keys[ absint( $ref['attachment_id'] ) . ':' . sanitize_key( $ref['size'] ) . ':' . $filename ] = true;
+	}
+
+	ksort( $proof_keys );
+	ksort( $ref_keys );
+	if ( array_keys( $proof_keys ) !== array_keys( $ref_keys ) ) {
+		return new WP_Error( 'yotm_prune_ownership_invalid', __( 'The prune item ownership evidence does not match its metadata references.', 'thumbnail-manager' ) );
+	}
+
+	return $path;
 }
 
 /**
@@ -338,7 +442,10 @@ function yotm_delete_prune_item( $item, $uploads_base ) {
 	}
 
 	if ( ! is_file( $path ) ) {
-		yotm_reconcile_prune_item_metadata( $item, $path );
+		$reconciled = yotm_reconcile_prune_item_metadata( $item, $path );
+		if ( is_wp_error( $reconciled ) ) {
+			return $reconciled;
+		}
 
 		return array(
 			'deleted' => false,
@@ -351,7 +458,10 @@ function yotm_delete_prune_item( $item, $uploads_base ) {
 	$result = yotm_delete_file_with_result( $path );
 
 	if ( ! empty( $result['deleted'] ) ) {
-		yotm_reconcile_prune_item_metadata( $item, $path );
+		$reconciled = yotm_reconcile_prune_item_metadata( $item, $path );
+		if ( is_wp_error( $reconciled ) ) {
+			return $reconciled;
+		}
 	}
 
 	return $result;
@@ -365,7 +475,7 @@ function yotm_delete_prune_item( $item, $uploads_base ) {
  */
 function yotm_reconcile_prune_item_metadata( $item, $path ) {
 	if ( ! is_array( $item ) ) {
-		return;
+		return true;
 	}
 
 	$refs = is_array( $item['metadata_refs'] ?? null ) ? $item['metadata_refs'] : array();
@@ -390,8 +500,13 @@ function yotm_reconcile_prune_item_metadata( $item, $path ) {
 		}
 
 		$seen[ $key ] = true;
-		yotm_remove_attachment_size_metadata( $attachment_id, $size, $filename );
+		$removed      = yotm_remove_attachment_size_metadata( $attachment_id, $size, $filename );
+		if ( is_wp_error( $removed ) ) {
+			return $removed;
+		}
 	}
+
+	return true;
 }
 
 /**
@@ -457,24 +572,24 @@ function yotm_remove_attachment_size_metadata( $attachment_id, $size_name, $file
 		return false;
 	}
 
-	$changed = false;
-
-	foreach ( $metadata['sizes'] as $key => $size_data ) {
-		if ( ! is_array( $size_data ) ) {
-			continue;
-		}
-
-		$size_file = $size_data['file'] ?? ( $size_data['filename'] ?? '' );
-
-		if ( $key === $size_name || ( '' !== $size_file && wp_basename( $size_file ) === $filename ) ) {
-			unset( $metadata['sizes'][ $key ] );
-			$changed = true;
-		}
+	if ( ! isset( $metadata['sizes'][ $size_name ] ) || ! is_array( $metadata['sizes'][ $size_name ] ) ) {
+		return true;
 	}
 
-	if ( ! $changed ) {
-		return false;
+	$size_file = $metadata['sizes'][ $size_name ]['file'] ?? ( $metadata['sizes'][ $size_name ]['filename'] ?? '' );
+	if ( '' === $size_file || ! hash_equals( wp_basename( (string) $size_file ), wp_basename( (string) $filename ) ) ) {
+		return true;
 	}
 
-	return false !== wp_update_attachment_metadata( $attachment_id, $metadata );
+	unset( $metadata['sizes'][ $size_name ] );
+	unset( $GLOBALS['yotm_media_source_last_error'] );
+	$updated = wp_update_attachment_metadata( $attachment_id, $metadata );
+	if ( false === $updated ) {
+		if ( isset( $GLOBALS['yotm_media_source_last_error'] ) && is_wp_error( $GLOBALS['yotm_media_source_last_error'] ) ) {
+			return $GLOBALS['yotm_media_source_last_error'];
+		}
+		return new WP_Error( 'yotm_prune_metadata_update_failed', __( 'The file was removed, but its exact metadata reference could not be reconciled.', 'thumbnail-manager' ) );
+	}
+
+	return true;
 }

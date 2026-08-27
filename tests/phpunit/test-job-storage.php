@@ -359,7 +359,10 @@ class YOTM_Job_Storage_Test extends WP_UnitTestCase {
 	public function test_manifest_is_stable_and_cannot_grow_after_review() {
 		$job = yotm_job_create(
 			'prune',
-			array(),
+			array(
+				'ownership_schema'      => 'generated_file_v1',
+				'source_index_complete' => 1,
+			),
 			array(
 				'status' => 'scanning',
 				'phase'  => 'metadata',
@@ -457,7 +460,10 @@ class YOTM_Job_Storage_Test extends WP_UnitTestCase {
 	public function test_review_and_delete_require_the_same_manifest() {
 		$job = yotm_job_create(
 			'prune',
-			array(),
+			array(
+				'ownership_schema'      => 'generated_file_v1',
+				'source_index_complete' => 1,
+			),
 			array(
 				'status' => 'scanning',
 				'phase'  => 'metadata',
@@ -508,7 +514,11 @@ class YOTM_Job_Storage_Test extends WP_UnitTestCase {
 
 		$job = yotm_job_create(
 			'prune',
-			array( 'base' => $uploads['basedir'] ),
+			array(
+				'base'                  => $uploads['basedir'],
+				'ownership_schema'      => 'generated_file_v1',
+				'source_index_complete' => 1,
+			),
 			array(
 				'status' => 'scanning',
 				'phase'  => 'metadata',
@@ -594,6 +604,12 @@ class YOTM_Job_Storage_Test extends WP_UnitTestCase {
 			$this->files[] = $file;
 			file_put_contents( $file, 'thumbnail' );
 		}
+		$sidecar       = trailingslashit( $directory ) . 'side-100x100.jpg.webp';
+		$backup        = trailingslashit( $directory ) . 'side-100x100.bak.jpg';
+		$this->files[] = $sidecar;
+		$this->files[] = $backup;
+		file_put_contents( $sidecar, 'sidecar' );
+		file_put_contents( $backup, 'backup' );
 
 		$job = yotm_job_create(
 			'prune',
@@ -632,8 +648,10 @@ class YOTM_Job_Storage_Test extends WP_UnitTestCase {
 		} while ( ! $batch['done'] && $loops < 10 );
 
 		$this->assertTrue( $batch['done'] );
-		$this->assertSame( 8, $batch['job']['payload']['orphan_summary']['total_files'] );
-		$this->assertSame( 8, $batch['job']['payload']['orphan_summary']['unmapped_skipped'] );
+		$this->assertSame( 10, $batch['job']['payload']['orphan_summary']['total_files'] );
+		$this->assertSame( 10, $batch['job']['payload']['orphan_summary']['unmapped_skipped'] );
+		$this->assertSame( 1, $batch['job']['payload']['orphan_summary']['unverified_sidecars'] );
+		$this->assertSame( 1, $batch['job']['payload']['orphan_summary']['ambiguous_siblings'] );
 	}
 
 	private function clear_jobs() {

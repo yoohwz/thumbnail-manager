@@ -57,7 +57,7 @@ class YOTM_Job_Storage_Installation_Test extends WP_UnitTestCase {
 		$this->assertSame( $scheduled, wp_next_scheduled( 'yotm_cleanup_jobs' ) );
 
 		$this->stop_query_capture();
-		$this->assertSame( 2, $this->count_presence_queries() );
+		$this->assertSame( 3, $this->count_presence_queries() );
 		$this->assertSame( 0, $this->count_queries( '/^(CREATE|ALTER) TABLE/i' ) );
 	}
 
@@ -70,12 +70,12 @@ class YOTM_Job_Storage_Installation_Test extends WP_UnitTestCase {
 		$this->assertTrue( yotm_cleanup_expired_jobs() );
 
 		$this->stop_query_capture();
-		$this->assertSame( 2, $this->count_presence_queries() );
+		$this->assertSame( 3, $this->count_presence_queries() );
 		$this->assertSame( 0, $this->count_queries( '/^(CREATE|ALTER) TABLE/i' ) );
 	}
 
 	public function test_current_marker_and_both_tables_missing_fail_closed() {
-		$this->drop_tables( array( 'jobs', 'items' ) );
+		$this->drop_tables( array( 'jobs', 'items', 'sources' ) );
 		update_option( 'yotm_job_db_version', YOTM_JOB_DB_VERSION, false );
 		$this->reset_request_state();
 		$this->start_query_capture();
@@ -87,7 +87,7 @@ class YOTM_Job_Storage_Installation_Test extends WP_UnitTestCase {
 			$this->assert_storage_inconsistent( yotm_job_get_recent_for_current_user() );
 			$this->assert_storage_inconsistent( yotm_cleanup_expired_jobs() );
 			$this->assertSame( YOTM_JOB_DB_VERSION, get_option( 'yotm_job_db_version' ) );
-			$this->assertSame( 2, $this->count_presence_queries() );
+			$this->assertSame( 3, $this->count_presence_queries() );
 			$this->assertSame( 0, $this->count_queries( '/^(CREATE|ALTER) TABLE/i' ) );
 		} finally {
 			$this->stop_query_capture();
@@ -111,7 +111,7 @@ class YOTM_Job_Storage_Installation_Test extends WP_UnitTestCase {
 
 		try {
 			$this->assert_storage_inconsistent( yotm_job_storage_ready() );
-			$this->assertSame( 2, $this->count_presence_queries() );
+			$this->assertSame( 3, $this->count_presence_queries() );
 			$this->assertSame( 0, $this->count_queries( '/^(CREATE|ALTER) TABLE/i' ) );
 		} finally {
 			$this->stop_query_capture();
@@ -120,15 +120,16 @@ class YOTM_Job_Storage_Installation_Test extends WP_UnitTestCase {
 
 	public function partial_storage_provider() {
 		return array(
-			'current marker, jobs missing'  => array( YOTM_JOB_DB_VERSION, 'jobs' ),
-			'current marker, items missing' => array( YOTM_JOB_DB_VERSION, 'items' ),
-			'older marker, jobs missing'    => array( '1.0.0', 'jobs' ),
-			'absent marker, items missing'  => array( null, 'items' ),
+			'current marker, jobs missing'    => array( YOTM_JOB_DB_VERSION, 'jobs' ),
+			'current marker, items missing'   => array( YOTM_JOB_DB_VERSION, 'items' ),
+			'current marker, sources missing' => array( YOTM_JOB_DB_VERSION, 'sources' ),
+			'older marker, jobs missing'      => array( '1.0.0', 'jobs' ),
+			'absent marker, items missing'    => array( null, 'items' ),
 		);
 	}
 
 	public function test_absent_marker_and_both_tables_absent_install_once() {
-		$this->drop_tables( array( 'jobs', 'items' ) );
+		$this->drop_tables( array( 'jobs', 'items', 'sources' ) );
 		delete_option( 'yotm_job_db_version' );
 		delete_transient( 'yotm_job_db_migration_failure' );
 		wp_clear_scheduled_hook( 'yotm_cleanup_jobs' );
@@ -142,8 +143,8 @@ class YOTM_Job_Storage_Installation_Test extends WP_UnitTestCase {
 			$this->assertSame( YOTM_JOB_DB_VERSION, get_option( 'yotm_job_db_version' ) );
 			$this->assertTrue( yotm_job_tables_exist() );
 			$this->assertNotFalse( wp_next_scheduled( 'yotm_cleanup_jobs' ) );
-			$this->assertSame( 6, $this->count_presence_queries() );
-			$this->assertSame( 2, $this->count_queries( '/^CREATE(?: TEMPORARY)? TABLE/i' ) );
+			$this->assertSame( 9, $this->count_presence_queries() );
+			$this->assertSame( 3, $this->count_queries( '/^CREATE(?: TEMPORARY)? TABLE/i' ) );
 		} finally {
 			$this->stop_query_capture();
 		}
@@ -182,13 +183,33 @@ class YOTM_Job_Storage_Installation_Test extends WP_UnitTestCase {
 		$this->assertSame( '', $stored_item['claim_token'] );
 		$this->assertSame( 0, $stored_item['claim_generation'] );
 		$this->assertSame( 0, $stored_item['attempts'] );
-		$this->assertSame( 6, $this->count_presence_queries() );
+		$this->assertSame( 9, $this->count_presence_queries() );
+	}
+
+	public function test_two_table_predecessor_adds_source_table_without_losing_data() {
+		$job = yotm_job_create(
+			'prune',
+			array( 'proof' => 'two-table-predecessor' ),
+			array(
+				'status' => 'scanning',
+				'phase'  => 'metadata',
+			)
+		);
+		$this->assertIsArray( $job );
+		$this->drop_tables( array( 'sources' ) );
+		update_option( 'yotm_job_db_version', YOTM_JOB_DB_PRE_SOURCE_VERSION, false );
+		$this->reset_request_state();
+
+		$this->assertTrue( yotm_job_storage_ready() );
+		$this->assertTrue( yotm_job_tables_exist() );
+		$this->assertSame( 'two-table-predecessor', yotm_job_get_by_id( $job['id'] )['payload']['proof'] );
+		$this->assertSame( YOTM_JOB_DB_VERSION, get_option( 'yotm_job_db_version' ) );
 	}
 
 	public function test_failed_install_is_memoized_for_later_operations_in_same_request() {
 		global $wpdb;
 
-		$this->drop_tables( array( 'jobs', 'items' ) );
+		$this->drop_tables( array( 'jobs', 'items', 'sources' ) );
 		delete_option( 'yotm_job_db_version' );
 		delete_transient( 'yotm_job_db_migration_failure' );
 		$this->reset_request_state();
@@ -204,8 +225,8 @@ class YOTM_Job_Storage_Installation_Test extends WP_UnitTestCase {
 			$this->assert_storage_unavailable( yotm_cleanup_expired_jobs() );
 			$this->assertFalse( get_option( 'yotm_job_db_version' ) );
 			$this->assertIsArray( get_transient( 'yotm_job_db_migration_failure' ) );
-			$this->assertSame( 4, $this->count_presence_queries() );
-			$this->assertSame( 2, $this->count_queries( '/^CREATE(?: TEMPORARY)? TABLE/i' ) );
+			$this->assertSame( 6, $this->count_presence_queries() );
+			$this->assertSame( 3, $this->count_queries( '/^CREATE(?: TEMPORARY)? TABLE/i' ) );
 		} finally {
 			remove_filter( 'query', array( $this, 'fail_items_table_creation' ) );
 			$wpdb->suppress_errors( $suppressing );
@@ -229,7 +250,7 @@ class YOTM_Job_Storage_Installation_Test extends WP_UnitTestCase {
 		$this->stop_query_capture();
 
 		$this->assertSame( '1.0.0', get_option( 'yotm_job_db_version' ) );
-		$this->assertSame( 2, $this->count_presence_queries() );
+		$this->assertSame( 3, $this->count_presence_queries() );
 		$this->assertSame( 0, $this->count_queries( '/^(CREATE|ALTER) TABLE/i' ) );
 	}
 
@@ -277,11 +298,12 @@ class YOTM_Job_Storage_Installation_Test extends WP_UnitTestCase {
 			switch_to_blog( $second_blog_id );
 
 			$second_tables = yotm_job_table_names();
-			$this->drop_tables( array( 'jobs', 'items' ) );
+			$this->drop_tables( array( 'jobs', 'items', 'sources' ) );
 			delete_option( 'yotm_job_db_version' );
 			delete_transient( 'yotm_job_db_migration_failure' );
 
 			$this->assertSame( $wpdb->get_blog_prefix( $second_blog_id ) . 'yotm_jobs', $second_tables['jobs'] );
+			$this->assertSame( $wpdb->get_blog_prefix( $second_blog_id ) . 'yotm_media_sources', $second_tables['sources'] );
 			$this->assertNotSame( $primary_tables['jobs'], $second_tables['jobs'] );
 			$this->assertFalse( get_option( 'yotm_job_db_version', false ) );
 			$this->assertFalse( get_transient( 'yotm_job_db_migration_failure' ) );
@@ -312,7 +334,7 @@ class YOTM_Job_Storage_Installation_Test extends WP_UnitTestCase {
 			}
 
 			switch_to_blog( $second_blog_id );
-			$this->drop_tables( array( 'jobs', 'items' ) );
+			$this->drop_tables( array( 'jobs', 'items', 'sources' ) );
 			delete_option( 'yotm_job_db_version' );
 			delete_transient( 'yotm_job_db_migration_failure' );
 			restore_current_blog();
@@ -425,7 +447,7 @@ class YOTM_Job_Storage_Installation_Test extends WP_UnitTestCase {
 	}
 
 	private function count_presence_queries() {
-		return $this->count_queries( '/^DESCRIBE\s+\S*yotm_(jobs|job_items)/i' );
+		return $this->count_queries( '/^DESCRIBE\s+\S*yotm_(jobs|job_items|media_sources)/i' );
 	}
 
 	private function assert_storage_inconsistent( $result ) {
