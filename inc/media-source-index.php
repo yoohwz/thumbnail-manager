@@ -1412,14 +1412,28 @@ function yotm_guard_delete_post_metadata( $check, $object_id, $meta_key, $meta_v
 		return $check;
 	}
 
-	$args  = array( absint( $object_id ), (string) $meta_key );
-	$where = 'post_id = %d AND meta_key = %s';
 	if ( '' !== $meta_value && null !== $meta_value && false !== $meta_value ) {
-		$where .= ' AND meta_value = %s';
-		$args[] = maybe_serialize( $meta_value );
-	}
-	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared -- Guard needs exact rows matching Core's delete predicate.
-	$rows = $wpdb->get_results( $wpdb->prepare( "SELECT meta_id,post_id,meta_key,meta_value FROM {$wpdb->postmeta} WHERE {$where} ORDER BY meta_id ASC", $args ), ARRAY_A );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Guard needs exact rows matching Core's delete predicate.
+		$rows = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT meta_id,post_id,meta_key,meta_value FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key = %s AND meta_value = %s ORDER BY meta_id ASC",
+				absint( $object_id ),
+				(string) $meta_key,
+				maybe_serialize( $meta_value )
+			),
+			ARRAY_A
+		);
+	} else {
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Guard needs exact rows matching Core's delete predicate.
+		$rows = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT meta_id,post_id,meta_key,meta_value FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key = %s ORDER BY meta_id ASC",
+				absint( $object_id ),
+				(string) $meta_key
+			),
+			ARRAY_A
+		);
+	}//end if
 	if ( empty( $rows ) ) {
 		yotm_media_source_push_guard_invocation( 'delete', $frame_id );
 		return $check;
