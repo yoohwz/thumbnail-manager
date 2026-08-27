@@ -211,6 +211,7 @@ function yotm_media_source_filter_proposed_file( $attachment_id, $attached_value
 		}
 	}
 
+	// phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Intentionally mirror the WordPress Core accessor filter.
 	return apply_filters( 'get_attached_file', $file, absint( $attachment_id ) );
 }
 
@@ -226,6 +227,7 @@ function yotm_media_source_filter_proposed_metadata( $attachment_id, $metadata_v
 		return false;
 	}
 
+	// phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Intentionally mirror the WordPress Core accessor filter.
 	$metadata = apply_filters( 'wp_get_attachment_metadata', $metadata_value, absint( $attachment_id ) );
 	if ( ! is_array( $metadata ) ) {
 		return false;
@@ -254,6 +256,7 @@ function yotm_media_source_filter_proposed_original( $attachment_id, $filtered_f
 		? $filtered_file
 		: path_join( dirname( $filtered_file ), $filtered_metadata['original_image'] );
 
+	// phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Intentionally mirror the WordPress Core accessor filter.
 	return apply_filters( 'wp_get_original_image_path', $original, absint( $attachment_id ) );
 }
 
