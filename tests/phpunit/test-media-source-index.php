@@ -73,6 +73,15 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 		$this->assertArrayNotHasKey( yotm_normalize_filesystem_path( $backup ), $candidates );
 	}
 
+	public function test_exact_avif_metadata_output_remains_eligible() {
+		$fixture    = $this->create_attachment_with_thumbnail( 'exact-avif.jpg', 'exact-avif-150x150.avif', 'image/avif' );
+		$candidates = $this->collect_candidates( $fixture['attachment_id'] );
+		$this->assertCount( 1, $candidates );
+		$candidate = reset( $candidates );
+		$this->assertSame( yotm_normalize_filesystem_path( $fixture['thumbnail'] ), $candidate['path'] );
+		$this->assertSame( 'image/avif', $candidate['ownership_evidence'][0]['mime'] );
+	}
+
 	public function test_cross_attachment_source_is_excluded_even_outside_candidate_attachment() {
 		$fixture = $this->create_attachment_with_thumbnail( 'owner.jpg', 'owner-150x150.jpg' );
 		$source  = $this->create_attachment( $fixture['thumbnail'], array( 'file' => $this->relative_path( $fixture['thumbnail'] ) ) );
