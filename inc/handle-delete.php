@@ -626,10 +626,17 @@ function yotm_delete_file_with_result( $path ) {
  * @param int    $attachment_id Attachment ID.
  * @param string $size_name Size name.
  * @param string $filename Generated filename.
- * @return bool
+ * @return bool|WP_Error
  */
 function yotm_remove_attachment_size_metadata( $attachment_id, $size_name, $filename ) {
-	$metadata = wp_get_attachment_metadata( $attachment_id );
+	$rows = yotm_media_reference_raw_postmeta_rows( $attachment_id, '_wp_attachment_metadata' );
+	if ( is_wp_error( $rows ) ) {
+		return $rows;
+	}
+	if ( 1 !== count( $rows ) || ! is_array( $rows[0]['value'] ) ) {
+		return new WP_Error( 'yotm_prune_metadata_state_ambiguous', __( 'The file was removed, but raw attachment metadata could not be reconciled safely.', 'thumbnail-manager' ) );
+	}
+	$metadata = $rows[0]['value'];
 
 	if ( empty( $metadata['sizes'] ) || ! is_array( $metadata['sizes'] ) ) {
 		return false;

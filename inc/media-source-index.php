@@ -65,6 +65,52 @@ function yotm_media_source_guard_enabled() {
 }
 
 /**
+ * Read exact, unfiltered postmeta rows for an authoritative attachment key.
+ *
+ * The returned list preserves row cardinality and order. Values are decoded
+ * exactly once with maybe_unserialize(), matching Core's stored-value shape
+ * without invoking the short-circuitable metadata accessor layer.
+ *
+ * @param int    $attachment_id Attachment ID.
+ * @param string $meta_key Authoritative meta key.
+ * @return array<int,array{meta_id:int,value:mixed}>|WP_Error
+ */
+function yotm_media_reference_raw_postmeta_rows( $attachment_id, $meta_key ) {
+	global $wpdb;
+
+	$attachment_id = absint( $attachment_id );
+	$meta_key      = (string) $meta_key;
+	$allowed       = array( '_wp_attached_file', '_wp_attachment_metadata', '_wp_attachment_backup_sizes' );
+	if ( ! $attachment_id || ! in_array( $meta_key, $allowed, true ) ) {
+		return new WP_Error( 'yotm_media_raw_meta_invalid', __( 'Authoritative attachment metadata could not be identified.', 'thumbnail-manager' ) );
+	}
+
+	$wpdb->last_error = '';
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Core postmeta table is trusted; destructive decisions require exact uncached rows that cannot be short-circuited by metadata filters.
+	$stored = $wpdb->get_results(
+		$wpdb->prepare(
+			"SELECT meta_id,meta_value FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key = %s ORDER BY meta_id ASC",
+			$attachment_id,
+			$meta_key
+		),
+		ARRAY_A
+	);
+	if ( '' !== (string) $wpdb->last_error || ! is_array( $stored ) ) {
+		return yotm_job_storage_error( 'yotm_job_storage_unavailable', (string) $wpdb->last_error );
+	}
+
+	$rows = array();
+	foreach ( $stored as $row ) {
+		$rows[] = array(
+			'meta_id' => absint( $row['meta_id'] ?? 0 ),
+			'value'   => maybe_unserialize( $row['meta_value'] ?? '' ),
+		);
+	}
+
+	return $rows;
+}
+
+/**
  * Return the durable pending source-index mutations for this site.
  *
  * @return array{version:int,entries:array}|WP_Error
@@ -352,7 +398,14 @@ function yotm_media_source_aliases( $attachment_id, $attached_value = null, $met
 	$metadata_values = array();
 	$backup_values   = array();
 	if ( $live ) {
-		foreach ( (array) get_post_meta( $attachment_id, '_wp_attached_file', false ) as $stored_file ) {
+		$attached_rows = yotm_media_reference_raw_postmeta_rows( $attachment_id, '_wp_attached_file' );
+		$metadata_rows = yotm_media_reference_raw_postmeta_rows( $attachment_id, '_wp_attachment_metadata' );
+		$backup_rows   = yotm_media_reference_raw_postmeta_rows( $attachment_id, '_wp_attachment_backup_sizes' );
+		if ( is_wp_error( $attached_rows ) || is_wp_error( $metadata_rows ) || is_wp_error( $backup_rows ) ) {
+			return is_wp_error( $attached_rows ) ? $attached_rows : ( is_wp_error( $metadata_rows ) ? $metadata_rows : $backup_rows );
+		}
+		foreach ( $attached_rows as $stored_row ) {
+			$stored_file = $stored_row['value'];
 			if ( ! is_string( $stored_file ) || '' === $stored_file ) {
 				return new WP_Error( 'yotm_media_source_state_unresolved', __( 'Attachment source state could not be resolved.', 'thumbnail-manager' ) );
 			}
@@ -362,7 +415,8 @@ function yotm_media_source_aliases( $attachment_id, $attached_value = null, $met
 		if ( is_string( $filtered_file ) && '' !== $filtered_file ) {
 			$attached_values[] = $filtered_file;
 		}
-		foreach ( (array) get_post_meta( $attachment_id, '_wp_attachment_metadata', false ) as $stored_metadata ) {
+		foreach ( $metadata_rows as $stored_row ) {
+			$stored_metadata = $stored_row['value'];
 			if ( ! is_array( $stored_metadata ) ) {
 				return new WP_Error( 'yotm_media_generated_state_unresolved', __( 'Attachment generated-file state could not be resolved.', 'thumbnail-manager' ) );
 			}
@@ -378,7 +432,8 @@ function yotm_media_source_aliases( $attachment_id, $attached_value = null, $met
 				'include_generated' => false,
 			);
 		}
-		foreach ( (array) get_post_meta( $attachment_id, '_wp_attachment_backup_sizes', false ) as $stored_backups ) {
+		foreach ( $backup_rows as $stored_row ) {
+			$stored_backups = $stored_row['value'];
 			if ( ! is_array( $stored_backups ) ) {
 				return new WP_Error( 'yotm_media_backup_state_unresolved', __( 'Attachment edit-backup state could not be resolved.', 'thumbnail-manager' ) );
 			}
@@ -395,7 +450,12 @@ function yotm_media_source_aliases( $attachment_id, $attached_value = null, $met
 			)
 			: array();
 		if ( null === $backup_value ) {
-			foreach ( (array) get_post_meta( $attachment_id, '_wp_attachment_backup_sizes', false ) as $stored_backups ) {
+			$backup_rows = yotm_media_reference_raw_postmeta_rows( $attachment_id, '_wp_attachment_backup_sizes' );
+			if ( is_wp_error( $backup_rows ) ) {
+				return $backup_rows;
+			}
+			foreach ( $backup_rows as $stored_row ) {
+				$stored_backups = $stored_row['value'];
 				if ( ! is_array( $stored_backups ) ) {
 					return new WP_Error( 'yotm_media_backup_state_unresolved', __( 'Attachment edit-backup state could not be resolved.', 'thumbnail-manager' ) );
 				}
@@ -1087,10 +1147,21 @@ function yotm_media_path_lock_aliases( $aliases ) {
  * @return array[]|WP_Error
  */
 function yotm_media_source_proposed_aliases( $attachment_id, $original_key, $effective_key, $meta_value ) {
-	$attached = get_post_meta( $attachment_id, '_wp_attached_file', true );
-	$metadata = get_post_meta( $attachment_id, '_wp_attachment_metadata', true );
+	$current       = yotm_media_source_aliases( $attachment_id );
+	$attached_rows = yotm_media_reference_raw_postmeta_rows( $attachment_id, '_wp_attached_file' );
+	$metadata_rows = yotm_media_reference_raw_postmeta_rows( $attachment_id, '_wp_attachment_metadata' );
+	$backup_rows   = yotm_media_reference_raw_postmeta_rows( $attachment_id, '_wp_attachment_backup_sizes' );
+	if ( is_wp_error( $current ) || is_wp_error( $attached_rows ) || is_wp_error( $metadata_rows ) || is_wp_error( $backup_rows ) ) {
+		return is_wp_error( $current ) ? $current : ( is_wp_error( $attached_rows ) ? $attached_rows : ( is_wp_error( $metadata_rows ) ? $metadata_rows : $backup_rows ) );
+	}
+	if ( count( $attached_rows ) > 1 || count( $metadata_rows ) > 1 || count( $backup_rows ) > 1 ) {
+		return new WP_Error( 'yotm_media_source_state_ambiguous', __( 'Attachment source metadata contains multiple authoritative rows and cannot be mutated safely.', 'thumbnail-manager' ) );
+	}
+
+	$attached = ! empty( $attached_rows ) ? $attached_rows[0]['value'] : '';
+	$metadata = ! empty( $metadata_rows ) ? $metadata_rows[0]['value'] : array();
 	$metadata = is_array( $metadata ) ? $metadata : array();
-	$backups  = get_post_meta( $attachment_id, '_wp_attachment_backup_sizes', true );
+	$backups  = ! empty( $backup_rows ) ? $backup_rows[0]['value'] : array();
 	$backups  = is_array( $backups ) ? $backups : array();
 
 	if ( '_wp_attached_file' === $original_key && '_wp_attached_file' !== $effective_key ) {
@@ -1112,7 +1183,19 @@ function yotm_media_source_proposed_aliases( $attachment_id, $original_key, $eff
 		$backups = is_array( $meta_value ) ? $meta_value : array();
 	}
 
-	return yotm_media_source_aliases( $attachment_id, $attached, $metadata, true, $backups );
+	$proposed = yotm_media_source_aliases( $attachment_id, $attached, $metadata, true, $backups );
+	if ( is_wp_error( $proposed ) ) {
+		return $proposed;
+	}
+
+	$aliases = array();
+	foreach ( array_merge( $current, $proposed ) as $alias ) {
+		$key             = sanitize_key( $alias['source_kind'] ?? '' ) . ':' . (string) ( $alias['path_hash'] ?? '' );
+		$aliases[ $key ] = $alias;
+	}
+	ksort( $aliases );
+
+	return array_values( $aliases );
 }
 
 /**
@@ -2022,8 +2105,12 @@ function yotm_media_reference_path_owners( $path, $limit = YOTM_MEDIA_SOURCE_FAN
 		}
 
 		if ( ! empty( $live_kinds['generated'] ) ) {
-			$metadata_rows = get_post_meta( $attachment_id, '_wp_attachment_metadata', false );
-			foreach ( $metadata_rows as $metadata ) {
+			$metadata_rows = yotm_media_reference_raw_postmeta_rows( $attachment_id, '_wp_attachment_metadata' );
+			if ( is_wp_error( $metadata_rows ) ) {
+				return $metadata_rows;
+			}
+			foreach ( $metadata_rows as $stored_row ) {
+				$metadata = $stored_row['value'];
 				if ( ! is_array( $metadata ) || empty( $metadata['file'] ) || ! is_string( $metadata['file'] ) || ! is_array( $metadata['sizes'] ?? null ) ) {
 					return new WP_Error( 'yotm_media_generated_state_unresolved', __( 'Attachment generated-file state could not be resolved.', 'thumbnail-manager' ) );
 				}

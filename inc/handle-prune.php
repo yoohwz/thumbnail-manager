@@ -771,9 +771,30 @@ function yotm_collect_metadata_prune_candidates_for_ids( $ids, $scan_bases, $kee
 
 	foreach ( $ids as $attachment_id ) {
 		$attachment_id = absint( $attachment_id );
-		$file          = get_attached_file( $attachment_id );
-
-		if ( ! $attachment_id || ! $file ) {
+		if ( ! $attachment_id ) {
+			continue;
+		}
+		$attached_rows = yotm_media_reference_raw_postmeta_rows( $attachment_id, '_wp_attached_file' );
+		$metadata_rows = yotm_media_reference_raw_postmeta_rows( $attachment_id, '_wp_attachment_metadata' );
+		if (
+			is_wp_error( $attached_rows )
+			|| is_wp_error( $metadata_rows )
+			|| 1 !== count( $attached_rows )
+			|| 1 !== count( $metadata_rows )
+			|| ! is_string( $attached_rows[0]['value'] )
+			|| '' === $attached_rows[0]['value']
+			|| ! is_array( $metadata_rows[0]['value'] )
+		) {
+			$orphan_summary['source_errors'] = (int) ( $orphan_summary['source_errors'] ?? 0 ) + 1;
+			continue;
+		}
+		$uploads  = wp_get_upload_dir();
+		$base     = (string) ( $uploads['basedir'] ?? '' );
+		$raw_file = $attached_rows[0]['value'];
+		$file     = preg_match( '#^(?:[A-Za-z]:)?/#', $raw_file ) ? $raw_file : trailingslashit( $base ) . ltrim( $raw_file, '/\\' );
+		$file     = yotm_media_source_canonical_path( $file );
+		if ( is_wp_error( $file ) ) {
+			$orphan_summary['source_errors'] = (int) ( $orphan_summary['source_errors'] ?? 0 ) + 1;
 			continue;
 		}
 
@@ -783,16 +804,20 @@ function yotm_collect_metadata_prune_candidates_for_ids( $ids, $scan_bases, $kee
 			continue;
 		}
 
-		$metadata = wp_get_attachment_metadata( $attachment_id );
+		$metadata = $metadata_rows[0]['value'];
 		if ( empty( $metadata['sizes'] ) || ! is_array( $metadata['sizes'] ) ) {
 			continue;
 		}
 
-		$uploads       = wp_get_upload_dir();
 		$metadata_file = ! empty( $metadata['file'] ) && is_string( $metadata['file'] )
-			? trailingslashit( (string) ( $uploads['basedir'] ?? '' ) ) . ltrim( $metadata['file'], '/\\' )
+			? trailingslashit( $base ) . ltrim( $metadata['file'], '/\\' )
 			: $original_path;
-		$upload_dir    = trailingslashit( dirname( yotm_normalize_filesystem_path( $metadata_file ) ) );
+		$metadata_file = yotm_media_source_canonical_path( $metadata_file );
+		if ( is_wp_error( $metadata_file ) ) {
+			$orphan_summary['source_errors'] = (int) ( $orphan_summary['source_errors'] ?? 0 ) + 1;
+			continue;
+		}
+		$upload_dir = trailingslashit( dirname( yotm_normalize_filesystem_path( $metadata_file ) ) );
 
 		foreach ( $metadata['sizes'] as $size_name => $size_data ) {
 			if ( ! is_array( $size_data ) ) {

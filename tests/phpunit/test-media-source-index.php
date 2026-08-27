@@ -37,6 +37,9 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 	/** @var callable|null */
 	private $filtered_source_callback;
 
+	/** @var array */
+	private $metadata_filter_fixture = array();
+
 	public function setUp(): void {
 		parent::setUp();
 		unset( $GLOBALS['yotm_job_storage_readiness'], $GLOBALS['yotm_media_source_last_error'] );
@@ -64,6 +67,7 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 		remove_filter( 'update_post_metadata', array( $this, 'nest_by_mid_inside_regular_update' ), 10 );
 		remove_filter( 'update_post_metadata_by_mid', array( $this, 'nest_regular_inside_by_mid_update' ), 10 );
 		remove_filter( 'get_attached_file', array( $this, 'supply_attached_file_for_fallback' ), 10 );
+		remove_filter( 'get_post_metadata', array( $this, 'filter_authoritative_metadata' ), 10 );
 		if ( is_callable( $this->filtered_source_callback ) ) {
 			remove_filter( 'get_attached_file', $this->filtered_source_callback, 10 );
 		}
@@ -129,6 +133,44 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 		$this->assertSame( array(), $owners['protected'] );
 		$this->assertSame( $fixture['attachment_id'], $owners['generated'][0]['attachment_id'] );
 		$this->assertSame( 'thumbnail', $owners['generated'][0]['size'] );
+	}
+
+	public function test_filtered_metadata_cannot_hide_or_mint_destructive_ownership() {
+		$fixture      = $this->create_attachment_with_thumbnail( 'raw-owner.jpg', 'raw-owner-150x150.jpg' );
+		$virtual_full = trailingslashit( $this->test_dir ) . 'virtual-full.jpg';
+		$virtual      = trailingslashit( $this->test_dir ) . 'virtual-150x150.jpg';
+		$this->write_file( $virtual_full, 'virtual-full' );
+		$this->write_file( $virtual, 'virtual' );
+		$this->metadata_filter_fixture = array(
+			'attachment_id' => $fixture['attachment_id'],
+			'metadata'      => array(
+				'file'  => $this->relative_path( $virtual_full ),
+				'sizes' => array(
+					'virtual' => array(
+						'file'      => wp_basename( $virtual ),
+						'width'     => 150,
+						'height'    => 150,
+						'mime-type' => 'image/jpeg',
+					),
+				),
+			),
+		);
+		add_filter( 'get_post_metadata', array( $this, 'filter_authoritative_metadata' ), 10, 5 );
+
+		$this->assertTrue( yotm_media_source_sync_attachment( $fixture['attachment_id'], null, true ) );
+		$real_owners = yotm_media_reference_path_owners( $fixture['thumbnail'] );
+		$this->assertIsArray( $real_owners );
+		$this->assertSame( $fixture['attachment_id'], $real_owners['generated'][0]['attachment_id'] );
+		$this->assertTrue( yotm_media_source_path_is_authoritative( $fixture['original'] ) );
+		$this->assertTrue( yotm_media_source_path_is_authoritative( $virtual_full ) );
+
+		$virtual_owners = yotm_media_reference_path_owners( $virtual );
+		$this->assertIsArray( $virtual_owners );
+		$this->assertSame( array(), $virtual_owners['generated'] );
+
+		$candidates = $this->collect_candidates( $fixture['attachment_id'] );
+		$this->assertArrayHasKey( yotm_normalize_filesystem_path( $fixture['thumbnail'] ), $candidates );
+		$this->assertArrayNotHasKey( yotm_normalize_filesystem_path( $virtual ), $candidates );
 	}
 
 	public function test_source_image_and_edit_backup_are_protected_companions() {
@@ -1015,6 +1057,21 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 
 	public function supply_attached_file_for_fallback( $file, $attachment_id ) {
 		return $this->fallback_attachment_id === (int) $attachment_id && empty( $file ) ? $this->fallback_file : $file;
+	}
+
+	public function filter_authoritative_metadata( $check, $object_id, $meta_key, $single, $meta_type ) {
+		unset( $meta_type, $single );
+		if ( (int) ( $this->metadata_filter_fixture['attachment_id'] ?? 0 ) !== (int) $object_id ) {
+			return $check;
+		}
+		if ( '_wp_attached_file' === $meta_key ) {
+			return array( '' );
+		}
+		if ( '_wp_attachment_metadata' === $meta_key ) {
+			$value = $this->metadata_filter_fixture['metadata'];
+			return array( $value );
+		}
+		return $check;
 	}
 
 	public function force_named_lock_contention( $query ) {

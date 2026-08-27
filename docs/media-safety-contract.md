@@ -98,7 +98,7 @@ If the file is already absent, reconciliation may remove a stale matching metada
 
 A deletion failure must not cause broad metadata cleanup unrelated to the exact candidate.
 
-The site-wide reverse-reference index has a versioned semantic generation and completeness marker. Destructive reference decisions require a complete current generation and an empty mutation-dirty set. Source/companion reference kinds are blanket vetoes. Raw `sizes[*].file` entries are generated-owner tuples and are validated against exact candidate or regeneration evidence rather than treated as source vetoes.
+The site-wide reverse-reference index has a versioned semantic generation and completeness marker. Destructive reference decisions require a complete current generation and an empty mutation-dirty set. Source/companion reference kinds are blanket vetoes. Raw `sizes[*].file` entries are generated-owner tuples and are validated against exact candidate or regeneration evidence rather than treated as source vetoes. Here, raw authority means exact uncached rows read directly from the postmeta table with preserved row cardinality; short-circuitable metadata accessors cannot mint or hide destructive ownership or prove a Force metadata commit. Filtered aliases may add conservative source/protected vetoes only.
 
 Writes and deletes of `_wp_attached_file`, `_wp_attachment_metadata`, and `_wp_attachment_backup_sizes` must remain fenced through regular and by-meta-ID mutation paths. Unknown/malformed rows, stale index/live disagreement, unsupported filtered by-meta-ID accessors, or an incomplete generation fail closed.
 

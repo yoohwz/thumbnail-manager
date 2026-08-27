@@ -79,23 +79,29 @@ function yotm_regenerate_preflight( $attachment_id ) {
 		return new WP_Error( 'yotm_regenerate_not_raster', __( 'Attachment is not a local raster image.', 'thumbnail-manager' ) );
 	}
 
-	$attached_rows = get_metadata_raw( 'post', $attachment_id, '_wp_attached_file' );
-	$metadata_rows = get_metadata_raw( 'post', $attachment_id, '_wp_attachment_metadata' );
-	$backup_rows   = get_metadata_raw( 'post', $attachment_id, '_wp_attachment_backup_sizes' );
-	if ( ! is_array( $attached_rows ) || 1 !== count( $attached_rows ) || ! is_string( $attached_rows[0] ) || '' === $attached_rows[0] ) {
+	$attached_rows = yotm_media_reference_raw_postmeta_rows( $attachment_id, '_wp_attached_file' );
+	$metadata_rows = yotm_media_reference_raw_postmeta_rows( $attachment_id, '_wp_attachment_metadata' );
+	$backup_rows   = yotm_media_reference_raw_postmeta_rows( $attachment_id, '_wp_attachment_backup_sizes' );
+	if ( is_wp_error( $attached_rows ) || is_wp_error( $metadata_rows ) || is_wp_error( $backup_rows ) ) {
+		return is_wp_error( $attached_rows ) ? $attached_rows : ( is_wp_error( $metadata_rows ) ? $metadata_rows : $backup_rows );
+	}
+	$attached_values = array_column( $attached_rows, 'value' );
+	$metadata_values = array_column( $metadata_rows, 'value' );
+	$backup_values   = array_column( $backup_rows, 'value' );
+	if ( 1 !== count( $attached_values ) || ! is_string( $attached_values[0] ) || '' === $attached_values[0] ) {
 		return new WP_Error( 'yotm_regenerate_attached_state', __( 'Force requires exactly one valid raw attached-file row.', 'thumbnail-manager' ) );
 	}
-	if ( ! is_array( $metadata_rows ) || 1 !== count( $metadata_rows ) || ! is_array( $metadata_rows[0] ) || empty( $metadata_rows[0]['file'] ) || ! is_string( $metadata_rows[0]['file'] ) ) {
+	if ( 1 !== count( $metadata_values ) || ! is_array( $metadata_values[0] ) || empty( $metadata_values[0]['file'] ) || ! is_string( $metadata_values[0]['file'] ) ) {
 		return new WP_Error( 'yotm_regenerate_metadata_state', __( 'Force requires exactly one valid raw attachment-metadata row.', 'thumbnail-manager' ) );
 	}
-	foreach ( (array) $backup_rows as $backup_row ) {
+	foreach ( $backup_values as $backup_row ) {
 		if ( ! is_array( $backup_row ) ) {
 			return new WP_Error( 'yotm_regenerate_backup_state', __( 'Attachment edit-backup state could not be resolved.', 'thumbnail-manager' ) );
 		}
 	}
 
-	$attached = preg_match( '#^(?:[A-Za-z]:)?/#', $attached_rows[0] ) ? $attached_rows[0] : trailingslashit( $base ) . ltrim( $attached_rows[0], '/\\' );
-	$full     = trailingslashit( $base ) . ltrim( $metadata_rows[0]['file'], '/\\' );
+	$attached = preg_match( '#^(?:[A-Za-z]:)?/#', $attached_values[0] ) ? $attached_values[0] : trailingslashit( $base ) . ltrim( $attached_values[0], '/\\' );
+	$full     = trailingslashit( $base ) . ltrim( $metadata_values[0]['file'], '/\\' );
 	$attached = yotm_media_source_canonical_path( $attached );
 	$full     = yotm_media_source_canonical_path( $full );
 	if ( is_wp_error( $attached ) || is_wp_error( $full ) || ! hash_equals( (string) $attached, (string) $full ) ) {
@@ -105,7 +111,7 @@ function yotm_regenerate_preflight( $attachment_id ) {
 		return new WP_Error( 'yotm_regenerate_full_missing', __( 'The current full image is missing or unsafe.', 'thumbnail-manager' ) );
 	}
 
-	$metadata  = $metadata_rows[0];
+	$metadata  = $metadata_values[0];
 	$directory = dirname( $full );
 	$source    = $full;
 	$protected = array( $full => 'metadata_full' );
@@ -127,7 +133,7 @@ function yotm_regenerate_preflight( $attachment_id ) {
 			$source = $path;
 		}
 	}
-	foreach ( (array) $backup_rows as $backup_row ) {
+	foreach ( $backup_values as $backup_row ) {
 		foreach ( $backup_row as $backup ) {
 			$filename = is_array( $backup ) ? ( $backup['file'] ?? '' ) : '';
 			if ( ! is_string( $filename ) || '' === $filename || wp_basename( $filename ) !== $filename || false !== strpos( $filename, '\\' ) ) {
@@ -150,9 +156,9 @@ function yotm_regenerate_preflight( $attachment_id ) {
 
 	return array(
 		'attachment_id' => $attachment_id,
-		'attached_raw'  => $attached_rows[0],
+		'attached_raw'  => $attached_values[0],
 		'metadata'      => $metadata,
-		'backups'       => array_values( (array) $backup_rows ),
+		'backups'       => array_values( $backup_values ),
 		'full'          => $full,
 		'source'        => $source,
 		'protected'     => $protected,
@@ -549,8 +555,12 @@ function yotm_regenerate_recover_journal( &$item ) {
 		return yotm_regenerate_failure( $locks, true );
 	}
 	try {
-		$raw = get_metadata_raw( 'post', absint( $journal['attachment_id'] ), '_wp_attachment_metadata' );
-		if ( ! is_array( $raw ) || 1 !== count( $raw ) || ! is_array( $raw[0] ) ) {
+		$raw_rows = yotm_media_reference_raw_postmeta_rows( absint( $journal['attachment_id'] ), '_wp_attachment_metadata' );
+		if ( is_wp_error( $raw_rows ) ) {
+			return yotm_regenerate_failure( $raw_rows, true );
+		}
+		$raw = array_column( $raw_rows, 'value' );
+		if ( 1 !== count( $raw ) || ! is_array( $raw[0] ) ) {
 			return yotm_regenerate_failure( __( 'Current metadata does not match either journaled transaction state.', 'thumbnail-manager' ) );
 		}
 
@@ -789,13 +799,15 @@ function yotm_regenerate_force_attachment( $attachment_id, $item, $worker ) {
 			return yotm_regenerate_failure( __( 'Could not persist the promoted-files journal.', 'thumbnail-manager' ) );
 		}
 
-		$written = update_post_meta( $attachment_id, '_wp_attachment_metadata', $journal['final_metadata'] );
-		$raw     = get_metadata_raw( 'post', $attachment_id, '_wp_attachment_metadata' );
-		if ( ( false === $written && ( ! is_array( $raw ) || 1 !== count( $raw ) || $raw[0] !== $journal['final_metadata'] ) ) || ! is_array( $raw ) || 1 !== count( $raw ) || $raw[0] !== $journal['final_metadata'] ) {
+		$written  = update_post_meta( $attachment_id, '_wp_attachment_metadata', $journal['final_metadata'] );
+		$raw_rows = yotm_media_reference_raw_postmeta_rows( $attachment_id, '_wp_attachment_metadata' );
+		$raw      = is_wp_error( $raw_rows ) ? array() : array_column( $raw_rows, 'value' );
+		if ( ( false === $written && ( 1 !== count( $raw ) || $raw[0] !== $journal['final_metadata'] ) ) || 1 !== count( $raw ) || $raw[0] !== $journal['final_metadata'] ) {
 			update_post_meta( $attachment_id, '_wp_attachment_metadata', $snapshot['metadata'] );
-			$restored_raw = get_metadata_raw( 'post', $attachment_id, '_wp_attachment_metadata' );
-			$rolled_back  = yotm_regenerate_rollback( $journal );
-			if ( ! $rolled_back || ! is_array( $restored_raw ) || 1 !== count( $restored_raw ) || $restored_raw[0] !== $snapshot['metadata'] ) {
+			$restored_rows = yotm_media_reference_raw_postmeta_rows( $attachment_id, '_wp_attachment_metadata' );
+			$restored_raw  = is_wp_error( $restored_rows ) ? array() : array_column( $restored_rows, 'value' );
+			$rolled_back   = yotm_regenerate_rollback( $journal );
+			if ( ! $rolled_back || 1 !== count( $restored_raw ) || $restored_raw[0] !== $snapshot['metadata'] ) {
 				return yotm_regenerate_failure( __( 'Metadata commit and automatic rollback were incomplete; journal evidence was retained for manual recovery.', 'thumbnail-manager' ) );
 			}
 			return yotm_regenerate_failure( __( 'Could not commit exact regenerated attachment metadata; the old state was restored.', 'thumbnail-manager' ) );

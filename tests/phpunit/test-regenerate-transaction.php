@@ -18,6 +18,12 @@ class YOTM_Regenerate_Transaction_Test extends WP_UnitTestCase {
 	/** @var array */
 	private $thumbnail_options = array();
 
+	/** @var int */
+	private $filtered_commit_attachment_id = 0;
+
+	/** @var array */
+	private $filtered_commit_metadata = array();
+
 	public function setUp(): void {
 		parent::setUp();
 		unset( $GLOBALS['yotm_job_storage_readiness'], $GLOBALS['yotm_media_source_last_error'] );
@@ -49,6 +55,9 @@ class YOTM_Regenerate_Transaction_Test extends WP_UnitTestCase {
 	public function tearDown(): void {
 		remove_filter( 'intermediate_image_sizes_advanced', array( $this, 'only_thumbnail' ), PHP_INT_MAX );
 		remove_filter( 'wp_update_attachment_metadata', array( $this, 'count_update_filter' ), 10 );
+		remove_filter( 'wp_update_attachment_metadata', array( $this, 'arm_filtered_commit_lie' ), PHP_INT_MAX );
+		remove_filter( 'get_post_metadata', array( $this, 'lie_about_committed_metadata' ), 10 );
+		remove_filter( 'update_post_metadata', array( $this, 'short_circuit_metadata_commit' ), 10 );
 		if ( $this->attachment_id ) {
 			wp_delete_attachment( $this->attachment_id, true );
 		}
@@ -144,6 +153,52 @@ class YOTM_Regenerate_Transaction_Test extends WP_UnitTestCase {
 		$this->assertSame( 'unexpected-owner', file_get_contents( $destination ) );
 	}
 
+	public function test_filtered_commit_readback_cannot_mint_success() {
+		add_filter( 'intermediate_image_sizes_advanced', array( $this, 'only_thumbnail' ), PHP_INT_MAX );
+		$full                = $this->test_dir . '/filtered-commit.jpg';
+		$this->attachment_id = $this->create_image_attachment( $full );
+		$metadata            = wp_generate_attachment_metadata( $this->attachment_id, $full );
+		$this->assertIsArray( $metadata );
+		$metadata['yotm_commit_sentinel'] = 'raw-old';
+		$this->assertNotFalse( wp_update_attachment_metadata( $this->attachment_id, $metadata ) );
+		$this->assertTrue( yotm_media_source_sync_attachment( $this->attachment_id, null, true ) );
+		$old_rows = yotm_media_reference_raw_postmeta_rows( $this->attachment_id, '_wp_attachment_metadata' );
+		$this->assertIsArray( $old_rows );
+		$this->assertCount( 1, $old_rows );
+
+		$job = yotm_job_create(
+			'regenerate',
+			array(
+				'force_all'      => 1,
+				'only_missing'   => 0,
+				'discovery_done' => 1,
+			),
+			array(
+				'status'       => 'running',
+				'phase'        => 'regenerate',
+				'counter_mode' => 'item_v2',
+			)
+		);
+		$this->assertIsArray( $job );
+		$this->assertTrue( yotm_job_add_item( $job['id'], 'force-filter:' . $this->attachment_id, array( 'attachment_id' => $this->attachment_id ) ) );
+		$worker = yotm_job_acquire_worker( $job['id'], array( 'running' ), array( 'regenerate' ) );
+		$this->assertIsArray( $worker );
+		$item = yotm_job_claim_items( $worker, 1 )[0];
+
+		$this->filtered_commit_attachment_id = $this->attachment_id;
+		add_filter( 'wp_update_attachment_metadata', array( $this, 'arm_filtered_commit_lie' ), PHP_INT_MAX, 2 );
+
+		$result = yotm_regenerate_force_attachment( $this->attachment_id, $item, $worker );
+		$this->assertSame( 'failed', $result['status'] );
+		$this->assertNotEmpty( $this->filtered_commit_metadata );
+		$this->assertSame( $this->filtered_commit_metadata, get_post_meta( $this->attachment_id, '_wp_attachment_metadata', true ) );
+		$current_rows = yotm_media_reference_raw_postmeta_rows( $this->attachment_id, '_wp_attachment_metadata' );
+		$this->assertIsArray( $current_rows );
+		$this->assertCount( 1, $current_rows );
+		$this->assertSame( $old_rows[0]['value'], $current_rows[0]['value'] );
+		yotm_job_release_worker( $worker );
+	}
+
 	public function only_thumbnail( $sizes ) {
 		return isset( $sizes['thumbnail'] ) ? array( 'thumbnail' => $sizes['thumbnail'] ) : array();
 	}
@@ -151,6 +206,29 @@ class YOTM_Regenerate_Transaction_Test extends WP_UnitTestCase {
 	public function count_update_filter( $metadata ) {
 		++$this->update_filter_calls;
 		return $metadata;
+	}
+
+	public function arm_filtered_commit_lie( $metadata, $attachment_id ) {
+		remove_filter( 'wp_update_attachment_metadata', array( $this, 'arm_filtered_commit_lie' ), PHP_INT_MAX );
+		$metadata['yotm_commit_sentinel']    = 'filtered-final';
+		$this->filtered_commit_attachment_id = (int) $attachment_id;
+		$this->filtered_commit_metadata      = $metadata;
+		add_filter( 'get_post_metadata', array( $this, 'lie_about_committed_metadata' ), 10, 5 );
+		add_filter( 'update_post_metadata', array( $this, 'short_circuit_metadata_commit' ), 10, 5 );
+		return $metadata;
+	}
+
+	public function lie_about_committed_metadata( $check, $object_id, $meta_key, $single, $meta_type ) {
+		unset( $meta_type, $single );
+		if ( $this->filtered_commit_attachment_id !== (int) $object_id || '_wp_attachment_metadata' !== $meta_key ) {
+			return $check;
+		}
+		return array( $this->filtered_commit_metadata );
+	}
+
+	public function short_circuit_metadata_commit( $check, $object_id, $meta_key, $meta_value, $prev_value ) {
+		unset( $meta_value, $prev_value );
+		return $this->filtered_commit_attachment_id === (int) $object_id && '_wp_attachment_metadata' === $meta_key ? true : $check;
 	}
 
 	private function create_image_attachment( $destination ) {
