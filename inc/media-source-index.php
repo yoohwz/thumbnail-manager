@@ -187,6 +187,7 @@ function yotm_media_source_upsert_aliases( $aliases ) {
 	$now   = gmdate( 'Y-m-d H:i:s' );
 
 	foreach ( (array) $aliases as $alias ) {
+		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Plugin-owned table name is derived from the trusted WordPress prefix; values use placeholders.
 		$sql = $wpdb->prepare(
 			"INSERT INTO {$table} (attachment_id,source_kind,path_hash,path,updated_at)
 			VALUES (%d,%s,%s,%s,%s)
@@ -228,7 +229,7 @@ function yotm_media_source_replace_attachment( $attachment_id, $aliases ) {
 		$keep[] = sanitize_key( $alias['source_kind'] ?? '' ) . ':' . (string) ( $alias['path_hash'] ?? '' );
 	}
 
-	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Current source rows must be read uncached before conservative cleanup.
+	// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Plugin-owned table name is trusted; values use placeholders and current rows must be uncached.
 	$rows = $wpdb->get_results( $wpdb->prepare( "SELECT id,source_kind,path_hash FROM {$table} WHERE attachment_id = %d", $attachment_id ) );
 	if ( '' !== (string) $wpdb->last_error ) {
 		return yotm_job_storage_error( 'yotm_job_storage_unavailable', (string) $wpdb->last_error );
@@ -669,7 +670,7 @@ function yotm_media_source_path_is_authoritative( $path, $limit = YOTM_MEDIA_SOU
 	$hash  = hash( 'sha256', $canonical );
 	$table = yotm_job_table_names()['sources'];
 	$limit = max( 1, absint( $limit ) );
-	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Live source veto must be uncached; prepared below.
+	// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Plugin-owned table name is trusted; live source veto is uncached and values use placeholders.
 	$rows = $wpdb->get_results( $wpdb->prepare( "SELECT attachment_id,path FROM {$table} WHERE path_hash = %s ORDER BY attachment_id ASC LIMIT %d", $hash, $limit + 1 ) );
 	if ( '' !== (string) $wpdb->last_error ) {
 		return yotm_job_storage_error( 'yotm_job_storage_unavailable', (string) $wpdb->last_error );
