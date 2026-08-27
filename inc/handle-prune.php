@@ -318,19 +318,65 @@ function yotm_prune_scan_batch() {
  * @return array{done:bool,job:array}|WP_Error
  */
 function yotm_prune_source_index_batch( $job, $limit, $worker ) {
-	$payload = $job['payload'];
+	$payload    = $job['payload'];
+	$next_phase = 'regenerate' === ( $job['type'] ?? '' ) ? 'regenerate' : 'metadata';
 	if ( empty( $payload['source_index_initialized'] ) ) {
-		$cleared = yotm_media_source_clear_index();
-		if ( is_wp_error( $cleared ) ) {
-			return $cleared;
+		$complete = yotm_media_reference_require_complete_index();
+		if ( true === $complete ) {
+			$state                               = yotm_media_reference_index_state();
+			$payload['source_index_initialized'] = 1;
+			$payload['source_index_complete']    = 1;
+			$payload['source_index_generation']  = YOTM_MEDIA_REFERENCE_GENERATION;
+			$payload['source_index_token']       = $state['baseline_token'];
+			$payload['scan_phase']               = $next_phase;
+			if ( ! yotm_job_worker_update(
+				$worker,
+				array(
+					'payload' => $payload,
+					'phase'   => $next_phase,
+					'cursor'  => 0,
+				)
+			) ) {
+				return yotm_job_storage_error();
+			}
+			return array(
+				'done' => true,
+				'job'  => yotm_job_get_by_id( $job['id'] ),
+			);
+		}//end if
+
+		$begun = yotm_media_reference_baseline_begin();
+		if ( is_wp_error( $begun ) ) {
+			return $begun;
 		}
 		$payload['source_index_initialized'] = 1;
+		$payload['source_index_complete']    = 0;
 		$payload['source_index_cursor']      = 0;
 		$payload['source_index_max_id']      = yotm_get_max_image_attachment_id( array() );
+		$payload['source_index_generation']  = YOTM_MEDIA_REFERENCE_GENERATION;
+		$payload['source_index_token']       = $begun['baseline_token'];
 		if ( ! yotm_job_worker_update( $worker, array( 'payload' => $payload ) ) ) {
 			return yotm_job_storage_error();
 		}
-	}
+	} else {
+		$state = yotm_media_reference_index_state();
+		if (
+			is_wp_error( $state )
+			|| 'building' !== $state['status']
+			|| YOTM_MEDIA_REFERENCE_GENERATION !== absint( $payload['source_index_generation'] ?? 0 )
+			|| ! hash_equals( (string) $state['baseline_token'], (string) ( $payload['source_index_token'] ?? '' ) )
+		) {
+			$payload['source_index_initialized'] = 0;
+			$payload['source_index_complete']    = 0;
+			$payload['source_index_cursor']      = 0;
+			$payload['source_index_max_id']      = 0;
+			yotm_job_worker_update( $worker, array( 'payload' => $payload ) );
+			return array(
+				'done' => false,
+				'job'  => yotm_job_get_by_id( $job['id'] ),
+			);
+		}
+	}//end if
 
 	$source_ids = yotm_get_image_attachment_ids_after(
 		array(),
@@ -355,31 +401,57 @@ function yotm_prune_source_index_batch( $job, $limit, $worker ) {
 		);
 	}
 
-	$dirty = yotm_media_source_dirty_state();
-	if ( is_wp_error( $dirty ) ) {
-		return $dirty;
+	$source_fence = yotm_media_source_fence_acquire();
+	if ( is_wp_error( $source_fence ) ) {
+		return $source_fence;
 	}
-	if ( ! empty( $dirty['entries'] ) ) {
-		$payload['source_index_initialized'] = 0;
-		$payload['source_index_complete']    = 0;
-		$payload['source_index_cursor']      = 0;
-		$payload['source_index_max_id']      = 0;
-		if ( ! yotm_job_worker_update( $worker, array( 'payload' => $payload ) ) ) {
-			return yotm_job_storage_error();
+	try {
+		$dirty = yotm_media_source_dirty_state();
+		if ( is_wp_error( $dirty ) ) {
+			return $dirty;
 		}
-		return array(
-			'done' => false,
-			'job'  => yotm_job_get_by_id( $job['id'] ),
-		);
-	}
+		if ( ! empty( $dirty['entries'] ) ) {
+			$payload['source_index_initialized'] = 0;
+			$payload['source_index_complete']    = 0;
+			$payload['source_index_cursor']      = 0;
+			$payload['source_index_max_id']      = 0;
+			if ( ! yotm_job_worker_update( $worker, array( 'payload' => $payload ) ) ) {
+				return yotm_job_storage_error();
+			}
+			return array(
+				'done' => false,
+				'job'  => yotm_job_get_by_id( $job['id'] ),
+			);
+		}
 
-	$payload['source_index_complete'] = 1;
-	$payload['scan_phase']            = 'metadata';
+		$current_max = yotm_get_max_image_attachment_id( array() );
+		if ( $current_max > absint( $payload['source_index_max_id'] ?? 0 ) ) {
+			$payload['source_index_max_id'] = $current_max;
+			if ( ! yotm_job_worker_update( $worker, array( 'payload' => $payload ) ) ) {
+				return yotm_job_storage_error();
+			}
+			return array(
+				'done' => false,
+				'job'  => yotm_job_get_by_id( $job['id'] ),
+			);
+		}
+
+		$completed = yotm_media_reference_baseline_complete( $payload['source_index_token'] ?? '' );
+		if ( is_wp_error( $completed ) ) {
+			return $completed;
+		}
+	} finally {
+		yotm_media_source_fence_release( $source_fence );
+	}//end try
+
+	$payload['source_index_complete']   = 1;
+	$payload['source_index_generation'] = YOTM_MEDIA_REFERENCE_GENERATION;
+	$payload['scan_phase']              = $next_phase;
 	if ( ! yotm_job_worker_update(
 		$worker,
 		array(
 			'payload' => $payload,
-			'phase'   => 'metadata',
+			'phase'   => $next_phase,
 			'cursor'  => 0,
 		)
 	) ) {

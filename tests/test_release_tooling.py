@@ -74,7 +74,7 @@ class ReleasePackageTests(unittest.TestCase):
         self.assertEqual(first_manifest.read_bytes(), second_manifest.read_bytes())
 
         manifest = json.loads(first_manifest.read_text(encoding="utf-8"))
-        self.assertEqual(18, manifest["file_count"])
+        self.assertEqual(19, manifest["file_count"])
         self.assertRegex(manifest["release_control"]["bundle_sha256"], r"^[0-9a-f]{64}$")
         component_paths = {item["path"] for item in manifest["release_control"]["components"]}
         self.assertEqual(

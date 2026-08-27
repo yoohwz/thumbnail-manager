@@ -1187,7 +1187,7 @@ function yotm_job_add_item( $job_id, $item_key, $payload, $status = 'queued', $b
 		SELECT %d,%s,%s,%s,'',%d,%s,%s FROM {$tables['jobs']}
 		WHERE id = %d
 		AND ((status = 'scanning' AND phase IN ('metadata','disk'))
-		OR (status = 'running' AND phase = 'regenerate'))",
+		OR (status = 'running' AND phase IN ('source_index','regenerate')))",
 		absint( $job_id ),
 		$item_key,
 		sanitize_key( $status ),
@@ -1532,6 +1532,33 @@ function yotm_job_refresh_item_claim( $item ) {
 }
 
 /**
+ * Persist a claimed item's exact payload without weakening claim ownership.
+ *
+ * @param array $item Claimed item.
+ * @param array $payload Replacement payload.
+ * @return bool
+ */
+function yotm_job_update_claimed_item_payload( $item, $payload ) {
+	global $wpdb;
+
+	$tables = yotm_job_table_names();
+	// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Plugin-owned table name; values use placeholders.
+	$sql = $wpdb->prepare(
+		"UPDATE {$tables['items']} SET payload = %s, updated_at = %s
+		WHERE id = %d AND status = 'processing' AND claim_token = %s AND claim_generation = %d",
+		wp_json_encode( is_array( $payload ) ? $payload : array() ),
+		gmdate( 'Y-m-d H:i:s' ),
+		absint( $item['id'] ?? 0 ),
+		sanitize_text_field( $item['claim_token'] ?? '' ),
+		absint( $item['claim_generation'] ?? 0 )
+	);
+	// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+
+	// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Claim-fenced journal persistence must be uncached; prepared above.
+	return 1 === $wpdb->query( $sql );
+}
+
+/**
  * Return a transiently blocked item to the queue for an immediate safe retry.
  *
  * @param array $item Claimed item.
@@ -1816,9 +1843,48 @@ function yotm_job_build_manifest_batch( $job, $limit = 1000, $worker = null ) {
 	);
 
 	foreach ( $rows as $row ) {
+		$item_payload = yotm_job_decode_payload( $row->payload );
+		if (
+			'prune' === ( $job['type'] ?? '' )
+			&& 'generated_file_v1' === ( $item_payload['ownership_schema'] ?? '' )
+			&& function_exists( 'yotm_prune_validate_live_reference_evidence' )
+		) {
+			$source_fence = yotm_media_source_fence_acquire();
+			if ( is_wp_error( $source_fence ) ) {
+				return array(
+					'done' => false,
+					'job'  => yotm_job_get_by_id( $job['id'] ),
+				);
+			}
+			try {
+				$reference_check = yotm_prune_validate_live_reference_evidence( $item_payload, $item_payload['path'] ?? '' );
+			} finally {
+				yotm_media_source_fence_release( $source_fence );
+			}
+			if ( is_wp_error( $reference_check ) ) {
+				// Mutable scan item: unsafe ownership is removed before immutable hashing/review.
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Plugin-owned pre-manifest item.
+				$removed = $wpdb->delete(
+					$tables['items'],
+					array(
+						'job_id'   => (int) $job['id'],
+						'item_key' => (string) $row->item_key,
+					),
+					array( '%d', '%s' )
+				);
+				if ( 1 !== $removed ) {
+					return array(
+						'done' => false,
+						'job'  => yotm_job_get_by_id( $job['id'] ),
+					);
+				}
+				$after = (string) $row->item_key;
+				continue;
+			}
+		}//end if
 		$digest = hash( 'sha256', $digest . ':' . $row->item_key . ':' . hash( 'sha256', (string) $row->payload ) );
 		$after  = (string) $row->item_key;
-	}
+	}//end foreach
 
 	$payload['manifest_after']  = $after;
 	$payload['manifest_digest'] = $digest;
@@ -1826,7 +1892,9 @@ function yotm_job_build_manifest_batch( $job, $limit = 1000, $worker = null ) {
 	$fields                     = array( 'payload' => $payload );
 
 	if ( $done ) {
-		$fields['manifest_hash'] = $digest;
+		$fields['manifest_hash']         = $digest;
+		$payload['reference_generation'] = defined( 'YOTM_MEDIA_REFERENCE_GENERATION' ) ? YOTM_MEDIA_REFERENCE_GENERATION : 0;
+		$fields['payload']               = $payload;
 	}
 
 	$updated = is_array( $worker )
@@ -2067,7 +2135,7 @@ function yotm_job_get_recent_for_current_user( $limit = 10 ) {
  * Mark a job stopped while retaining its audit data.
  *
  * @param array $job Job row.
- * @return array|false
+ * @return array|false|WP_Error
  */
 function yotm_job_cancel( $job ) {
 	if ( ! is_array( $job ) || empty( $job['id'] ) ) {
@@ -2078,21 +2146,34 @@ function yotm_job_cancel( $job ) {
 		return $job;
 	}
 
-	$payload                 = $job['payload'];
-	$payload['cancelled_at'] = gmdate( 'c' );
-	$cancelled               = yotm_job_transition(
-		$job['id'],
-		yotm_job_active_statuses(),
-		array(),
-		array(
-			'payload'                 => $payload,
-			'status'                  => 'cancelled',
-			'phase'                   => 'cancelled',
-			'worker_token'            => '',
-			'worker_lease_expires_at' => null,
-			'expires_at'              => gmdate( 'Y-m-d H:i:s', time() + YOTM_JOB_AUDIT_RETENTION_SECONDS ),
-		)
-	);
+	$lock_name = yotm_job_worker_lock_name( $job['id'] );
+	$locked    = yotm_job_acquire_named_lock( $lock_name );
+	if ( is_wp_error( $locked ) ) {
+		return $locked;
+	}
+	if ( ! $locked ) {
+		return new WP_Error( 'yotm_job_cancel_busy', __( 'The current attachment transaction is still finishing. Retry stop shortly.', 'thumbnail-manager' ) );
+	}
+
+	try {
+		$payload                 = $job['payload'];
+		$payload['cancelled_at'] = gmdate( 'c' );
+		$cancelled               = yotm_job_transition(
+			$job['id'],
+			yotm_job_active_statuses(),
+			array(),
+			array(
+				'payload'                 => $payload,
+				'status'                  => 'cancelled',
+				'phase'                   => 'cancelled',
+				'worker_token'            => '',
+				'worker_lease_expires_at' => null,
+				'expires_at'              => gmdate( 'Y-m-d H:i:s', time() + YOTM_JOB_AUDIT_RETENTION_SECONDS ),
+			)
+		);
+	} finally {
+		yotm_job_release_named_lock( $lock_name );
+	}
 
 	if ( $cancelled ) {
 		return $cancelled;
@@ -2188,6 +2269,15 @@ function yotm_job_ajax_cancel() {
 	}
 
 	$job = yotm_job_cancel( $job );
+	if ( is_wp_error( $job ) ) {
+		wp_send_json_error(
+			array(
+				'msg'            => $job->get_error_message(),
+				'retry_after_ms' => 250,
+			),
+			409
+		);
+	}
 	wp_send_json_success(
 		array(
 			'cancelled' => true,

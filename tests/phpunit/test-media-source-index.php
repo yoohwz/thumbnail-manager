@@ -48,6 +48,9 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 		$this->test_dir     = $this->uploads_base . 'yotm-source-' . wp_generate_uuid4();
 		wp_mkdir_p( $this->test_dir );
 		yotm_media_source_clear_index();
+		$state = yotm_media_reference_index_state();
+		$this->assertIsArray( $state );
+		$this->assertTrue( yotm_media_reference_baseline_complete( $state['baseline_token'] ) );
 	}
 
 	public function tearDown(): void {
@@ -78,6 +81,7 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 			@rmdir( $this->test_dir );
 		}
 		delete_option( YOTM_MEDIA_SOURCE_DIRTY_OPTION );
+		delete_option( YOTM_MEDIA_REFERENCE_STATE_OPTION );
 		parent::tearDown();
 	}
 
@@ -115,6 +119,42 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 
 		$this->assertTrue( yotm_media_source_path_is_authoritative( $fixture['thumbnail'] ) );
 		$this->assertSame( array(), $this->collect_candidates( $fixture['attachment_id'] ) );
+	}
+
+	public function test_generated_ownership_is_not_a_source_veto_but_remains_queryable() {
+		$fixture = $this->create_attachment_with_thumbnail( 'generated-owner.jpg', 'generated-owner-150x150.jpg' );
+		$this->assertFalse( yotm_media_source_path_is_authoritative( $fixture['thumbnail'] ) );
+		$owners = yotm_media_reference_path_owners( $fixture['thumbnail'] );
+		$this->assertIsArray( $owners );
+		$this->assertSame( array(), $owners['protected'] );
+		$this->assertSame( $fixture['attachment_id'], $owners['generated'][0]['attachment_id'] );
+		$this->assertSame( 'thumbnail', $owners['generated'][0]['size'] );
+	}
+
+	public function test_source_image_and_edit_backup_are_protected_companions() {
+		$fixture      = $this->create_attachment_with_thumbnail( 'companions.jpg', 'companions-150x150.jpg' );
+		$source_image = trailingslashit( $this->test_dir ) . 'companions-source.heic';
+		$edit_backup  = trailingslashit( $this->test_dir ) . 'companions-e123.jpg';
+		$this->write_file( $source_image, 'source-image' );
+		$this->write_file( $edit_backup, 'edit-backup' );
+		$metadata                 = get_post_meta( $fixture['attachment_id'], '_wp_attachment_metadata', true );
+		$metadata['source_image'] = wp_basename( $source_image );
+		$this->assertNotFalse( update_post_meta( $fixture['attachment_id'], '_wp_attachment_metadata', $metadata ) );
+		$this->assertNotFalse(
+			update_post_meta(
+				$fixture['attachment_id'],
+				'_wp_attachment_backup_sizes',
+				array(
+					'full-orig' => array(
+						'file'   => wp_basename( $edit_backup ),
+						'width'  => 800,
+						'height' => 600,
+					),
+				)
+			)
+		);
+		$this->assertTrue( yotm_media_source_path_is_authoritative( $source_image ) );
+		$this->assertTrue( yotm_media_source_path_is_authoritative( $edit_backup ) );
 	}
 
 	public function test_source_baseline_is_bounded_resumable_and_completes_before_metadata_phase() {
@@ -410,7 +450,7 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 		remove_filter( 'update_post_metadata_by_mid', array( $this, 'nest_regular_inside_by_mid_update' ), 10 );
 
 		$this->assertTrue( $this->nested_guard['nested_result'] );
-		$this->assertTrue( $this->nested_guard['outer_held'] );
+		$this->assertFalse( $this->nested_guard['outer_held'] );
 		$this->assertSame( 1, $this->nested_guard['outer_attachment_refs'] );
 		$this->assertSame( $this->relative_path( $outer ), get_post_meta( $fixture['attachment_id'], '_wp_attached_file', true ) );
 		$this->assertTrue( yotm_media_source_path_is_authoritative( $outer ) );
@@ -753,8 +793,8 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 		$this->assertSame( $this->relative_path( $raw ), get_post_meta( $other_id, '_wp_attached_file', true ) );
 		$this->assertWPError( $GLOBALS['yotm_media_source_last_error'] );
 		$table = yotm_job_table_names()['sources'];
-		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Test proves the failed P2 upsert left no positive source row.
-		$this->assertSame( 0, (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$table} WHERE path_hash = %s", $this->failed_source_hash ) ) );
+		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- A conservative pre-write positive may remain, but the unresolved mutation must stay dirty.
+		$this->assertGreaterThanOrEqual( 1, (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$table} WHERE path_hash = %s", $this->failed_source_hash ) ) );
 		$this->assertNotEmpty( yotm_media_source_dirty_state()['entries'] );
 
 		yotm_media_source_shutdown_cleanup();
