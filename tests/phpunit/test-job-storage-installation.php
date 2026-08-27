@@ -162,7 +162,8 @@ class YOTM_Job_Storage_Installation_Test extends WP_UnitTestCase {
 		$this->assertIsArray( $job );
 		$this->assertTrue( yotm_job_add_item( $job['id'], 'preserved-item', array( 'path' => '/tmp/preserved.jpg' ), 'queued', 42 ) );
 
-		update_option( 'yotm_job_db_version', '1.0.0', false );
+		$this->drop_concurrency_columns();
+		update_option( 'yotm_job_db_version', '1.0.1', false );
 		$this->reset_request_state();
 		$this->start_query_capture();
 
@@ -174,7 +175,13 @@ class YOTM_Job_Storage_Installation_Test extends WP_UnitTestCase {
 		$this->assertSame( YOTM_JOB_DB_VERSION, get_option( 'yotm_job_db_version' ) );
 		$this->assertSame( 'preserved', $stored_job['payload']['proof'] );
 		$this->assertSame( 1, $stored_job['total'] );
+		$this->assertSame( 'legacy_v1', $stored_job['counter_mode'] );
+		$this->assertSame( '', $stored_job['worker_token'] );
+		$this->assertSame( 0, $stored_job['worker_generation'] );
 		$this->assertSame( 42, $stored_item['bytes'] );
+		$this->assertSame( '', $stored_item['claim_token'] );
+		$this->assertSame( 0, $stored_item['claim_generation'] );
+		$this->assertSame( 0, $stored_item['attempts'] );
 		$this->assertSame( 6, $this->count_presence_queries() );
 	}
 
@@ -373,6 +380,28 @@ class YOTM_Job_Storage_Installation_Test extends WP_UnitTestCase {
 		foreach ( $keys as $key ) {
 			$wpdb->query( "DROP TABLE IF EXISTS {$tables[ $key ]}" );
 		}
+	}
+
+	private function drop_concurrency_columns() {
+		global $wpdb;
+
+		$tables = yotm_job_table_names();
+		$wpdb->query(
+			"ALTER TABLE {$tables['jobs']}
+			DROP INDEX worker_lease,
+			DROP COLUMN counter_mode,
+			DROP COLUMN worker_token,
+			DROP COLUMN worker_generation,
+			DROP COLUMN worker_lease_expires_at"
+		);
+		$wpdb->query(
+			"ALTER TABLE {$tables['items']}
+			DROP INDEX job_claim,
+			DROP COLUMN claim_token,
+			DROP COLUMN claim_generation,
+			DROP COLUMN claim_expires_at,
+			DROP COLUMN attempts"
+		);
 	}
 
 	private function start_query_capture() {

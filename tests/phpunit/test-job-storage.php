@@ -103,6 +103,197 @@ class YOTM_Job_Storage_Test extends WP_UnitTestCase {
 		$this->assertSame( $first['token'], $duplicate->get_error_data()['token'] );
 	}
 
+	public function test_worker_generation_fences_a_stale_request_after_takeover() {
+		global $wpdb;
+
+		$job          = yotm_job_create(
+			'recommendation',
+			array(),
+			array(
+				'status'       => 'scanning',
+				'phase'        => 'metadata',
+				'counter_mode' => 'item_v2',
+				'exclusive'    => false,
+			)
+		);
+		$first_worker = yotm_job_acquire_worker( $job['id'], array( 'scanning' ), array( 'metadata' ) );
+		$this->assertIsArray( $first_worker );
+		$this->assertTrue( yotm_job_worker_update( $first_worker, array( 'processed' => 1 ) ) );
+
+		$tables = yotm_job_table_names();
+		$wpdb->update(
+			$tables['jobs'],
+			array( 'worker_lease_expires_at' => gmdate( 'Y-m-d H:i:s', time() - MINUTE_IN_SECONDS ) ),
+			array( 'id' => $job['id'] )
+		);
+		yotm_job_release_named_lock( $first_worker['lock_name'] );
+
+		$second_worker = yotm_job_acquire_worker( $job['id'], array( 'scanning' ), array( 'metadata' ) );
+		$this->assertIsArray( $second_worker );
+		$this->assertGreaterThan( $first_worker['generation'], $second_worker['generation'] );
+		$this->assertFalse( yotm_job_worker_update( $first_worker, array( 'processed' => 99 ) ) );
+		$this->assertTrue( yotm_job_worker_update( $second_worker, array( 'processed' => 2 ) ) );
+		$this->assertSame( 2, yotm_job_get_by_id( $job['id'] )['processed'] );
+
+		yotm_job_release_worker( $second_worker );
+	}
+
+	public function test_item_claims_are_owned_and_counters_are_derived_once() {
+		$job = yotm_job_create(
+			'recommendation',
+			array(),
+			array(
+				'status'       => 'scanning',
+				'phase'        => 'metadata',
+				'counter_mode' => 'item_v2',
+				'exclusive'    => false,
+			)
+		);
+		yotm_job_add_item( $job['id'], 'first-claim', array( 'attachment_id' => 1 ) );
+		yotm_job_add_item( $job['id'], 'second-claim', array( 'attachment_id' => 2 ) );
+		$worker = yotm_job_acquire_worker( $job['id'], array( 'scanning' ), array( 'metadata' ) );
+		$items  = yotm_job_claim_items( $worker, 2 );
+
+		$this->assertCount( 2, $items );
+		$this->assertSame( 1, $items[0]['attempts'] );
+		$stale_item                     = $items[0];
+		$stale_item['claim_token']      = wp_generate_uuid4();
+		$stale_item['claim_generation'] = $items[0]['claim_generation'] + 1;
+		$this->assertFalse( yotm_job_finish_item( $stale_item, 'done', '', 99 ) );
+		$this->assertTrue( yotm_job_finish_item( $items[0], 'done', '', 12 ) );
+		$this->assertFalse( yotm_job_finish_item( $items[0], 'done', '', 12 ) );
+		$this->assertTrue( yotm_job_finish_item( $items[1], 'failed', 'expected failure' ) );
+
+		$counters = yotm_job_item_counters( $job['id'] );
+		$this->assertSame( 2, $counters['processed'] );
+		$this->assertSame( 1, $counters['succeeded'] );
+		$this->assertSame( 1, $counters['failed'] );
+		$this->assertSame( 12, $counters['bytes'] );
+		$this->assertSame( 0, $counters['remaining'] );
+		$stored = yotm_job_sync_item_counters( $job['id'] );
+		$this->assertSame( 2, $stored['processed'] );
+		$this->assertSame( 1, $stored['succeeded'] );
+		$this->assertSame( 1, $stored['failed'] );
+
+		yotm_job_release_worker( $worker );
+	}
+
+	public function test_cancelled_job_rejects_late_worker_state_transition() {
+		$job       = yotm_job_create(
+			'recommendation',
+			array(),
+			array(
+				'status'    => 'scanning',
+				'phase'     => 'metadata',
+				'exclusive' => false,
+			)
+		);
+		$worker    = yotm_job_acquire_worker( $job['id'], array( 'scanning' ), array( 'metadata' ) );
+		$cancelled = yotm_job_cancel( yotm_job_get_by_id( $job['id'] ) );
+
+		$this->assertSame( 'cancelled', $cancelled['status'] );
+		$this->assertFalse(
+			yotm_job_worker_update(
+				$worker,
+				array(
+					'status' => 'completed',
+					'phase'  => 'completed',
+				)
+			)
+		);
+		$this->assertSame( 'cancelled', yotm_job_get_by_id( $job['id'] )['status'] );
+
+		yotm_job_release_worker( $worker );
+	}
+
+	public function test_expired_active_job_is_retained_before_terminal_cleanup() {
+		global $wpdb;
+
+		$job    = yotm_job_create( 'recommendation', array(), array( 'exclusive' => false ) );
+		$tables = yotm_job_table_names();
+		$wpdb->update(
+			$tables['jobs'],
+			array( 'expires_at' => gmdate( 'Y-m-d H:i:s', time() - MINUTE_IN_SECONDS ) ),
+			array( 'id' => $job['id'] )
+		);
+
+		$this->assertTrue( yotm_cleanup_expired_jobs() );
+		$expired = yotm_job_get_by_id( $job['id'] );
+		$this->assertSame( 'expired', $expired['status'] );
+		$this->assertGreaterThan( time(), strtotime( $expired['expires_at'] . ' UTC' ) );
+		$this->assertWPError( yotm_job_get( $job['token'] ) );
+
+		$wpdb->update(
+			$tables['jobs'],
+			array( 'expires_at' => gmdate( 'Y-m-d H:i:s', time() - MINUTE_IN_SECONDS ) ),
+			array( 'id' => $job['id'] )
+		);
+		$this->assertTrue( yotm_cleanup_expired_jobs() );
+		$this->assertFalse( yotm_job_get_by_id( $job['id'] ) );
+	}
+
+	public function test_legacy_cursor_regenerate_resumes_with_job_counters() {
+		$first_id  = self::factory()->post->create(
+			array(
+				'post_type'      => 'attachment',
+				'post_status'    => 'inherit',
+				'post_mime_type' => 'image/jpeg',
+			)
+		);
+		$second_id = self::factory()->post->create(
+			array(
+				'post_type'      => 'attachment',
+				'post_status'    => 'inherit',
+				'post_mime_type' => 'image/jpeg',
+			)
+		);
+		update_post_meta( $first_id, '_wp_attached_file', 'missing-first.jpg' );
+		update_post_meta( $second_id, '_wp_attached_file', 'missing-second.jpg' );
+
+		$job = yotm_job_create(
+			'regenerate',
+			array(
+				'cursor_mode' => 1,
+				'query_args'  => array(),
+			),
+			array(
+				'status' => 'running',
+				'phase'  => 'regenerate',
+				'total'  => 2,
+				'cursor' => $first_id,
+				'max_id' => $second_id,
+			)
+		);
+		yotm_job_update(
+			$job['id'],
+			array(
+				'processed' => 1,
+				'failed'    => 1,
+			)
+		);
+		yotm_job_add_item(
+			$job['id'],
+			hash( 'sha256', 'regenerate-failure:' . $first_id ),
+			array( 'attachment_id' => $first_id ),
+			'failed'
+		);
+		$worker = yotm_job_acquire_worker( $job['id'], array( 'running' ), array( 'regenerate' ) );
+
+		$first_batch = yotm_regenerate_legacy_batch( yotm_job_get_by_id( $job['id'] ), $worker, 10 );
+		$this->assertFalse( $first_batch['done'] );
+		$this->assertSame( 2, $first_batch['processed'] );
+		$this->assertSame( 2, $first_batch['failed'] );
+		$this->assertSame( $second_id, yotm_job_get_by_id( $job['id'] )['cursor'] );
+
+		$final_batch = yotm_regenerate_legacy_batch( yotm_job_get_by_id( $job['id'] ), $worker, 10 );
+		$this->assertTrue( $final_batch['done'] );
+		$this->assertSame( 2, $final_batch['processed'] );
+		$this->assertSame( 2, $final_batch['failed'] );
+		$this->assertSame( 'legacy_v1', yotm_job_get_by_id( $job['id'] )['counter_mode'] );
+
+		yotm_job_release_worker( $worker );
+	}
+
 	public function test_manifest_is_stable_and_cannot_grow_after_review() {
 		$job = yotm_job_create(
 			'prune',

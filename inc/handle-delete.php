@@ -38,21 +38,30 @@ function yotm_prune_approve() {
 
 	$payload                = $job['payload'];
 	$payload['approved_at'] = gmdate( 'c' );
-	yotm_job_update(
+	$approved               = yotm_job_transition(
 		$job['id'],
+		array( 'awaiting_approval' ),
+		array( 'review' ),
 		array(
 			'payload'    => $payload,
 			'status'     => 'approved',
 			'phase'      => 'delete',
 			'expires_at' => gmdate( 'Y-m-d H:i:s', time() + 30 * MINUTE_IN_SECONDS ),
+		),
+		array(
+			'manifest_hash'   => $manifest_hash,
+			'active_deadline' => true,
 		)
 	);
+	if ( ! $approved ) {
+		wp_send_json_error( array( 'msg' => __( 'The prune job changed before approval. Refresh and review its current state.', 'thumbnail-manager' ) ), 409 );
+	}
 
 	wp_send_json_success(
 		array(
-			'token'         => $job['token'],
-			'manifest_hash' => $job['manifest_hash'],
-			'total'         => $job['total'],
+			'token'         => $approved['token'],
+			'manifest_hash' => $approved['manifest_hash'],
+			'total'         => $approved['total'],
 			'expires_in'    => 30 * MINUTE_IN_SECONDS,
 		)
 	);
@@ -83,9 +92,18 @@ function yotm_prune_delete_batch() {
 		wp_send_json_error( array( 'msg' => $delete_allowed->get_error_message() ), 409 );
 	}
 
+	$worker = yotm_job_acquire_worker( $job['id'], array( 'approved', 'deleting' ), array( 'delete' ) );
+	if ( is_wp_error( $worker ) ) {
+		$data     = $worker->get_error_data();
+		$current  = is_array( $data ) && is_array( $data['job'] ?? null ) ? $data['job'] : $job;
+		$response = yotm_build_prune_delete_response( $current, 0, 0, true );
+		wp_send_json_success( $response );
+	}
+
+	$job = yotm_job_get_by_id( $job['id'] );
 	if ( 'approved' === $job['status'] ) {
-		yotm_job_update(
-			$job['id'],
+		yotm_job_worker_update(
+			$worker,
 			array(
 				'status' => 'deleting',
 				'phase'  => 'delete',
@@ -94,72 +112,86 @@ function yotm_prune_delete_batch() {
 		$job = yotm_job_get_by_id( $job['id'] );
 	}
 
-	$items         = yotm_job_get_items( $job['id'], array( 'queued', 'processing' ), $batch );
-	$processed_now = 0;
-	$deleted_now   = 0;
-	$failed_now    = 0;
-	$freed_now     = 0;
-	$base          = (string) ( $job['payload']['base'] ?? ( wp_get_upload_dir()['basedir'] ?? '' ) );
+	$items = yotm_job_claim_items( $worker, $batch );
+	if ( is_wp_error( $items ) ) {
+		wp_send_json_error( array( 'msg' => $items->get_error_message() ), 409 );
+	}
+
+	$deleted_now = 0;
+	$failed_now  = 0;
+	$base        = (string) ( $job['payload']['base'] ?? ( wp_get_upload_dir()['basedir'] ?? '' ) );
 
 	foreach ( $items as $item ) {
-		yotm_job_update_item( $item['id'], 'processing' );
-		$result = yotm_delete_prune_item( $item['payload'], $base );
-		++$processed_now;
+		if ( ! yotm_job_refresh_worker( $worker ) || ! yotm_job_refresh_item_claim( $item ) ) {
+			break;
+		}
 
+		$result = yotm_delete_prune_item( $item['payload'], $base );
 		if ( ! empty( $result['deleted'] ) ) {
-			++$deleted_now;
-			$freed_now += (int) $result['bytes'];
-			yotm_job_update_item( $item['id'], 'done', '', (int) $result['bytes'] );
+			if ( yotm_job_finish_item( $item, 'done', '', (int) $result['bytes'] ) ) {
+				++$deleted_now;
+			}
 		} elseif ( ! empty( $result['skipped'] ) ) {
-			yotm_job_update_item( $item['id'], 'skipped', (string) ( $result['message'] ?? '' ) );
-		} else {
+			yotm_job_finish_item( $item, 'skipped', (string) ( $result['message'] ?? '' ) );
+		} elseif ( yotm_job_finish_item( $item, 'failed', (string) ( $result['error'] ?? __( 'Could not delete the file.', 'thumbnail-manager' ) ) ) ) {
 			++$failed_now;
-			yotm_job_update_item( $item['id'], 'failed', (string) ( $result['error'] ?? __( 'Could not delete the file.', 'thumbnail-manager' ) ) );
 		}
 	}
 
-	$processed = $job['processed'] + $processed_now;
-	$deleted   = $job['succeeded'] + $deleted_now;
-	$failed    = $job['failed'] + $failed_now;
-	$bytes     = $job['bytes'] + $freed_now;
-	$remaining = yotm_job_count_items( $job['id'], 'queued' ) + yotm_job_count_items( $job['id'], 'processing' );
-	$fields    = array(
-		'processed' => $processed,
-		'succeeded' => $deleted,
-		'failed'    => $failed,
-		'bytes'     => $bytes,
-	);
-	$done      = 0 === $remaining;
-	$current   = yotm_job_get_by_id( $job['id'] );
-	$stopped   = is_array( $current ) && 'cancelled' === $current['status'];
+	$current  = yotm_job_sync_item_counters( $job['id'] );
+	$counters = yotm_job_item_counters( $job['id'] );
+	$done     = 0 === $counters['remaining'];
 
-	if ( $done && ! $stopped ) {
-		$fields['status']     = 'completed';
-		$fields['phase']      = 'completed';
-		$fields['expires_at'] = gmdate( 'Y-m-d H:i:s', time() + 7 * DAY_IN_SECONDS );
+	if ( $done && is_array( $current ) && 'deleting' === $current['status'] ) {
+		yotm_job_worker_update(
+			$worker,
+			array(
+				'status'     => 'completed',
+				'phase'      => 'completed',
+				'expires_at' => gmdate( 'Y-m-d H:i:s', time() + YOTM_JOB_AUDIT_RETENTION_SECONDS ),
+			)
+		);
 	}
 
-	yotm_job_update( $job['id'], $fields );
-	$total   = max( 1, $job['total'] );
-	$percent = $done && ! $stopped ? 100 : min( 99.9, ( $processed / $total ) * 100 );
+	wp_send_json_success( yotm_build_prune_delete_response( yotm_job_get_by_id( $job['id'] ), $deleted_now, $failed_now ) );
+}
 
-	wp_send_json_success(
-		array(
-			'processed'     => $processed,
-			'deleted'       => $deleted,
-			'deleted_count' => $deleted_now,
-			'failed'        => $failed,
-			'failed_count'  => $failed_now,
-			'skipped'       => max( 0, $processed - $deleted - $failed ),
-			'bytes'         => $bytes,
-			'bytes_human'   => size_format( $bytes ),
-			'remaining'     => $remaining,
-			'percent'       => $percent,
-			'done'          => $done && ! $stopped,
-			'stopped'       => $stopped,
-			'status'        => $stopped ? 'cancelled' : ( $done ? 'completed' : 'deleting' ),
-			'errors'        => yotm_job_get_error_sample( $job['id'] ),
-		)
+/**
+ * Build a prune deletion response from authoritative persisted counters.
+ *
+ * @param array $job Job row.
+ * @param int   $deleted_now Files deleted by this request.
+ * @param int   $failed_now Files failed by this request.
+ * @param bool  $retry Whether another request currently owns the worker.
+ * @return array
+ */
+function yotm_build_prune_delete_response( $job, $deleted_now = 0, $failed_now = 0, $retry = false ) {
+	$counters  = yotm_job_item_counters( $job['id'] );
+	$processed = (int) $job['processed'];
+	$deleted   = (int) $job['succeeded'];
+	$failed    = (int) $job['failed'];
+	$bytes     = (int) $job['bytes'];
+	$remaining = $counters['remaining'];
+	$stopped   = in_array( $job['status'], array( 'cancelled', 'expired' ), true );
+	$done      = 'completed' === $job['status'];
+	$total     = max( 1, (int) $job['total'] );
+
+	return array(
+		'processed'      => $processed,
+		'deleted'        => $deleted,
+		'deleted_count'  => absint( $deleted_now ),
+		'failed'         => $failed,
+		'failed_count'   => absint( $failed_now ),
+		'skipped'        => max( 0, $processed - $deleted - $failed ),
+		'bytes'          => $bytes,
+		'bytes_human'    => size_format( $bytes ),
+		'remaining'      => $remaining,
+		'percent'        => $done ? 100 : min( 99.9, ( $processed / $total ) * 100 ),
+		'done'           => $done,
+		'stopped'        => $stopped,
+		'status'         => $job['status'],
+		'retry_after_ms' => $retry ? 250 : 0,
+		'errors'         => yotm_job_get_error_sample( $job['id'] ),
 	);
 }
 

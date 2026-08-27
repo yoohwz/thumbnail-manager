@@ -9,7 +9,7 @@ msgstr ""
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"POT-Creation-Date: 2026-07-17T02:48:40+00:00\n"
+"POT-Creation-Date: 2026-08-27T03:06:45+00:00\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "X-Generator: WP-CLI 2.9.0\n"
 "X-Domain: thumbnail-manager\n"
@@ -19,7 +19,7 @@ msgid "Thumbnail Manager"
 msgstr ""
 
 #. Plugin URI of the plugin
-msgid "https://wordpress.org/plugins/thumbnail-manager"
+msgid "https://yoohw.com/product/thumbnail-manager/"
 msgstr ""
 
 #. Description of the plugin
@@ -501,7 +501,7 @@ msgstr ""
 
 #: inc/admin-menu.php:338
 #: inc/handle-regenerate.php:35
-#: inc/handle-regenerate.php:468
+#: inc/handle-regenerate.php:574
 msgid "All media"
 msgstr ""
 
@@ -684,8 +684,8 @@ msgid "No folders selected"
 msgstr ""
 
 #: inc/admin-menu.php:576
-#: inc/handle-recommendations.php:288
-#: inc/handle-recommendations.php:305
+#: inc/handle-recommendations.php:300
+#: inc/handle-recommendations.php:317
 msgid "Keep"
 msgstr ""
 
@@ -819,7 +819,7 @@ msgid "Notes"
 msgstr ""
 
 #: inc/admin-menu.php:771
-#: inc/handle-recommendations.php:493
+#: inc/handle-recommendations.php:505
 msgid "Core"
 msgstr ""
 
@@ -864,139 +864,143 @@ msgid "Delete thumbnails of disabled sizes"
 msgstr ""
 
 #: inc/handle-delete.php:20
-#: inc/handle-delete.php:66
+#: inc/handle-delete.php:75
 #: inc/handle-prune.php:18
-#: inc/handle-prune.php:103
+#: inc/handle-prune.php:104
 #: inc/handle-recommendations.php:20
-#: inc/handle-recommendations.php:84
+#: inc/handle-recommendations.php:85
 #: inc/handle-regenerate.php:20
-#: inc/handle-regenerate.php:136
-#: inc/job-storage.php:1000
-#: inc/job-storage.php:1020
-#: inc/job-storage.php:1049
-#: inc/job-storage.php:1062
+#: inc/handle-regenerate.php:138
+#: inc/job-storage.php:1944
+#: inc/job-storage.php:1964
+#: inc/job-storage.php:1993
+#: inc/job-storage.php:2012
 msgid "No permission."
 msgstr ""
 
-#: inc/handle-delete.php:117
+#: inc/handle-delete.php:57
+msgid "The prune job changed before approval. Refresh and review its current state."
+msgstr ""
+
+#: inc/handle-delete.php:136
 msgid "Could not delete the file."
 msgstr ""
 
-#: inc/handle-delete.php:176
+#: inc/handle-delete.php:208
 msgid "The prune scan is not ready for approval."
 msgstr ""
 
-#: inc/handle-delete.php:180
+#: inc/handle-delete.php:212
 msgid "Explicit delete confirmation is required."
 msgstr ""
 
-#: inc/handle-delete.php:184
+#: inc/handle-delete.php:216
 msgid "The reviewed manifest does not match this job. Run the scan again."
 msgstr ""
 
-#: inc/handle-delete.php:188
+#: inc/handle-delete.php:220
 msgid "There are no files in this manifest."
 msgstr ""
 
-#: inc/handle-delete.php:203
+#: inc/handle-delete.php:235
 msgid "This job has not been approved for deletion."
 msgstr ""
 
-#: inc/handle-delete.php:207
+#: inc/handle-delete.php:239
 msgid "The delete manifest does not match the reviewed scan."
 msgstr ""
 
-#: inc/handle-delete.php:211
+#: inc/handle-delete.php:243
 msgid "The delete approval has expired. Run and review a new scan."
 msgstr ""
 
-#: inc/handle-delete.php:225
+#: inc/handle-delete.php:257
 msgid "This token was not prepared for deletion."
 msgstr ""
 
-#: inc/handle-delete.php:229
+#: inc/handle-delete.php:261
 msgid "Scan is still running."
 msgstr ""
 
-#: inc/handle-delete.php:270
+#: inc/handle-delete.php:302
 msgid "File path is outside uploads."
 msgstr ""
 
-#: inc/handle-delete.php:281
+#: inc/handle-delete.php:313
 msgid "File was already missing; metadata was reconciled."
 msgstr ""
 
-#: inc/handle-delete.php:345
+#: inc/handle-delete.php:377
 msgid "File does not exist."
 msgstr ""
 
-#: inc/handle-delete.php:354
+#: inc/handle-delete.php:386
 msgid "File is not readable."
 msgstr ""
 
-#: inc/handle-delete.php:367
+#: inc/handle-delete.php:399
 msgid "WordPress could not delete the file."
 msgstr ""
 
-#: inc/handle-prune.php:117
+#: inc/handle-prune.php:118
 msgid "Invalid prune job."
 msgstr ""
 
-#: inc/handle-prune.php:125
+#: inc/handle-prune.php:126
 msgid "This prune job is not scannable."
 msgstr ""
 
-#: inc/handle-recommendations.php:98
+#: inc/handle-recommendations.php:99
 msgid "Invalid recommendation job."
 msgstr ""
 
-#: inc/handle-recommendations.php:106
+#: inc/handle-recommendations.php:107
 msgid "This recommendation job is not scannable."
 msgstr ""
 
-#: inc/handle-recommendations.php:280
+#: inc/handle-recommendations.php:292
 msgid "No files"
 msgstr ""
 
-#: inc/handle-recommendations.php:281
+#: inc/handle-recommendations.php:293
 msgid "No generated files or content references were detected."
 msgstr ""
 
-#: inc/handle-recommendations.php:282
+#: inc/handle-recommendations.php:294
 msgid "Disable if not needed"
 msgstr ""
 
-#: inc/handle-recommendations.php:287
+#: inc/handle-recommendations.php:299
 msgid "Protected because this is a core or integration-defined image size."
 msgstr ""
 
-#: inc/handle-recommendations.php:293
+#: inc/handle-recommendations.php:305
 msgid "Referenced"
 msgstr ""
 
 #. translators: 1: content reference count, 2: generated file count.
-#: inc/handle-recommendations.php:296
+#: inc/handle-recommendations.php:308
 msgid "Found %1$d content reference and %2$d generated file."
 msgid_plural "Found %1$d content references and %2$d generated files."
 msgstr[0] ""
 msgstr[1] ""
 
-#: inc/handle-recommendations.php:309
+#: inc/handle-recommendations.php:321
 msgid "Generated"
 msgstr ""
 
 #. translators: 1: generated file count, 2: formatted disk usage.
-#: inc/handle-recommendations.php:312
+#: inc/handle-recommendations.php:324
 msgid "Found %1$d generated file using about %2$s, but no content reference."
 msgid_plural "Found %1$d generated files using about %2$s, but no content reference."
 msgstr[0] ""
 msgstr[1] ""
 
-#: inc/handle-recommendations.php:321
+#: inc/handle-recommendations.php:333
 msgid "Review before pruning"
 msgstr ""
 
-#: inc/handle-recommendations.php:498
+#: inc/handle-recommendations.php:510
 msgid "WooCommerce"
 msgstr ""
 
@@ -1012,31 +1016,35 @@ msgstr ""
 msgid "Please enter at least one valid image attachment ID."
 msgstr ""
 
-#: inc/handle-regenerate.php:150
+#: inc/handle-regenerate.php:152
 msgid "Invalid regeneration job."
 msgstr ""
 
-#: inc/handle-regenerate.php:158
+#: inc/handle-regenerate.php:160
 msgid "This regeneration job is not runnable."
 msgstr ""
 
-#: inc/handle-regenerate.php:296
+#: inc/handle-regenerate.php:235
+msgid "Attachment ID is missing."
+msgstr ""
+
+#: inc/handle-regenerate.php:402
 msgid "Attached image file is missing."
 msgstr ""
 
-#: inc/handle-regenerate.php:303
+#: inc/handle-regenerate.php:409
 msgid "Attachment is not a raster image."
 msgstr ""
 
-#: inc/handle-regenerate.php:313
+#: inc/handle-regenerate.php:419
 msgid "No image sizes are missing."
 msgstr ""
 
-#: inc/handle-regenerate.php:340
+#: inc/handle-regenerate.php:446
 msgid "WordPress returned empty image metadata."
 msgstr ""
 
-#: inc/handle-regenerate.php:355
+#: inc/handle-regenerate.php:461
 msgid "Could not update attachment metadata."
 msgstr ""
 
@@ -1062,38 +1070,47 @@ msgstr ""
 msgid "%1$s and %2$d more"
 msgstr ""
 
-#: inc/job-storage.php:84
-msgid "Could not install the persistent job tables."
+#: inc/job-storage.php:94
+msgid "Persistent job storage is incomplete. Restore the job database tables before continuing."
 msgstr ""
 
-#: inc/job-storage.php:227
+#: inc/job-storage.php:95
+msgid "Persistent job storage is unavailable. Please try again later or ask an administrator to check the database."
+msgstr ""
+
+#: inc/job-storage.php:485
+#: inc/job-storage.php:524
+msgid "Another request is processing this job. Retrying shortly."
+msgstr ""
+
+#: inc/job-storage.php:705
 msgid "Job not found or it belongs to another user."
 msgstr ""
 
-#: inc/job-storage.php:239
+#: inc/job-storage.php:710
 msgid "This job has expired. Please start a new scan."
 msgstr ""
 
-#: inc/job-storage.php:299
+#: inc/job-storage.php:776
 msgid "An unfinished job of this type already exists. Resume or cancel it before starting another."
 msgstr ""
 
-#: inc/job-storage.php:313
+#: inc/job-storage.php:790
 msgid "Could not acquire the media maintenance lock. Please try again."
 msgstr ""
 
-#: inc/job-storage.php:320
+#: inc/job-storage.php:802
 msgid "A media maintenance job is already active. Resume or cancel it before starting another."
 msgstr ""
 
-#: inc/job-storage.php:321
+#: inc/job-storage.php:803
 msgid "Another administrator is already running media maintenance on this site."
 msgstr ""
 
-#: inc/job-storage.php:369
-msgid "Could not create the persistent job."
+#: inc/job-storage.php:1300
+msgid "This job worker no longer owns the current batch."
 msgstr ""
 
-#: inc/job-storage.php:1032
+#: inc/job-storage.php:1976
 msgid "Manifest items are only available for prune jobs."
 msgstr ""

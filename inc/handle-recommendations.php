@@ -54,11 +54,12 @@ function yotm_recommend_prepare() {
 			'scan_total_attachments' => $attachment_total + $content_total,
 		),
 		array(
-			'status'    => 'scanning',
-			'phase'     => 'metadata',
-			'total'     => $attachment_total + $content_total,
-			'ttl'       => DAY_IN_SECONDS,
-			'exclusive' => false,
+			'status'       => 'scanning',
+			'phase'        => 'metadata',
+			'counter_mode' => 'cursor_v2',
+			'total'        => $attachment_total + $content_total,
+			'ttl'          => DAY_IN_SECONDS,
+			'exclusive'    => false,
 		)
 	);
 
@@ -106,6 +107,17 @@ function yotm_recommend_batch() {
 		wp_send_json_error( array( 'msg' => __( 'This recommendation job is not scannable.', 'thumbnail-manager' ) ), 409 );
 	}
 
+	$worker = yotm_job_acquire_worker( $job['id'], array( 'scanning' ), array( 'metadata', 'content' ) );
+	if ( is_wp_error( $worker ) ) {
+		$data                       = $worker->get_error_data();
+		$current                    = is_array( $data ) && is_array( $data['job'] ?? null ) ? $data['job'] : $job;
+		$response                   = yotm_build_recommendation_progress_response( $current, ( $current['status'] ?? '' ) === 'completed' );
+		$response['retry_after_ms'] = 'scanning' === ( $current['status'] ?? '' ) ? 250 : 0;
+		wp_send_json_success( $response );
+	}
+
+	$job = yotm_job_get_by_id( $job['id'] );
+
 	$payload = $job['payload'];
 	$phase   = $payload['scan_phase'] ?? 'metadata';
 
@@ -121,8 +133,8 @@ function yotm_recommend_batch() {
 			yotm_recommend_scan_attachment_metadata_ids( $ids, $payload['metadata_usage'] );
 			$payload['attachment_after'] = max( array_map( 'absint', $ids ) );
 			$payload['scan_processed']   = (int) ( $payload['scan_processed'] ?? 0 ) + count( $ids );
-			yotm_job_update(
-				$job['id'],
+			yotm_job_worker_update(
+				$worker,
 				array(
 					'payload'   => $payload,
 					'processed' => (int) $payload['scan_processed'],
@@ -132,8 +144,8 @@ function yotm_recommend_batch() {
 		}
 
 		$payload['scan_phase'] = 'content';
-		yotm_job_update(
-			$job['id'],
+		yotm_job_worker_update(
+			$worker,
 			array(
 				'payload' => $payload,
 				'phase'   => 'content',
@@ -153,8 +165,8 @@ function yotm_recommend_batch() {
 		yotm_recommend_scan_content_ids( $ids, $payload['size_names'], $payload['content_usage'] );
 		$payload['content_after']  = max( array_map( 'absint', $ids ) );
 		$payload['scan_processed'] = (int) ( $payload['scan_processed'] ?? 0 ) + count( $ids );
-		yotm_job_update(
-			$job['id'],
+		yotm_job_worker_update(
+			$worker,
 			array(
 				'payload'   => $payload,
 				'processed' => (int) $payload['scan_processed'],
@@ -170,14 +182,14 @@ function yotm_recommend_batch() {
 
 	$payload['result']     = yotm_build_recommendation_result( $payload['sizes'], $payload['metadata_usage'], $payload['content_usage'] );
 	$payload['scan_phase'] = 'completed';
-	yotm_job_update(
-		$job['id'],
+	yotm_job_worker_update(
+		$worker,
 		array(
 			'payload'    => $payload,
 			'status'     => 'completed',
 			'phase'      => 'completed',
 			'processed'  => $job['total'],
-			'expires_at' => gmdate( 'Y-m-d H:i:s', time() + 7 * DAY_IN_SECONDS ),
+			'expires_at' => gmdate( 'Y-m-d H:i:s', time() + YOTM_JOB_AUDIT_RETENTION_SECONDS ),
 		)
 	);
 
@@ -369,7 +381,7 @@ function yotm_build_recommendation_progress_response( $job, $done ) {
 		'total'     => (int) $job['total'],
 		'percent'   => $done ? 100 : min( 99, ( $processed / $total ) * 100 ),
 		'done'      => (bool) $done,
-		'stopped'   => 'cancelled' === $job['status'],
+		'stopped'   => in_array( $job['status'], array( 'cancelled', 'expired' ), true ),
 		'result'    => $done && is_array( $payload['result'] ?? null ) ? $payload['result'] : null,
 	);
 }
