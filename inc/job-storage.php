@@ -989,12 +989,12 @@ function yotm_job_update_where( $job_id, $fields, $conditions = array() ) {
 	}
 
 	$tables = yotm_job_table_names();
-	// phpcs:disable WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- The query fragments contain allowlisted columns and the placeholders are assembled above.
+	// phpcs:disable WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare,WordPress.DB.PreparedSQL.NotPrepared -- The query fragments contain allowlisted columns and the placeholders are assembled above.
 	$sql = $wpdb->prepare(
 		'UPDATE ' . $tables['jobs'] . ' SET ' . implode( ', ', $set ) . ' WHERE ' . implode( ' AND ', $where ),
 		...$args
 	);
-	// phpcs:enable WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare
+	// phpcs:enable WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare,WordPress.DB.PreparedSQL.NotPrepared
 
 	// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Prepared above; columns and table are allowlisted/plugin-owned.
 	$updated = $wpdb->query( $sql );
@@ -1377,17 +1377,18 @@ function yotm_job_claim_items( $worker, $limit = 100 ) {
 function yotm_job_refresh_item_claim( $item ) {
 	global $wpdb;
 
-	$updated = $wpdb->query(
-		$wpdb->prepare(
-			'UPDATE ' . yotm_job_table_names()['items'] . " SET claim_expires_at = %s, updated_at = %s
-			WHERE id = %d AND status = 'processing' AND claim_token = %s AND claim_generation = %d",
-			gmdate( 'Y-m-d H:i:s', time() + YOTM_JOB_WORKER_LEASE_SECONDS ),
-			gmdate( 'Y-m-d H:i:s' ),
-			absint( $item['id'] ?? 0 ),
-			sanitize_text_field( $item['claim_token'] ?? '' ),
-			absint( $item['claim_generation'] ?? 0 )
-		)
+	$tables = yotm_job_table_names();
+	$sql    = $wpdb->prepare(
+		"UPDATE {$tables['items']} SET claim_expires_at = %s, updated_at = %s
+		WHERE id = %d AND status = 'processing' AND claim_token = %s AND claim_generation = %d",
+		gmdate( 'Y-m-d H:i:s', time() + YOTM_JOB_WORKER_LEASE_SECONDS ),
+		gmdate( 'Y-m-d H:i:s' ),
+		absint( $item['id'] ?? 0 ),
+		sanitize_text_field( $item['claim_token'] ?? '' ),
+		absint( $item['claim_generation'] ?? 0 )
 	);
+	// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Prepared above; table name is plugin-owned.
+	$updated = $wpdb->query( $sql );
 
 	if ( false === $updated ) {
 		return false;
@@ -1397,13 +1398,12 @@ function yotm_job_refresh_item_claim( $item ) {
 		return true;
 	}
 
-	$current = $wpdb->get_row(
-		$wpdb->prepare(
-			'SELECT status,claim_token,claim_generation FROM ' . yotm_job_table_names()['items'] . ' WHERE id = %d',
-			absint( $item['id'] ?? 0 )
-		),
-		ARRAY_A
+	$sql = $wpdb->prepare(
+		"SELECT status,claim_token,claim_generation FROM {$tables['items']} WHERE id = %d",
+		absint( $item['id'] ?? 0 )
 	);
+	// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Prepared above; table name is plugin-owned.
+	$current = $wpdb->get_row( $sql, ARRAY_A );
 
 	return is_array( $current )
 		&& 'processing' === $current['status']
@@ -1443,8 +1443,9 @@ function yotm_job_finish_item( $item, $status, $error = '', $bytes = null ) {
 	$args[] = absint( $item['id'] ?? 0 );
 	$args[] = sanitize_text_field( $item['claim_token'] ?? '' );
 	$args[] = absint( $item['claim_generation'] ?? 0 );
+	$tables = yotm_job_table_names();
 	$sql    = $wpdb->prepare(
-		'UPDATE ' . yotm_job_table_names()['items'] . " SET {$set}
+		"UPDATE {$tables['items']} SET {$set}
 		WHERE id = %d AND status = 'processing' AND claim_token = %s AND claim_generation = %d",
 		...$args
 	);
