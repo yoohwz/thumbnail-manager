@@ -189,6 +189,7 @@ function yotm_media_source_upsert_aliases( $aliases ) {
 	foreach ( (array) $aliases as $alias ) {
 		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Plugin-owned table name is derived from the trusted WordPress prefix; values use placeholders.
 		$sql = $wpdb->prepare(
+			// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Plugin-owned table name is trusted; values use placeholders.
 			"INSERT INTO {$table} (attachment_id,source_kind,path_hash,path,updated_at)
 			VALUES (%d,%s,%s,%s,%s)
 			ON DUPLICATE KEY UPDATE path = VALUES(path), updated_at = VALUES(updated_at)",

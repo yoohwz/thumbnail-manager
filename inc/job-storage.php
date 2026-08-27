@@ -1542,6 +1542,7 @@ function yotm_job_release_item_claim( $item ) {
 	$tables = yotm_job_table_names();
 	// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Plugin-owned table name is derived from the trusted WordPress prefix; values use placeholders.
 	$sql = $wpdb->prepare(
+		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Plugin-owned table name is trusted; values use placeholders.
 		"UPDATE {$tables['items']} SET status = 'queued', claim_token = '', claim_expires_at = NULL, updated_at = %s
 		WHERE id = %d AND status = 'processing' AND claim_token = %s AND claim_generation = %d",
 		gmdate( 'Y-m-d H:i:s' ),
