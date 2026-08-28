@@ -249,6 +249,10 @@ function yotm_media_source_dirty_state() {
  * @return true|WP_Error
  */
 function yotm_media_source_dirty_persist( $state ) {
+	$fence = yotm_data_lifecycle_require_runtime_fence();
+	if ( is_wp_error( $fence ) ) {
+		return $fence;
+	}
 	if ( empty( $state['entries'] ) ) {
 		delete_option( YOTM_MEDIA_SOURCE_DIRTY_OPTION );
 		if ( false === get_option( YOTM_MEDIA_SOURCE_DIRTY_OPTION, false ) ) {
@@ -390,6 +394,10 @@ function yotm_media_reference_index_state() {
  * @return true|WP_Error
  */
 function yotm_media_reference_index_persist_state( $state ) {
+	$fence = yotm_data_lifecycle_require_runtime_fence();
+	if ( is_wp_error( $fence ) ) {
+		return $fence;
+	}
 	$state = array(
 		'version'             => YOTM_MEDIA_REFERENCE_STATE_VERSION,
 		'semantic_generation' => absint( $state['semantic_generation'] ?? YOTM_MEDIA_REFERENCE_GENERATION ),
@@ -772,6 +780,10 @@ function yotm_media_source_filter_proposed_original( $attachment_id, $filtered_f
  */
 function yotm_media_source_upsert_aliases( $aliases ) {
 	global $wpdb;
+	$fence = yotm_data_lifecycle_require_runtime_fence();
+	if ( is_wp_error( $fence ) ) {
+		return $fence;
+	}
 
 	$table = yotm_job_table_names()['sources'];
 	$now   = gmdate( 'Y-m-d H:i:s' );
@@ -900,6 +912,10 @@ function yotm_media_source_clear_index() {
  */
 function yotm_media_reference_baseline_begin( $token = '' ) {
 	global $wpdb;
+	$fence = yotm_data_lifecycle_require_runtime_fence();
+	if ( is_wp_error( $fence ) ) {
+		return $fence;
+	}
 
 	$source_fence = yotm_media_source_fence_acquire();
 	if ( is_wp_error( $source_fence ) ) {
@@ -1981,6 +1997,11 @@ function yotm_media_source_resync_after_meta_delete( $meta_ids, $object_id, $met
 function yotm_media_source_delete_attachment_rows( $attachment_id, $post = null ) {
 	global $wpdb;
 	if ( ! yotm_media_source_guard_enabled() || ! $post instanceof WP_Post || 'attachment' !== $post->post_type ) {
+		return;
+	}
+	$fence = yotm_data_lifecycle_require_runtime_fence();
+	if ( is_wp_error( $fence ) ) {
+		$GLOBALS['yotm_media_source_last_error'] = $fence;
 		return;
 	}
 

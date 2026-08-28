@@ -147,6 +147,8 @@ Plugin uninstall never authorizes deletion or mutation of attachment rows/postme
 
 The uninstall decision relies only on exact persisted schema, job quiescence, item state, and recovery journal evidence. It must not inspect or delete `.yotm-regenerate-*` content to turn an ambiguous journal into a purge-safe decision. Unsafe or bounded-out state retains all plugin database data for reinstall/recovery inspection while allowing WordPress to continue plugin-file deletion.
 
+Lifecycle schema markers and cleanup intents must be read and verified from the exact persisted options rows, without filter or object-cache authority. Recovery JSON classification rejects decoded duplicate object names. The final topology and full recovery proof run after all scope-bound intents are durable and while network/site lifecycle fences exclude runtime job, worker, claim, journal, and source-index mutations; a failed proof requires verified intent rollback before retain-all.
+
 ## Required regression evidence
 
 A Controlled change touching this contract must preserve or deliberately update automated coverage for the affected invariants. Existing high-value regression areas include:

@@ -21,6 +21,15 @@ class YOTM_Data_Lifecycle_Test extends WP_UnitTestCase {
 	/** @var string */
 	private $failed_inspection_table = '';
 
+	/** @var string */
+	private $failed_option_read = '';
+
+	/** @var string */
+	private $failed_option_write = '';
+
+	/** @var string */
+	private $failed_option_delete = '';
+
 	public function setUp(): void {
 		parent::setUp();
 		$this->primary_blog_id = get_current_blog_id();
@@ -32,7 +41,12 @@ class YOTM_Data_Lifecycle_Test extends WP_UnitTestCase {
 	public function tearDown(): void {
 		remove_filter( 'query', array( $this, 'fail_selected_drop' ), 1 );
 		remove_filter( 'query', array( $this, 'fail_selected_inspection' ), 1 );
-		remove_filter( 'pre_update_option_' . YOTM_UNINSTALL_INTENT_OPTION, array( $this, 'reject_intent_update' ) );
+		remove_filter( 'query', array( $this, 'fail_selected_option_read' ), 1 );
+		remove_filter( 'query', array( $this, 'fail_selected_option_write' ), 1 );
+		remove_filter( 'query', array( $this, 'fail_selected_option_delete' ), 1 );
+		remove_filter( 'pre_option_yotm_job_db_version', array( $this, 'virtual_current_schema' ) );
+		remove_filter( 'pre_option_' . YOTM_UNINSTALL_INTENT_OPTION, array( $this, 'hide_cleanup_intent' ) );
+		yotm_data_lifecycle_release_request_fences();
 		while ( is_multisite() && ms_is_switched() ) {
 			restore_current_blog();
 		}
@@ -63,6 +77,7 @@ class YOTM_Data_Lifecycle_Test extends WP_UnitTestCase {
 		}
 		$this->test_dir = '';
 		unset( $GLOBALS['yotm_job_storage_readiness'] );
+		yotm_data_lifecycle_release_request_fences();
 		parent::tearDown();
 
 		// DDL commits break the Core test transaction, so normalize shared state after its rollback.
@@ -70,6 +85,7 @@ class YOTM_Data_Lifecycle_Test extends WP_UnitTestCase {
 		$this->clear_owned_options();
 		update_option( 'yotm_job_db_version', YOTM_JOB_DB_VERSION, false );
 		unset( $GLOBALS['yotm_job_storage_readiness'] );
+		yotm_data_lifecycle_release_request_fences();
 	}
 
 	public function test_single_site_deactivation_clears_cron_and_retains_data() {
@@ -207,6 +223,58 @@ class YOTM_Data_Lifecycle_Test extends WP_UnitTestCase {
 		$this->assertRetained( $result, 'yotm_uninstall_prune_recovery' );
 	}
 
+	public function test_nested_escaped_journal_key_cannot_bypass_classification() {
+		$job = $this->create_job_with_item( array( 'proof' => true ), 'done', 'completed' );
+		global $wpdb;
+		$table   = yotm_job_table_names()['items'];
+		$raw     = '{"nested":{"prune_operation_journal_v\\u0031":{"version":1,"outcome":"delete_reconciled"}}}';
+		$updated = $wpdb->update( $table, array( 'payload' => $raw ), array( 'job_id' => $job['id'] ) );
+		$this->assertNotFalse( $updated );
+
+		$result = yotm_data_lifecycle_uninstall();
+
+		$this->assertRetained( $result, 'yotm_uninstall_prune_recovery' );
+	}
+
+	/**
+	 * @dataProvider duplicate_journal_key_provider
+	 */
+	public function test_duplicate_json_keys_retain_everything( $second_key ) {
+		$job = $this->create_job_with_item( array( 'proof' => true ), 'done', 'completed' );
+		global $wpdb;
+		$table   = yotm_job_table_names()['items'];
+		$valid   = wp_json_encode( $this->resolved_prune_journal() );
+		$raw     = '{"prune_operation_journal_v1":{"version":999},"' . $second_key . '":' . $valid . '}';
+		$updated = $wpdb->update( $table, array( 'payload' => $raw ), array( 'job_id' => $job['id'] ) );
+		$this->assertNotFalse( $updated );
+
+		$result = yotm_data_lifecycle_uninstall();
+
+		$this->assertRetained( $result, 'yotm_uninstall_json_duplicate_key' );
+	}
+
+	public function duplicate_journal_key_provider() {
+		return array(
+			'literal duplicate'            => array( 'prune_operation_journal_v1' ),
+			'escaped-equivalent duplicate' => array( 'prune_operation_journal_v\\u0031' ),
+		);
+	}
+
+	public function test_duplicate_structural_key_inside_resolved_journal_retains_everything() {
+		$job = $this->create_job_with_item( array( 'proof' => true ), 'done', 'completed' );
+		global $wpdb;
+		$table   = yotm_job_table_names()['items'];
+		$journal = $this->resolved_prune_journal();
+		unset( $journal['version'] );
+		$raw     = '{"prune_operation_journal_v1":{"version":999,"version":1,' . substr( wp_json_encode( $journal ), 1 ) . '}';
+		$updated = $wpdb->update( $table, array( 'payload' => $raw ), array( 'job_id' => $job['id'] ) );
+		$this->assertNotFalse( $updated );
+
+		$result = yotm_data_lifecycle_uninstall();
+
+		$this->assertRetained( $result, 'yotm_uninstall_json_duplicate_key' );
+	}
+
 	public function test_contradictory_done_journals_retain_everything() {
 		$this->create_job_with_item(
 			array(
@@ -267,6 +335,105 @@ class YOTM_Data_Lifecycle_Test extends WP_UnitTestCase {
 		$this->assertNull( get_option( YOTM_UNINSTALL_INTENT_OPTION, null ) );
 	}
 
+	public function test_late_active_job_after_intents_is_caught_by_final_proof_and_rolled_back() {
+		$job = $this->create_job( 'completed' );
+		$this->assertIsArray( $job );
+		$result = yotm_data_lifecycle_uninstall(
+			array(
+				'after_intents' => static function () use ( $job ) {
+					global $wpdb;
+					$wpdb->update( yotm_job_table_names()['jobs'], array( 'status' => 'running' ), array( 'id' => $job['id'] ) );
+				},
+			)
+		);
+
+		$this->assertRetained( $result, 'yotm_uninstall_active_job' );
+	}
+
+	public function test_late_processing_item_after_intents_is_caught_by_final_proof() {
+		$job    = $this->create_job_with_item( array( 'proof' => true ), 'done', 'completed' );
+		$result = yotm_data_lifecycle_uninstall(
+			array(
+				'after_intents' => static function () use ( $job ) {
+					global $wpdb;
+					$wpdb->update( yotm_job_table_names()['items'], array( 'status' => 'processing' ), array( 'job_id' => $job['id'] ) );
+				},
+			)
+		);
+
+		$this->assertRetained( $result, 'yotm_uninstall_processing_item' );
+	}
+
+	public function test_late_recovery_journal_after_intents_is_caught_by_final_proof() {
+		$job    = $this->create_job_with_item( array( 'proof' => true ), 'done', 'completed' );
+		$result = yotm_data_lifecycle_uninstall(
+			array(
+				'after_intents' => static function () use ( $job ) {
+					global $wpdb;
+					$wpdb->update(
+						yotm_job_table_names()['items'],
+						array( 'payload' => wp_json_encode( array( 'prune_operation_journal_v1' => array( 'version' => 1 ) ) ) ),
+						array( 'job_id' => $job['id'] )
+					);
+				},
+			)
+		);
+
+		$this->assertRetained( $result, 'yotm_uninstall_prune_recovery' );
+	}
+
+	public function test_persisted_cleanup_intent_blocks_new_runtime_job() {
+		yotm_data_lifecycle_release_request_fences();
+		$intent = yotm_data_lifecycle_intent(
+			get_current_blog_id(),
+			yotm_data_lifecycle_scope_hash( array( get_current_blog_id() ) ),
+			array_values( yotm_job_table_names() )
+		);
+		$this->assertTrue( yotm_data_lifecycle_write_option( YOTM_UNINSTALL_INTENT_OPTION, $intent ) );
+		unset( $GLOBALS['yotm_job_storage_readiness'] );
+
+		$job = $this->create_job( 'running' );
+
+		$this->assertWPError( $job );
+		$this->assertSame( 'yotm_uninstall_in_progress', $job->get_error_code() );
+		$this->assertTrue( yotm_job_tables_exist() );
+	}
+
+	public function test_inflight_request_fence_blocks_uninstall_without_writes() {
+		yotm_data_lifecycle_release_request_fences();
+		$other = new wpdb( DB_USER, DB_PASSWORD, DB_NAME, DB_HOST );
+		$this->assertTrue( $other->ready );
+		$name = yotm_data_lifecycle_lock_name( 'site', get_current_blog_id() );
+		$this->assertSame( '1', (string) $other->get_var( $other->prepare( 'SELECT GET_LOCK(%s, 0)', $name ) ) );
+
+		try {
+			$result = yotm_data_lifecycle_uninstall();
+
+			$this->assertRetained( $result, 'yotm_uninstall_fence_busy' );
+		} finally {
+			$other->get_var( $other->prepare( 'SELECT RELEASE_LOCK(%s)', $name ) );
+			$other->close();
+		}
+	}
+
+	public function test_inflight_uninstall_fence_blocks_new_runtime_job() {
+		yotm_data_lifecycle_release_request_fences();
+		$other = new wpdb( DB_USER, DB_PASSWORD, DB_NAME, DB_HOST );
+		$this->assertTrue( $other->ready );
+		$name = yotm_data_lifecycle_lock_name( 'site', get_current_blog_id() );
+		$this->assertSame( '1', (string) $other->get_var( $other->prepare( 'SELECT GET_LOCK(%s, 0)', $name ) ) );
+
+		try {
+			$job = $this->create_job( 'running' );
+
+			$this->assertWPError( $job );
+			$this->assertSame( 'yotm_uninstall_fence_busy', $job->get_error_code() );
+		} finally {
+			$other->get_var( $other->prepare( 'SELECT RELEASE_LOCK(%s)', $name ) );
+			$other->close();
+		}
+	}
+
 	public function test_item_limit_retains_everything() {
 		$job = $this->create_job_with_item( array( 'one' => true ), 'done', 'completed' );
 		$this->add_item( $job['id'], array( 'two' => true ), 'done', 'second' );
@@ -299,13 +466,61 @@ class YOTM_Data_Lifecycle_Test extends WP_UnitTestCase {
 		$this->assertRetained( $result, 'yotm_uninstall_database_read' );
 	}
 
-	public function test_intent_write_failure_is_rolled_back_before_deletion() {
-		add_filter( 'pre_update_option_' . YOTM_UNINSTALL_INTENT_OPTION, array( $this, 'reject_intent_update' ), 10, 2 );
+	public function test_raw_option_read_failure_retains_everything() {
+		$this->failed_option_read = 'yotm_job_db_version';
+		add_filter( 'query', array( $this, 'fail_selected_option_read' ), 1 );
 
 		$result = yotm_data_lifecycle_uninstall();
 
-		remove_filter( 'pre_update_option_' . YOTM_UNINSTALL_INTENT_OPTION, array( $this, 'reject_intent_update' ) );
+		remove_filter( 'query', array( $this, 'fail_selected_option_read' ), 1 );
+		$this->assertRetained( $result, 'yotm_uninstall_database_read' );
+	}
+
+	public function test_option_filter_cannot_virtualize_wrong_schema_marker() {
+		update_option( 'yotm_job_db_version', '0.0.0', false );
+		add_filter( 'pre_option_yotm_job_db_version', array( $this, 'virtual_current_schema' ) );
+
+		$result = yotm_data_lifecycle_uninstall();
+
+		remove_filter( 'pre_option_yotm_job_db_version', array( $this, 'virtual_current_schema' ) );
+		$this->assertSame( 'retained', $result['status'] );
+		$this->assertSame( 'yotm_uninstall_schema_ambiguous', $result['reason'] );
+		$this->assertTrue( yotm_job_tables_exist() );
+	}
+
+	public function test_option_filter_cannot_hide_persisted_cleanup_intent() {
+		update_option( YOTM_UNINSTALL_INTENT_OPTION, array( 'version' => 999 ), false );
+		add_filter( 'pre_option_' . YOTM_UNINSTALL_INTENT_OPTION, array( $this, 'hide_cleanup_intent' ) );
+
+		$result = yotm_data_lifecycle_uninstall();
+
+		remove_filter( 'pre_option_' . YOTM_UNINSTALL_INTENT_OPTION, array( $this, 'hide_cleanup_intent' ) );
+		$this->assertSame( 'retained', $result['status'] );
+		$this->assertSame( 'yotm_uninstall_intent_invalid', $result['reason'] );
+		$this->assertTrue( yotm_job_tables_exist() );
+	}
+
+	public function test_intent_write_failure_is_rolled_back_before_deletion() {
+		$this->failed_option_write = YOTM_UNINSTALL_INTENT_OPTION;
+		add_filter( 'query', array( $this, 'fail_selected_option_write' ), 1 );
+
+		$result = yotm_data_lifecycle_uninstall();
+
+		remove_filter( 'query', array( $this, 'fail_selected_option_write' ), 1 );
 		$this->assertRetained( $result, 'yotm_uninstall_intent_write' );
+	}
+
+	public function test_option_delete_failure_keeps_cleanup_intent_for_retry() {
+		$this->failed_option_delete = 'yotm_disabled_sizes';
+		add_filter( 'query', array( $this, 'fail_selected_option_delete' ), 1 );
+
+		$result = yotm_data_lifecycle_uninstall();
+
+		remove_filter( 'query', array( $this, 'fail_selected_option_delete' ), 1 );
+		$this->assertSame( 'partial', $result['status'] );
+		$this->assertSame( 'yotm_uninstall_option_cleanup', $result['reason'] );
+		$this->assertIsArray( get_option( YOTM_UNINSTALL_INTENT_OPTION, null ) );
+		$this->assertTrue( yotm_job_tables_exist() );
 	}
 
 	public function test_interrupted_allowlisted_drop_keeps_intent_and_retries_idempotently() {
@@ -531,6 +746,26 @@ class YOTM_Data_Lifecycle_Test extends WP_UnitTestCase {
 		$this->assertSame( YOTM_JOB_DB_VERSION, get_option( 'yotm_job_db_version' ) );
 	}
 
+	public function test_multisite_scope_change_after_intents_rolls_back_original_scope() {
+		if ( ! is_multisite() ) {
+			$this->markTestSkipped( 'Requires WordPress Multisite.' );
+		}
+		$primary_tables = yotm_job_table_names();
+
+		$result = yotm_data_lifecycle_uninstall(
+			array(
+				'after_intents' => function () {
+					$this->create_second_site();
+				},
+			)
+		);
+
+		$this->assertSame( 'retained', $result['status'] );
+		$this->assertSame( 'yotm_uninstall_scope_changed', $result['reason'] );
+		$this->assertTrue( $this->table_exists( $primary_tables['jobs'] ) );
+		$this->assertNull( get_option( YOTM_UNINSTALL_INTENT_OPTION, null ) );
+	}
+
 	public function fail_selected_drop( $query ) {
 		if ( $this->failed_drop_table && false !== strpos( $query, "DROP TABLE IF EXISTS `{$this->failed_drop_table}`" ) ) {
 			return 'SELECT * FROM yotm_forced_lifecycle_failure';
@@ -547,8 +782,37 @@ class YOTM_Data_Lifecycle_Test extends WP_UnitTestCase {
 		return $query;
 	}
 
-	public function reject_intent_update( $value, $old_value ) {
-		return $old_value;
+	public function fail_selected_option_read( $query ) {
+		if ( $this->failed_option_read && false !== strpos( $query, 'SELECT option_value' ) && false !== strpos( $query, $this->failed_option_read ) ) {
+			return 'SELECT FROM';
+		}
+
+		return $query;
+	}
+
+	public function fail_selected_option_write( $query ) {
+		$write = 0 === stripos( ltrim( $query ), 'INSERT INTO' ) || 0 === stripos( ltrim( $query ), 'UPDATE ' );
+		if ( $write && $this->failed_option_write && false !== strpos( $query, $this->failed_option_write ) ) {
+			return 'SELECT FROM';
+		}
+
+		return $query;
+	}
+
+	public function fail_selected_option_delete( $query ) {
+		if ( $this->failed_option_delete && 0 === stripos( ltrim( $query ), 'DELETE FROM' ) && false !== strpos( $query, $this->failed_option_delete ) ) {
+			return 'SELECT FROM';
+		}
+
+		return $query;
+	}
+
+	public function virtual_current_schema() {
+		return YOTM_JOB_DB_VERSION;
+	}
+
+	public function hide_cleanup_intent() {
+		return null;
 	}
 
 	private function create_second_site() {

@@ -22,12 +22,17 @@ Explicit uninstall uses conditional safe purge with retain-on-unsafe behavior:
 
 1. Snapshot the complete site/network scope in bounded keyset pages.
 2. Prove exact schema ownership, job quiescence, absence of `processing` items, and resolution of every persisted prune/Force journal.
-3. Repeat the full safety proof immediately before the cleanup-intent boundary.
-4. Only after both passes succeed, persist exact scope-bound intents and remove the allowlisted database/scheduled artifacts.
+3. Acquire the network topology fence and every exact site lifecycle fence, then persist all scope-bound cleanup intents before any deletion.
+4. Under those fences, repeat topology enumeration and the complete safety proof. Roll back and verify every newly written intent if either proof changes or fails.
+5. Only after both full passes succeed, remove the allowlisted database/scheduled artifacts while retaining the same fences through verification.
 
 Any active job, processing item, unresolved or unprovable journal, database read error, ambiguous/partial schema without a valid interruption intent, changing site scope, or execution bound selects retain-all. WordPress may continue deleting plugin files; uninstall does not use `wp_die`, a fatal error, or a return value as a deletion veto.
 
-Only a structurally valid terminal `done` prune V1 journal with `outcome=delete_reconciled`, or terminal `done` Force V1 journal with `phase=cleanup_complete`, is resolved evidence. Journal inspection covers every item status. Failed, skipped, queued, processing, malformed, unknown, or contradictory recovery evidence retains all.
+Only a structurally valid terminal `done` prune V1 journal with `outcome=delete_reconciled`, or terminal `done` Force V1 journal with `phase=cleanup_complete`, is resolved evidence. Journal inspection covers every item status. The strict JSON classifier decodes Unicode escapes, records recovery keys at every nesting level, and rejects duplicate object names rather than accepting PHP's last-value behavior. Failed, skipped, queued, processing, malformed, duplicate-key, unknown, or contradictory recovery evidence retains all.
+
+Schema markers and cleanup intents are read directly from the exact site options table without option filters or object-cache state. Intent writes/deletes and cleanup verification use the same raw persisted authority, so a filter, stale cache, duplicate row, or database error cannot mint or hide purge authorization.
+
+Normal job creation, worker acquisition/refresh, claim/journal persistence, job transitions, and source-index mutations hold the site lifecycle fence for the request. A persisted cleanup intent or contended fence blocks new runtime work. On multisite, new-site initialization also observes the topology fence so it cannot initialize plugin storage inside the final proof/delete window.
 
 The reviewed one-shot uninstall limits are 100 sites, site pages of 25, item pages of 250, 10,000 item rows per complete scope pass, and a 10-second read-only preflight budget. Exceeding a bound retains all.
 

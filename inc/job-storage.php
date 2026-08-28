@@ -131,6 +131,10 @@ function yotm_job_last_database_error() {
  */
 function yotm_run_job_table_migration() {
 	global $wpdb;
+	$fence = yotm_data_lifecycle_require_runtime_fence();
+	if ( is_wp_error( $fence ) ) {
+		return $fence;
+	}
 
 	require_once ABSPATH . 'wp-admin/includes/upgrade.php';
 
@@ -232,7 +236,11 @@ function yotm_run_job_table_migration() {
  * @return true|WP_Error
  */
 function yotm_job_storage_ready() {
-	$key = yotm_job_storage_request_key();
+	$key    = yotm_job_storage_request_key();
+	$intent = yotm_data_lifecycle_read_option( YOTM_UNINSTALL_INTENT_OPTION );
+	if ( is_wp_error( $intent ) || $intent['exists'] ) {
+		return is_wp_error( $intent ) ? $intent : yotm_job_storage_error( 'yotm_uninstall_in_progress' );
+	}
 
 	if ( ! isset( $GLOBALS['yotm_job_storage_readiness'] ) || ! is_array( $GLOBALS['yotm_job_storage_readiness'] ) ) {
 		$GLOBALS['yotm_job_storage_readiness'] = array();
@@ -507,6 +515,10 @@ function yotm_job_release_all_workers() {
  */
 function yotm_job_acquire_worker( $job_id, $statuses, $phases = array() ) {
 	global $wpdb;
+	$fence = yotm_data_lifecycle_require_runtime_fence();
+	if ( is_wp_error( $fence ) ) {
+		return $fence;
+	}
 
 	$job_id    = absint( $job_id );
 	$statuses  = array_values( array_filter( array_map( 'sanitize_key', (array) $statuses ) ) );
@@ -605,6 +617,9 @@ function yotm_job_acquire_worker( $job_id, $statuses, $phases = array() ) {
  */
 function yotm_job_refresh_worker( $worker ) {
 	global $wpdb;
+	if ( is_wp_error( yotm_data_lifecycle_require_runtime_fence() ) ) {
+		return false;
+	}
 
 	$tables              = yotm_job_table_names();
 	$statuses            = (array) ( $worker['statuses'] ?? array() );
@@ -856,6 +871,10 @@ function yotm_job_create( $type, $payload = array(), $args = array() ) {
 	if ( is_wp_error( $ready ) ) {
 		return $ready;
 	}
+	$fence = yotm_data_lifecycle_require_runtime_fence();
+	if ( is_wp_error( $fence ) ) {
+		return $fence;
+	}
 
 	$cleanup = yotm_cleanup_expired_jobs();
 	if ( is_wp_error( $cleanup ) ) {
@@ -1029,6 +1048,9 @@ function yotm_job_prepare_update_data( $fields ) {
  */
 function yotm_job_update_where( $job_id, $fields, $conditions = array() ) {
 	global $wpdb;
+	if ( is_wp_error( yotm_data_lifecycle_require_runtime_fence() ) ) {
+		return false;
+	}
 
 	$data = yotm_job_prepare_update_data( $fields );
 	if ( empty( $data ) ) {
@@ -1199,6 +1221,9 @@ function yotm_job_transition( $job_id, $statuses, $phases, $fields, $conditions 
  */
 function yotm_job_add_item( $job_id, $item_key, $payload, $status = 'queued', $bytes = 0 ) {
 	global $wpdb;
+	if ( is_wp_error( yotm_data_lifecycle_require_runtime_fence() ) ) {
+		return false;
+	}
 
 	$tables   = yotm_job_table_names();
 	$now      = gmdate( 'Y-m-d H:i:s' );
@@ -1234,6 +1259,9 @@ function yotm_job_add_item( $job_id, $item_key, $payload, $status = 'queued', $b
  */
 function yotm_job_merge_item_payload( $job_id, $item_key, $payload ) {
 	global $wpdb;
+	if ( is_wp_error( yotm_data_lifecycle_require_runtime_fence() ) ) {
+		return false;
+	}
 
 	$tables   = yotm_job_table_names();
 	$item_key = preg_match( '/^[a-f0-9]{64}$/', (string) $item_key ) ? (string) $item_key : hash( 'sha256', (string) $item_key );
@@ -1476,6 +1504,10 @@ function yotm_job_get_items( $job_id, $statuses = array( 'queued' ), $limit = 10
  */
 function yotm_job_claim_items( $worker, $limit = 100, $recovery_only = false ) {
 	global $wpdb;
+	$fence = yotm_data_lifecycle_require_runtime_fence();
+	if ( is_wp_error( $fence ) ) {
+		return $fence;
+	}
 
 	if ( ! yotm_job_refresh_worker( $worker ) ) {
 		return new WP_Error( 'yotm_job_worker_stale', __( 'This job worker no longer owns the current batch.', 'thumbnail-manager' ) );
@@ -1568,6 +1600,9 @@ function yotm_job_claim_items( $worker, $limit = 100, $recovery_only = false ) {
  */
 function yotm_job_refresh_item_claim( $item ) {
 	global $wpdb;
+	if ( is_wp_error( yotm_data_lifecycle_require_runtime_fence() ) ) {
+		return false;
+	}
 
 	$tables = yotm_job_table_names();
 	// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name is plugin-owned.
@@ -1616,6 +1651,9 @@ function yotm_job_refresh_item_claim( $item ) {
  */
 function yotm_job_update_claimed_item_payload( $item, $payload ) {
 	global $wpdb;
+	if ( is_wp_error( yotm_data_lifecycle_require_runtime_fence() ) ) {
+		return false;
+	}
 
 	$tables = yotm_job_table_names();
 	// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Plugin-owned table name; values use placeholders.
@@ -1642,6 +1680,9 @@ function yotm_job_update_claimed_item_payload( $item, $payload ) {
  */
 function yotm_job_release_item_claim( $item ) {
 	global $wpdb;
+	if ( is_wp_error( yotm_data_lifecycle_require_runtime_fence() ) ) {
+		return false;
+	}
 
 	$tables = yotm_job_table_names();
 	// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Plugin-owned table name is derived from the trusted WordPress prefix; values use placeholders.
@@ -1670,6 +1711,9 @@ function yotm_job_release_item_claim( $item ) {
  */
 function yotm_job_finish_item( $item, $status, $error = '', $bytes = null ) {
 	global $wpdb;
+	if ( is_wp_error( yotm_data_lifecycle_require_runtime_fence() ) ) {
+		return false;
+	}
 
 	if ( ! in_array( $status, array( 'done', 'skipped', 'failed' ), true ) ) {
 		return false;
@@ -1716,6 +1760,9 @@ function yotm_job_finish_item( $item, $status, $error = '', $bytes = null ) {
  */
 function yotm_job_finish_item_v3( $item, $worker, $status, $error = '', $bytes = null ) {
 	global $wpdb;
+	if ( is_wp_error( yotm_data_lifecycle_require_runtime_fence() ) ) {
+		return false;
+	}
 
 	if ( ! in_array( $status, array( 'done', 'skipped', 'failed' ), true ) ) {
 		return false;
@@ -1894,6 +1941,9 @@ function yotm_job_sync_item_counters( $job_id ) {
  */
 function yotm_job_update_item( $item_id, $status, $error = '', $bytes = null ) {
 	global $wpdb;
+	if ( is_wp_error( yotm_data_lifecycle_require_runtime_fence() ) ) {
+		return false;
+	}
 
 	$data = array(
 		'status'     => sanitize_key( $status ),
@@ -2145,6 +2195,9 @@ function yotm_job_get_error_sample( $job_id, $limit = 20 ) {
  */
 function yotm_job_delete( $job_id ) {
 	global $wpdb;
+	if ( is_wp_error( yotm_data_lifecycle_require_runtime_fence() ) ) {
+		return;
+	}
 
 	$tables = yotm_job_table_names();
 	$wpdb->delete( $tables['items'], array( 'job_id' => absint( $job_id ) ) );
@@ -2162,6 +2215,10 @@ function yotm_cleanup_expired_jobs() {
 	$ready = yotm_job_storage_ready();
 	if ( is_wp_error( $ready ) ) {
 		return $ready;
+	}
+	$fence = yotm_data_lifecycle_require_runtime_fence();
+	if ( is_wp_error( $fence ) ) {
+		return $fence;
 	}
 
 	$tables              = yotm_job_table_names();

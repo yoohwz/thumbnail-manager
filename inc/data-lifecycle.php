@@ -89,6 +89,306 @@ function yotm_data_lifecycle_within_deadline( $started, $seconds ) {
 }
 
 /**
+ * Return the exact validated options table for the current site.
+ *
+ * @return string|WP_Error
+ */
+function yotm_data_lifecycle_options_table() {
+	global $wpdb;
+
+	$table = (string) $wpdb->options;
+	if ( '' === $table || ! preg_match( '/^[A-Za-z0-9_]+$/', $table ) ) {
+		return new WP_Error( 'yotm_uninstall_options_table', 'Could not validate the site options table.' );
+	}
+
+	return $table;
+}
+
+/**
+ * Read one exact persisted option without filters or object-cache state.
+ *
+ * Duplicate rows and database errors are ambiguous and therefore fail closed.
+ *
+ * @param string $name Exact option name.
+ * @return array{exists:bool,value:mixed}|WP_Error
+ */
+function yotm_data_lifecycle_read_option( $name ) {
+	global $wpdb;
+
+	$table = yotm_data_lifecycle_options_table();
+	if ( is_wp_error( $table ) || ! is_string( $name ) || '' === $name ) {
+		return is_wp_error( $table ) ? $table : new WP_Error( 'yotm_uninstall_option_name', 'Could not validate an option name.' );
+	}
+
+	$suppressing      = $wpdb->suppress_errors();
+	$wpdb->last_error = '';
+	// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Exact validated options table; value is prepared.
+	$sql = $wpdb->prepare( "SELECT option_value FROM `{$table}` WHERE option_name = %s LIMIT 2", $name );
+	// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+	// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Persisted lifecycle authority must bypass filters and caches.
+	$rows  = $wpdb->get_col( $sql );
+	$error = (string) $wpdb->last_error;
+	$wpdb->suppress_errors( $suppressing );
+	if ( '' !== $error || ! is_array( $rows ) ) {
+		return new WP_Error( 'yotm_uninstall_database_read', 'Could not read exact persisted lifecycle options.' );
+	}
+	if ( 1 < count( $rows ) ) {
+		return new WP_Error( 'yotm_uninstall_option_duplicate', 'A lifecycle option has ambiguous duplicate rows.' );
+	}
+	if ( empty( $rows ) ) {
+		return array(
+			'exists' => false,
+			'value'  => null,
+		);
+	}
+
+	return array(
+		'exists' => true,
+		'value'  => maybe_unserialize( $rows[0] ),
+	);
+}
+
+/**
+ * Clear WordPress caches after an authoritative direct option mutation.
+ *
+ * @param string $name Exact option name.
+ * @return void
+ */
+function yotm_data_lifecycle_clean_option_cache( $name ) {
+	wp_cache_delete( $name, 'options' );
+	wp_cache_delete( 'alloptions', 'options' );
+	wp_cache_delete( 'notoptions', 'options' );
+}
+
+/**
+ * Persist one exact option and verify the durable value without filters.
+ *
+ * @param string $name Exact option name.
+ * @param mixed  $value Exact value.
+ * @return true|WP_Error
+ */
+function yotm_data_lifecycle_write_option( $name, $value ) {
+	global $wpdb;
+
+	$table  = yotm_data_lifecycle_options_table();
+	$before = yotm_data_lifecycle_read_option( $name );
+	if ( is_wp_error( $table ) || is_wp_error( $before ) ) {
+		return is_wp_error( $table ) ? $table : $before;
+	}
+
+	$serialized       = maybe_serialize( $value );
+	$suppressing      = $wpdb->suppress_errors();
+	$wpdb->last_error = '';
+	if ( $before['exists'] ) {
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Exact lifecycle row is verified below.
+		$result = $wpdb->update( $table, array( 'option_value' => $serialized ), array( 'option_name' => $name ), array( '%s' ), array( '%s' ) );
+	} else {
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Exact lifecycle row is verified below.
+		$result = $wpdb->insert(
+			$table,
+			array(
+				'option_name'  => $name,
+				'option_value' => $serialized,
+				'autoload'     => 'no',
+			),
+			array( '%s', '%s', '%s' )
+		);
+	}
+	$error = (string) $wpdb->last_error;
+	$wpdb->suppress_errors( $suppressing );
+	if ( false === $result || '' !== $error ) {
+		return new WP_Error( 'yotm_uninstall_option_write', 'Could not persist an exact lifecycle option.' );
+	}
+
+	yotm_data_lifecycle_clean_option_cache( $name );
+	$after = yotm_data_lifecycle_read_option( $name );
+	if ( is_wp_error( $after ) || ! $after['exists'] || $after['value'] !== $value ) {
+		return new WP_Error( 'yotm_uninstall_option_write', 'Could not verify an exact lifecycle option.' );
+	}
+
+	return true;
+}
+
+/**
+ * Delete one exact option and verify durable absence without filters.
+ *
+ * @param string $name Exact option name.
+ * @return true|WP_Error
+ */
+function yotm_data_lifecycle_delete_option( $name ) {
+	global $wpdb;
+
+	$table = yotm_data_lifecycle_options_table();
+	if ( is_wp_error( $table ) ) {
+		return $table;
+	}
+
+	$suppressing      = $wpdb->suppress_errors();
+	$wpdb->last_error = '';
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Exact allowlisted lifecycle row is verified below.
+	$result = $wpdb->delete( $table, array( 'option_name' => $name ), array( '%s' ) );
+	$error  = (string) $wpdb->last_error;
+	$wpdb->suppress_errors( $suppressing );
+	if ( false === $result || '' !== $error ) {
+		return new WP_Error( 'yotm_uninstall_option_delete', 'Could not delete an exact lifecycle option.' );
+	}
+
+	yotm_data_lifecycle_clean_option_cache( $name );
+	$after = yotm_data_lifecycle_read_option( $name );
+	if ( is_wp_error( $after ) || $after['exists'] ) {
+		return new WP_Error( 'yotm_uninstall_option_delete', 'Could not verify exact lifecycle option deletion.' );
+	}
+
+	return true;
+}
+
+/**
+ * Return one database-stable lifecycle lock name.
+ *
+ * @param string $kind Lock kind.
+ * @param int    $blog_id Optional blog ID.
+ * @return string
+ */
+function yotm_data_lifecycle_lock_name( $kind, $blog_id = 0 ) {
+	global $wpdb;
+
+	$database = defined( 'DB_NAME' ) ? DB_NAME : 'WordPress';
+	$scope    = $database . '|' . (string) $wpdb->base_prefix . '|' . sanitize_key( $kind );
+	if ( $blog_id ) {
+		$scope .= '|' . absint( $blog_id ) . '|' . (string) $wpdb->get_blog_prefix( absint( $blog_id ) );
+	}
+
+	return 'yotm_lifecycle_' . md5( $scope );
+}
+
+/**
+ * Acquire one exact MySQL lifecycle lock.
+ *
+ * @param string $name Lock name.
+ * @param int    $wait Maximum wait seconds.
+ * @return true|false|WP_Error
+ */
+function yotm_data_lifecycle_acquire_named_lock( $name, $wait = 0 ) {
+	global $wpdb;
+
+	$wpdb->last_error = '';
+	$sql              = $wpdb->prepare( 'SELECT GET_LOCK(%s, %d)', sanitize_text_field( $name ), max( 0, absint( $wait ) ) );
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared -- Advisory lock state is connection-local and uncached.
+	$result = $wpdb->get_var( $sql );
+	if ( '' !== (string) $wpdb->last_error || null === $result ) {
+		return new WP_Error( 'yotm_uninstall_fence_database', 'Could not acquire the lifecycle database fence.' );
+	}
+
+	return '1' === (string) $result;
+}
+
+/**
+ * Release one exact MySQL lifecycle lock.
+ *
+ * @param string $name Lock name.
+ * @return bool
+ */
+function yotm_data_lifecycle_release_named_lock( $name ) {
+	global $wpdb;
+
+	$sql = $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', sanitize_text_field( $name ) );
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared -- Advisory lock state is connection-local and uncached.
+	return '1' === (string) $wpdb->get_var( $sql );
+}
+
+/**
+ * Hold the current site's lifecycle fence for the rest of this request.
+ *
+ * Every runtime mutation boundary uses this before it can create or advance
+ * persistent work. An uninstall intent, read error, or contended fence blocks
+ * the mutation without touching job state.
+ *
+ * @return true|WP_Error
+ */
+function yotm_data_lifecycle_require_runtime_fence() {
+	$blog_id = absint( get_current_blog_id() );
+	$name    = yotm_data_lifecycle_lock_name( 'site', $blog_id );
+	if ( ! empty( $GLOBALS['yotm_data_lifecycle_request_fences'][ $name ] ) ) {
+		return true;
+	}
+
+	$acquired = yotm_data_lifecycle_acquire_named_lock( $name, 0 );
+	if ( is_wp_error( $acquired ) ) {
+		return $acquired;
+	}
+	if ( ! $acquired ) {
+		return new WP_Error( 'yotm_uninstall_fence_busy', 'Persistent work is blocked by the uninstall lifecycle fence.' );
+	}
+
+	$intent = yotm_data_lifecycle_read_option( YOTM_UNINSTALL_INTENT_OPTION );
+	if ( is_wp_error( $intent ) || $intent['exists'] ) {
+		yotm_data_lifecycle_release_named_lock( $name );
+
+		return is_wp_error( $intent ) ? $intent : new WP_Error( 'yotm_uninstall_in_progress', 'Persistent work is blocked while uninstall cleanup is pending.' );
+	}
+
+	if ( ! isset( $GLOBALS['yotm_data_lifecycle_request_fences'] ) || ! is_array( $GLOBALS['yotm_data_lifecycle_request_fences'] ) ) {
+		$GLOBALS['yotm_data_lifecycle_request_fences'] = array();
+	}
+	$GLOBALS['yotm_data_lifecycle_request_fences'][ $name ] = true;
+	if ( empty( $GLOBALS['yotm_data_lifecycle_fence_shutdown'] ) ) {
+		$GLOBALS['yotm_data_lifecycle_fence_shutdown'] = true;
+		register_shutdown_function( 'yotm_data_lifecycle_release_request_fences' );
+	}
+
+	return true;
+}
+
+/**
+ * Release lifecycle locks held by normal runtime work in this request.
+ *
+ * @return void
+ */
+function yotm_data_lifecycle_release_request_fences() {
+	if ( empty( $GLOBALS['yotm_data_lifecycle_request_fences'] ) || ! is_array( $GLOBALS['yotm_data_lifecycle_request_fences'] ) ) {
+		return;
+	}
+	foreach ( array_reverse( array_keys( $GLOBALS['yotm_data_lifecycle_request_fences'] ) ) as $name ) {
+		yotm_data_lifecycle_release_named_lock( $name );
+	}
+	$GLOBALS['yotm_data_lifecycle_request_fences'] = array();
+}
+
+/**
+ * Hold the network topology fence before a newly inserted site is initialized.
+ *
+ * The blogs row is inserted by Core immediately before this hook. An uninstall
+ * whose final topology proof has not yet run will therefore see the new row;
+ * one already past that proof keeps initialization behind this fence until its
+ * cleanup completes.
+ *
+ * @return void
+ */
+function yotm_data_lifecycle_fence_new_site_initialization() {
+	if ( ! is_multisite() ) {
+		return;
+	}
+	$name = yotm_data_lifecycle_lock_name( 'topology' );
+	if ( ! empty( $GLOBALS['yotm_data_lifecycle_request_fences'][ $name ] ) ) {
+		return;
+	}
+	$acquired = yotm_data_lifecycle_acquire_named_lock( $name, 10 );
+	if ( true !== $acquired ) {
+		return;
+	}
+	if ( ! isset( $GLOBALS['yotm_data_lifecycle_request_fences'] ) || ! is_array( $GLOBALS['yotm_data_lifecycle_request_fences'] ) ) {
+		$GLOBALS['yotm_data_lifecycle_request_fences'] = array();
+	}
+	$GLOBALS['yotm_data_lifecycle_request_fences'][ $name ] = true;
+	if ( empty( $GLOBALS['yotm_data_lifecycle_fence_shutdown'] ) ) {
+		$GLOBALS['yotm_data_lifecycle_fence_shutdown'] = true;
+		register_shutdown_function( 'yotm_data_lifecycle_release_request_fences' );
+	}
+}
+
+add_action( 'wp_insert_site', 'yotm_data_lifecycle_fence_new_site_initialization', 0 );
+
+/**
  * Read the physical presence and columns of one exact table.
  *
  * @param string $table Validated table name.
@@ -459,15 +759,15 @@ function yotm_data_lifecycle_site_recovery_safe( $tables, $limits, $started, &$s
 			if ( ! $id || $id <= $last_id ) {
 				return new WP_Error( 'yotm_uninstall_item_scan', 'Recovery journal ordering was inconsistent.' );
 			}
-			$last_id = $id;
-			$raw     = is_string( $row['payload'] ?? null ) ? $row['payload'] : '';
-			$payload = json_decode( $raw, true );
-			if ( JSON_ERROR_NONE !== json_last_error() || ! is_array( $payload ) ) {
-				return new WP_Error( 'yotm_uninstall_item_payload', 'An item payload could not be classified safely.' );
+			$last_id  = $id;
+			$raw      = is_string( $row['payload'] ?? null ) ? $row['payload'] : '';
+			$analysis = yotm_data_lifecycle_decode_item_payload( $raw );
+			if ( is_wp_error( $analysis ) ) {
+				return $analysis;
 			}
-
-			$prune_token = array_key_exists( 'prune_operation_journal_v1', $payload ) || false !== strpos( $raw, '"prune_operation_journal_v1"' );
-			$force_token = array_key_exists( 'regeneration_journal', $payload ) || false !== strpos( $raw, '"regeneration_journal"' );
+			$payload     = $analysis['payload'];
+			$prune_token = ! empty( $analysis['keys']['prune_operation_journal_v1'] );
+			$force_token = ! empty( $analysis['keys']['regeneration_journal'] );
 			if ( $prune_token && $force_token ) {
 				return new WP_Error( 'yotm_uninstall_journal_conflict', 'An item contains contradictory recovery journals.' );
 			}
@@ -512,18 +812,23 @@ function yotm_data_lifecycle_preflight_site( $blog_id, $scope_hash, $limits, $st
 		$inspected[ $key ] = $state;
 	}
 
-	$present      = array_keys( array_filter( wp_list_pluck( $inspected, 'present' ) ) );
-	$version      = get_option( 'yotm_job_db_version', null );
-	$intent       = get_option( YOTM_UNINSTALL_INTENT_OPTION, null );
-	$valid_intent = yotm_data_lifecycle_valid_intent( $intent, $blog_id, $scope_hash, array_values( $tables ) );
-	if ( null !== $intent && ! $valid_intent ) {
+	$present       = array_keys( array_filter( wp_list_pluck( $inspected, 'present' ) ) );
+	$version_state = yotm_data_lifecycle_read_option( 'yotm_job_db_version' );
+	$intent_state  = yotm_data_lifecycle_read_option( YOTM_UNINSTALL_INTENT_OPTION );
+	if ( is_wp_error( $version_state ) || is_wp_error( $intent_state ) ) {
+		return is_wp_error( $version_state ) ? $version_state : $intent_state;
+	}
+	$version      = $version_state['exists'] ? $version_state['value'] : null;
+	$intent       = $intent_state['exists'] ? $intent_state['value'] : null;
+	$valid_intent = $intent_state['exists'] && yotm_data_lifecycle_valid_intent( $intent, $blog_id, $scope_hash, array_values( $tables ) );
+	if ( $intent_state['exists'] && ! $valid_intent ) {
 		return new WP_Error( 'yotm_uninstall_intent_invalid', 'Cleanup intent does not match the exact uninstall scope.' );
 	}
 
 	$all_present = 3 === count( $present );
 	$all_absent  = 0 === count( $present );
 	$current     = YOTM_DATA_LIFECYCLE_SCHEMA_VERSION === $version;
-	$clean       = $all_absent && null === $version;
+	$clean       = $all_absent && ! $version_state['exists'];
 	$interrupted = $valid_intent;
 
 	if ( ! ( ( $all_present && $current ) || $clean || $interrupted ) ) {
@@ -616,12 +921,14 @@ function yotm_data_lifecycle_prepare_intents( $plans ) {
 		$result = yotm_data_lifecycle_in_blog(
 			$plan['blog_id'],
 			static function () use ( $plan ) {
-				$before = get_option( YOTM_UNINSTALL_INTENT_OPTION, null );
-				update_option( YOTM_UNINSTALL_INTENT_OPTION, $plan['intent'], false );
-				$after = get_option( YOTM_UNINSTALL_INTENT_OPTION, null );
+				$before = yotm_data_lifecycle_read_option( YOTM_UNINSTALL_INTENT_OPTION );
+				if ( is_wp_error( $before ) ) {
+					return $before;
+				}
+				$written = yotm_data_lifecycle_write_option( YOTM_UNINSTALL_INTENT_OPTION, $plan['intent'] );
 
 				return array(
-					'ok'     => $after === $plan['intent'],
+					'ok'     => ! is_wp_error( $written ),
 					'before' => $before,
 				);
 			}
@@ -633,9 +940,11 @@ function yotm_data_lifecycle_prepare_intents( $plans ) {
 					'value'   => $result['before'],
 				);
 			}
-			yotm_data_lifecycle_restore_intents( $previous );
+			$restored = yotm_data_lifecycle_restore_intents( $previous );
 
-			return new WP_Error( 'yotm_uninstall_intent_write', 'Could not persist the complete uninstall intent scope.' );
+			return $restored
+				? new WP_Error( 'yotm_uninstall_intent_write', 'Could not persist the complete uninstall intent scope.' )
+				: new WP_Error( 'yotm_uninstall_intent_rollback', 'Could not verify cleanup-intent rollback after a coordination failure.' );
 		}
 		$previous[] = array(
 			'blog_id' => $plan['blog_id'],
@@ -650,21 +959,27 @@ function yotm_data_lifecycle_prepare_intents( $plans ) {
  * Restore prior intent state after a pre-delete coordination failure.
  *
  * @param array[] $previous Previous intent values.
- * @return void
+ * @return bool
  */
 function yotm_data_lifecycle_restore_intents( $previous ) {
+	$restored = true;
 	foreach ( array_reverse( $previous ) as $entry ) {
-		yotm_data_lifecycle_in_blog(
+		$result = yotm_data_lifecycle_in_blog(
 			$entry['blog_id'],
 			static function () use ( $entry ) {
-				if ( null === $entry['value'] ) {
-					delete_option( YOTM_UNINSTALL_INTENT_OPTION );
+				if ( empty( $entry['value']['exists'] ) ) {
+					return yotm_data_lifecycle_delete_option( YOTM_UNINSTALL_INTENT_OPTION );
 				} else {
-					update_option( YOTM_UNINSTALL_INTENT_OPTION, $entry['value'], false );
+					return yotm_data_lifecycle_write_option( YOTM_UNINSTALL_INTENT_OPTION, $entry['value']['value'] );
 				}
 			}
 		);
+		if ( is_wp_error( $result ) ) {
+			$restored = false;
+		}
 	}
+
+	return $restored;
 }
 
 /**
@@ -680,6 +995,35 @@ function yotm_data_lifecycle_table_absent( $table ) {
 }
 
 /**
+ * Inspect the raw cron option for one exact hook.
+ *
+ * @param string $hook Exact cron hook.
+ * @return bool|WP_Error
+ */
+function yotm_data_lifecycle_cron_has_hook( $hook ) {
+	$state = yotm_data_lifecycle_read_option( 'cron' );
+	if ( is_wp_error( $state ) || ! $state['exists'] ) {
+		return is_wp_error( $state ) ? $state : false;
+	}
+	if ( ! is_array( $state['value'] ) ) {
+		return new WP_Error( 'yotm_uninstall_cron_read', 'Could not classify the persisted cron schedule.' );
+	}
+	foreach ( $state['value'] as $timestamp => $events ) {
+		if ( 'version' === (string) $timestamp ) {
+			continue;
+		}
+		if ( ! is_array( $events ) ) {
+			return new WP_Error( 'yotm_uninstall_cron_read', 'Could not classify the persisted cron schedule.' );
+		}
+		if ( array_key_exists( $hook, $events ) ) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+/**
  * Clean one preflight-approved site exactly.
  *
  * @param array $plan Site cleanup plan.
@@ -688,7 +1032,8 @@ function yotm_data_lifecycle_table_absent( $table ) {
 function yotm_data_lifecycle_cleanup_site( $plan ) {
 	global $wpdb;
 
-	if ( get_option( YOTM_UNINSTALL_INTENT_OPTION, null ) !== $plan['intent'] ) {
+	$intent = yotm_data_lifecycle_read_option( YOTM_UNINSTALL_INTENT_OPTION );
+	if ( is_wp_error( $intent ) || ! $intent['exists'] || $intent['value'] !== $plan['intent'] ) {
 		return new WP_Error( 'yotm_uninstall_intent_changed', 'Cleanup intent changed before mutation.' );
 	}
 
@@ -696,8 +1041,17 @@ function yotm_data_lifecycle_cleanup_site( $plan ) {
 		return new WP_Error( 'yotm_uninstall_cron_cleanup', 'Could not clear the plugin cleanup schedule.' );
 	}
 	delete_transient( 'yotm_job_db_migration_failure' );
+	foreach ( array( '_transient_yotm_job_db_migration_failure', '_transient_timeout_yotm_job_db_migration_failure' ) as $transient_option ) {
+		$deleted = yotm_data_lifecycle_delete_option( $transient_option );
+		if ( is_wp_error( $deleted ) ) {
+			return new WP_Error( 'yotm_uninstall_transient_cleanup', 'Could not clear the plugin migration transient.' );
+		}
+	}
 	foreach ( array( 'yotm_disabled_sizes', 'yotm_job_db_version', 'yotm_media_source_index_dirty', 'yotm_media_reference_index_state' ) as $option ) {
-		delete_option( $option );
+		$deleted = yotm_data_lifecycle_delete_option( $option );
+		if ( is_wp_error( $deleted ) ) {
+			return new WP_Error( 'yotm_uninstall_option_cleanup', 'Could not clear an exact plugin option.' );
+		}
 	}
 
 	foreach ( array( 'sources', 'items', 'jobs' ) as $key ) {
@@ -717,23 +1071,102 @@ function yotm_data_lifecycle_cleanup_site( $plan ) {
 	}
 
 	foreach ( array( 'yotm_disabled_sizes', 'yotm_job_db_version', 'yotm_media_source_index_dirty', 'yotm_media_reference_index_state' ) as $option ) {
-		if ( null !== get_option( $option, null ) ) {
+		$state = yotm_data_lifecycle_read_option( $option );
+		if ( is_wp_error( $state ) || $state['exists'] ) {
 			return new WP_Error( 'yotm_uninstall_option_cleanup', 'Could not verify exact plugin option cleanup.' );
 		}
 	}
-	if ( false !== wp_next_scheduled( 'yotm_cleanup_jobs' ) ) {
+	$cron = yotm_data_lifecycle_cron_has_hook( 'yotm_cleanup_jobs' );
+	if ( is_wp_error( $cron ) || $cron ) {
 		return new WP_Error( 'yotm_uninstall_cron_cleanup', 'Could not verify plugin cleanup schedule removal.' );
 	}
-	if ( false !== get_transient( 'yotm_job_db_migration_failure' ) ) {
-		return new WP_Error( 'yotm_uninstall_transient_cleanup', 'Could not verify plugin transient cleanup.' );
+	foreach ( array( '_transient_yotm_job_db_migration_failure', '_transient_timeout_yotm_job_db_migration_failure' ) as $transient_option ) {
+		$state = yotm_data_lifecycle_read_option( $transient_option );
+		if ( is_wp_error( $state ) || $state['exists'] ) {
+			return new WP_Error( 'yotm_uninstall_transient_cleanup', 'Could not verify plugin transient cleanup.' );
+		}
+	}
+	if ( wp_using_ext_object_cache() ) {
+		$found = false;
+		wp_cache_get( 'yotm_job_db_migration_failure', 'transient', false, $found );
+		if ( $found ) {
+			return new WP_Error( 'yotm_uninstall_transient_cleanup', 'Could not verify plugin transient cache cleanup.' );
+		}
 	}
 
-	delete_option( YOTM_UNINSTALL_INTENT_OPTION );
-	if ( null !== get_option( YOTM_UNINSTALL_INTENT_OPTION, null ) ) {
+	$deleted_intent = yotm_data_lifecycle_delete_option( YOTM_UNINSTALL_INTENT_OPTION );
+	if ( is_wp_error( $deleted_intent ) ) {
 		return new WP_Error( 'yotm_uninstall_intent_cleanup', 'Could not clear the completed cleanup intent.' );
 	}
 
 	return true;
+}
+
+/**
+ * Acquire the topology and every exact site fence for uninstall.
+ *
+ * Locks already held by normal work in this same request are borrowed rather
+ * than recursively acquired. Production uninstall loads this module alone and
+ * therefore owns every returned lock.
+ *
+ * @param int[] $site_ids Exact ordered site scope.
+ * @return array[]|WP_Error
+ */
+function yotm_data_lifecycle_acquire_scope_fences( $site_ids ) {
+	$names = array();
+	if ( is_multisite() ) {
+		$names[] = yotm_data_lifecycle_lock_name( 'topology' );
+	}
+	foreach ( $site_ids as $blog_id ) {
+		$names[] = yotm_data_lifecycle_lock_name( 'site', $blog_id );
+	}
+
+	$locks = array();
+	foreach ( $names as $name ) {
+		$borrowed = ! empty( $GLOBALS['yotm_data_lifecycle_request_fences'][ $name ] );
+		if ( ! $borrowed ) {
+			$acquired = yotm_data_lifecycle_acquire_named_lock( $name, 0 );
+			if ( is_wp_error( $acquired ) || ! $acquired ) {
+				yotm_data_lifecycle_release_scope_fences( $locks );
+
+				return is_wp_error( $acquired ) ? $acquired : new WP_Error( 'yotm_uninstall_fence_busy', 'An in-flight request requires retained plugin data.' );
+			}
+		}
+		$locks[] = array(
+			'name'  => $name,
+			'owned' => ! $borrowed,
+		);
+	}
+
+	return $locks;
+}
+
+/**
+ * Release uninstall-owned scope fences.
+ *
+ * @param array[] $locks Lock handles.
+ * @return void
+ */
+function yotm_data_lifecycle_release_scope_fences( $locks ) {
+	foreach ( array_reverse( $locks ) as $lock ) {
+		if ( ! empty( $lock['owned'] ) ) {
+			yotm_data_lifecycle_release_named_lock( $lock['name'] );
+		}
+	}
+}
+
+/**
+ * Restore pre-intent state and return one retained result.
+ *
+ * @param array[] $previous Previous intent states.
+ * @param string  $reason Original failure reason.
+ * @return array{status:string,reason:string}
+ */
+function yotm_data_lifecycle_rollback_result( $previous, $reason ) {
+	return array(
+		'status' => 'retained',
+		'reason' => yotm_data_lifecycle_restore_intents( $previous ) ? $reason : 'yotm_uninstall_intent_rollback',
+	);
 }
 
 /**
@@ -768,54 +1201,70 @@ function yotm_data_lifecycle_uninstall( $options = array() ) {
 		call_user_func( $options['before_commit_recheck'], $plans );
 	}
 
-	$verified_sites = yotm_data_lifecycle_uninstall_site_ids( $limits, $started );
-	if ( is_wp_error( $verified_sites ) || $verified_sites !== $sites || ! hash_equals( $scope_hash, yotm_data_lifecycle_scope_hash( $verified_sites ) ) ) {
+	$fences = yotm_data_lifecycle_acquire_scope_fences( $sites );
+	if ( is_wp_error( $fences ) ) {
 		return array(
 			'status' => 'retained',
-			'reason' => 'yotm_uninstall_scope_changed',
-		);
-	}
-	$verified = yotm_data_lifecycle_preflight_scope( $verified_sites, $scope_hash, $limits, $started );
-	if ( is_wp_error( $verified ) ) {
-		return array(
-			'status' => 'retained',
-			'reason' => $verified->get_error_code(),
-		);
-	}
-	if ( ! yotm_data_lifecycle_within_deadline( $started, $limits['max_seconds'] ) ) {
-		return array(
-			'status' => 'retained',
-			'reason' => 'yotm_uninstall_time_limit',
+			'reason' => $fences->get_error_code(),
 		);
 	}
 
-	$intents = yotm_data_lifecycle_prepare_intents( $verified );
-	if ( is_wp_error( $intents ) ) {
-		return array(
-			'status' => 'retained',
-			'reason' => $intents->get_error_code(),
-		);
-	}
-
-	foreach ( $verified as $plan ) {
-		$result = yotm_data_lifecycle_in_blog(
-			$plan['blog_id'],
-			static function () use ( $plan ) {
-				return yotm_data_lifecycle_cleanup_site( $plan );
-			}
-		);
-		if ( is_wp_error( $result ) ) {
+	try {
+		$verified_sites = yotm_data_lifecycle_uninstall_site_ids( $limits, $started );
+		if ( is_wp_error( $verified_sites ) || $verified_sites !== $sites || ! hash_equals( $scope_hash, yotm_data_lifecycle_scope_hash( $verified_sites ) ) ) {
 			return array(
-				'status' => 'partial',
-				'reason' => $result->get_error_code(),
+				'status' => 'retained',
+				'reason' => 'yotm_uninstall_scope_changed',
 			);
 		}
-	}
 
-	return array(
-		'status' => 'purged',
-		'reason' => '',
-	);
+		$previous = yotm_data_lifecycle_prepare_intents( $plans );
+		if ( is_wp_error( $previous ) ) {
+			return array(
+				'status' => 'retained',
+				'reason' => $previous->get_error_code(),
+			);
+		}
+
+		if ( is_callable( $options['after_intents'] ?? null ) ) {
+			call_user_func( $options['after_intents'], $plans );
+		}
+
+		$final_sites = yotm_data_lifecycle_uninstall_site_ids( $limits, $started );
+		if ( is_wp_error( $final_sites ) || $final_sites !== $sites || ! hash_equals( $scope_hash, yotm_data_lifecycle_scope_hash( $final_sites ) ) ) {
+			return yotm_data_lifecycle_rollback_result( $previous, 'yotm_uninstall_scope_changed' );
+		}
+
+		$verified = yotm_data_lifecycle_preflight_scope( $final_sites, $scope_hash, $limits, $started );
+		if ( is_wp_error( $verified ) ) {
+			return yotm_data_lifecycle_rollback_result( $previous, $verified->get_error_code() );
+		}
+		if ( ! yotm_data_lifecycle_within_deadline( $started, $limits['max_seconds'] ) ) {
+			return yotm_data_lifecycle_rollback_result( $previous, 'yotm_uninstall_time_limit' );
+		}
+
+		foreach ( $verified as $plan ) {
+			$result = yotm_data_lifecycle_in_blog(
+				$plan['blog_id'],
+				static function () use ( $plan ) {
+					return yotm_data_lifecycle_cleanup_site( $plan );
+				}
+			);
+			if ( is_wp_error( $result ) ) {
+				return array(
+					'status' => 'partial',
+					'reason' => $result->get_error_code(),
+				);
+			}
+		}
+
+		return array(
+			'status' => 'purged',
+			'reason' => '',
+		);
+	} finally {
+		yotm_data_lifecycle_release_scope_fences( $fences );
+	}//end try
 }
 
 /**
@@ -885,4 +1334,203 @@ function yotm_deactivate_job_cleanup( $network_deactivating = false ) {
 	} while ( 25 === $page_count && $last_id < (int) $high_water );
 
 	return true;
+}
+
+/**
+ * Skip JSON whitespace from one parser cursor.
+ *
+ * @param string $raw JSON document.
+ * @param int    $cursor Parser cursor.
+ * @return void
+ */
+function yotm_data_lifecycle_json_skip_space( $raw, &$cursor ) {
+	$length = strlen( $raw );
+	while ( $cursor < $length && false !== strpos( " \t\r\n", $raw[ $cursor ] ) ) {
+		++$cursor;
+	}
+}
+
+/**
+ * Parse and decode one JSON string token.
+ *
+ * @param string $raw JSON document.
+ * @param int    $cursor Parser cursor.
+ * @return string|WP_Error
+ */
+function yotm_data_lifecycle_json_string( $raw, &$cursor ) {
+	$length = strlen( $raw );
+	if ( $cursor >= $length || '"' !== $raw[ $cursor ] ) {
+		return new WP_Error( 'yotm_uninstall_item_payload', 'An item payload contains invalid JSON.' );
+	}
+	$start = $cursor++;
+	while ( $cursor < $length ) {
+		$char = $raw[ $cursor++ ];
+		if ( '"' === $char ) {
+			$token   = substr( $raw, $start, $cursor - $start );
+			$decoded = json_decode( $token );
+
+			return JSON_ERROR_NONE === json_last_error() && is_string( $decoded )
+				? $decoded
+				: new WP_Error( 'yotm_uninstall_item_payload', 'An item payload contains an invalid JSON string.' );
+		}
+		if ( '\\' === $char ) {
+			if ( $cursor >= $length ) {
+				break;
+			}
+			$escape = $raw[ $cursor++ ];
+			if ( 'u' === $escape ) {
+				if ( 4 > $length - $cursor || ! ctype_xdigit( substr( $raw, $cursor, 4 ) ) ) {
+					break;
+				}
+				$cursor += 4;
+			} elseif ( false === strpos( '"\\/bfnrt', $escape ) ) {
+				break;
+			}
+		} elseif ( ord( $char ) < 0x20 ) {
+			break;
+		}
+	}//end while
+
+	return new WP_Error( 'yotm_uninstall_item_payload', 'An item payload contains an unterminated JSON string.' );
+}
+
+/**
+ * Parse one strict JSON value and reject duplicate object names.
+ *
+ * Decoded names are compared so literal and Unicode-escaped equivalents are
+ * the same key. Every object level is checked independently.
+ *
+ * @param string $raw JSON document.
+ * @param int    $cursor Parser cursor.
+ * @param int    $depth Current nesting depth.
+ * @param array  $keys All decoded object-name counts.
+ * @return true|WP_Error
+ */
+function yotm_data_lifecycle_json_value( $raw, &$cursor, $depth, &$keys ) {
+	if ( 64 < $depth ) {
+		return new WP_Error( 'yotm_uninstall_item_payload', 'An item payload exceeds the safe JSON nesting limit.' );
+	}
+	yotm_data_lifecycle_json_skip_space( $raw, $cursor );
+	$length = strlen( $raw );
+	if ( $cursor >= $length ) {
+		return new WP_Error( 'yotm_uninstall_item_payload', 'An item payload contains incomplete JSON.' );
+	}
+
+	$char = $raw[ $cursor ];
+	if ( '"' === $char ) {
+		$value = yotm_data_lifecycle_json_string( $raw, $cursor );
+
+		return is_wp_error( $value ) ? $value : true;
+	}
+	if ( '{' === $char ) {
+		++$cursor;
+		$object_keys = array();
+		yotm_data_lifecycle_json_skip_space( $raw, $cursor );
+		if ( $cursor < $length && '}' === $raw[ $cursor ] ) {
+			++$cursor;
+
+			return true;
+		}
+		while ( $cursor < $length ) {
+			yotm_data_lifecycle_json_skip_space( $raw, $cursor );
+			$key = yotm_data_lifecycle_json_string( $raw, $cursor );
+			if ( is_wp_error( $key ) ) {
+				return $key;
+			}
+			if ( array_key_exists( $key, $object_keys ) ) {
+				return new WP_Error( 'yotm_uninstall_json_duplicate_key', 'An item payload contains an ambiguous duplicate JSON object name.' );
+			}
+			$object_keys[ $key ] = true;
+			$keys[ $key ]        = isset( $keys[ $key ] ) ? $keys[ $key ] + 1 : 1;
+			yotm_data_lifecycle_json_skip_space( $raw, $cursor );
+			if ( $cursor >= $length || ':' !== $raw[ $cursor++ ] ) {
+				return new WP_Error( 'yotm_uninstall_item_payload', 'An item payload contains invalid JSON object syntax.' );
+			}
+			$value = yotm_data_lifecycle_json_value( $raw, $cursor, $depth + 1, $keys );
+			if ( is_wp_error( $value ) ) {
+				return $value;
+			}
+			yotm_data_lifecycle_json_skip_space( $raw, $cursor );
+			if ( $cursor < $length && '}' === $raw[ $cursor ] ) {
+				++$cursor;
+
+				return true;
+			}
+			if ( $cursor >= $length || ',' !== $raw[ $cursor++ ] ) {
+				return new WP_Error( 'yotm_uninstall_item_payload', 'An item payload contains invalid JSON object separators.' );
+			}
+		}//end while
+
+		return new WP_Error( 'yotm_uninstall_item_payload', 'An item payload contains an unterminated JSON object.' );
+	}//end if
+	if ( '[' === $char ) {
+		++$cursor;
+		yotm_data_lifecycle_json_skip_space( $raw, $cursor );
+		if ( $cursor < $length && ']' === $raw[ $cursor ] ) {
+			++$cursor;
+
+			return true;
+		}
+		while ( $cursor < $length ) {
+			$value = yotm_data_lifecycle_json_value( $raw, $cursor, $depth + 1, $keys );
+			if ( is_wp_error( $value ) ) {
+				return $value;
+			}
+			yotm_data_lifecycle_json_skip_space( $raw, $cursor );
+			if ( $cursor < $length && ']' === $raw[ $cursor ] ) {
+				++$cursor;
+
+				return true;
+			}
+			if ( $cursor >= $length || ',' !== $raw[ $cursor++ ] ) {
+				return new WP_Error( 'yotm_uninstall_item_payload', 'An item payload contains invalid JSON array separators.' );
+			}
+		}
+
+		return new WP_Error( 'yotm_uninstall_item_payload', 'An item payload contains an unterminated JSON array.' );
+	}//end if
+
+	foreach ( array( 'true', 'false', 'null' ) as $literal ) {
+		if ( 0 === strncmp( substr( $raw, $cursor ), $literal, strlen( $literal ) ) ) {
+			$cursor += strlen( $literal );
+
+			return true;
+		}
+	}
+	$remaining = substr( $raw, $cursor );
+	if ( preg_match( '/^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+\-]?[0-9]+)?/', $remaining, $number ) ) {
+		$cursor += strlen( $number[0] );
+
+		return true;
+	}
+
+	return new WP_Error( 'yotm_uninstall_item_payload', 'An item payload contains an invalid JSON value.' );
+}
+
+/**
+ * Decode one strict item payload with duplicate-name and token evidence.
+ *
+ * @param string $raw Raw JSON.
+ * @return array{payload:array,keys:array<string,int>}|WP_Error
+ */
+function yotm_data_lifecycle_decode_item_payload( $raw ) {
+	if ( ! is_string( $raw ) || '' === $raw || 1048576 < strlen( $raw ) ) {
+		return new WP_Error( 'yotm_uninstall_item_payload', 'An item payload exceeds the safe JSON boundary.' );
+	}
+	$cursor = 0;
+	$keys   = array();
+	$valid  = yotm_data_lifecycle_json_value( $raw, $cursor, 0, $keys );
+	yotm_data_lifecycle_json_skip_space( $raw, $cursor );
+	if ( is_wp_error( $valid ) || strlen( $raw ) !== $cursor ) {
+		return is_wp_error( $valid ) ? $valid : new WP_Error( 'yotm_uninstall_item_payload', 'An item payload contains trailing JSON data.' );
+	}
+	$payload = json_decode( $raw, true );
+	if ( JSON_ERROR_NONE !== json_last_error() || ! is_array( $payload ) ) {
+		return new WP_Error( 'yotm_uninstall_item_payload', 'An item payload could not be classified safely.' );
+	}
+
+	return array(
+		'payload' => $payload,
+		'keys'    => $keys,
+	);
 }
