@@ -71,6 +71,69 @@ class YOTM_Job_Storage_Test extends WP_UnitTestCase {
 		$this->assertSame( 'yotm_job_missing', $result->get_error_code() );
 	}
 
+	public function test_pre_extraction_persisted_job_remains_resumable_and_cancellable() {
+		global $wpdb;
+
+		$tables  = yotm_job_table_names();
+		$token   = wp_generate_uuid4();
+		$now     = gmdate( 'Y-m-d H:i:s' );
+		$payload = array(
+			'fixture' => 'pre-extraction-job',
+			'cursor'  => 'opaque-17',
+		);
+
+		$this->assertNotFalse(
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery -- Exact persisted compatibility fixture.
+			$wpdb->insert(
+				$tables['jobs'],
+				array(
+					'token'                   => $token,
+					'blog_id'                 => get_current_blog_id(),
+					'user_id'                 => $this->administrator_id,
+					'type'                    => 'bounded_export',
+					'status'                  => 'scanning',
+					'phase'                   => 'metadata',
+					'counter_mode'            => 'item_v2',
+					'manifest_hash'           => '',
+					'payload'                 => wp_json_encode( $payload ),
+					'total'                   => 3,
+					'processed'               => 1,
+					'succeeded'               => 1,
+					'failed'                  => 0,
+					'bytes'                   => 11,
+					'cursor_id'               => 17,
+					'max_id'                  => 30,
+					'worker_token'            => '',
+					'worker_generation'       => 0,
+					'worker_lease_expires_at' => null,
+					'created_at'              => $now,
+					'updated_at'              => $now,
+					'expires_at'              => gmdate( 'Y-m-d H:i:s', time() + HOUR_IN_SECONDS ),
+				)
+			)
+		);
+
+		$persisted = yotm_job_get( $token );
+		$this->assertIsArray( $persisted );
+		$this->assertSame( 'bounded_export', $persisted['type'] );
+		$this->assertSame( $payload, $persisted['payload'] );
+		$this->assertSame( 17, $persisted['cursor'] );
+
+		$worker = yotm_job_acquire_worker( $persisted['id'], array( 'scanning' ), array( 'metadata' ) );
+		$this->assertIsArray( $worker );
+		$this->assertTrue( yotm_job_worker_update( $worker, array( 'cursor' => 18 ) ) );
+		yotm_job_release_worker( $worker );
+
+		$cancelled = yotm_job_cancel( yotm_job_get( $token ) );
+		$this->assertIsArray( $cancelled );
+		$this->assertSame( 'cancelled', $cancelled['status'] );
+		$this->assertSame( 'cancelled', $cancelled['phase'] );
+		$this->assertSame( 18, $cancelled['cursor'] );
+		$this->assertSame( 'pre-extraction-job', $cancelled['payload']['fixture'] );
+		$this->assertNotEmpty( $cancelled['payload']['cancelled_at'] );
+		$this->assertGreaterThan( time() + DAY_IN_SECONDS, strtotime( $cancelled['expires_at'] ) );
+	}
+
 	public function test_destructive_jobs_are_locked_per_site() {
 		$prune = yotm_job_create(
 			'prune',
@@ -260,6 +323,58 @@ class YOTM_Job_Storage_Test extends WP_UnitTestCase {
 		$this->assertSame( 1, $stored['failed'] );
 
 		yotm_job_release_worker( $worker );
+	}
+
+	public function test_generic_non_media_bounded_job_uses_shared_lifecycle() {
+		$payload = array(
+			'format' => 'csv',
+			'scope'  => 'catalog',
+		);
+		$job     = yotm_job_create(
+			'bounded_export',
+			$payload,
+			array(
+				'status'       => 'scanning',
+				'phase'        => 'metadata',
+				'counter_mode' => 'item_v2',
+				'exclusive'    => false,
+				'total'        => 2,
+			)
+		);
+		$this->assertIsArray( $job );
+		$this->assertSame( $payload, $job['payload'] );
+		$this->assertSame( 'bounded_export', $job['type'] );
+
+		$this->assertTrue( yotm_job_add_item( $job['id'], 'record-1', array( 'record_id' => 'A-1' ) ) );
+		$this->assertTrue( yotm_job_add_item( $job['id'], 'record-2', array( 'record_id' => 'A-2' ) ) );
+		$worker = yotm_job_acquire_worker( $job['id'], array( 'scanning' ), array( 'metadata' ) );
+		$this->assertIsArray( $worker );
+		$items = yotm_job_claim_items( $worker, 2 );
+		$this->assertCount( 2, $items );
+		$this->assertTrue( yotm_job_finish_item( $items[0], 'done', '', 7 ) );
+		$this->assertTrue( yotm_job_finish_item( $items[1], 'done', '', 9 ) );
+
+		$stored = yotm_job_sync_item_counters( $job['id'] );
+		$this->assertIsArray( $stored );
+		$this->assertSame( 2, $stored['processed'] );
+		$this->assertSame( 2, $stored['succeeded'] );
+		$this->assertSame( 0, $stored['failed'] );
+		$this->assertSame( 16, $stored['bytes'] );
+		$this->assertTrue(
+			yotm_job_worker_update(
+				$worker,
+				array(
+					'status' => 'completed',
+					'phase'  => 'completed',
+				)
+			)
+		);
+		yotm_job_release_worker( $worker );
+
+		$completed = yotm_job_get( $job['token'] );
+		$this->assertSame( 'completed', $completed['status'] );
+		$this->assertSame( 'completed', $completed['phase'] );
+		$this->assertSame( $payload, $completed['payload'] );
 	}
 
 	public function test_cancelled_job_rejects_late_worker_state_transition() {

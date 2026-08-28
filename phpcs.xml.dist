@@ -35,11 +35,13 @@
 	<rule ref="WordPress.DB.DirectDatabaseQuery">
 		<!-- Persistent job tables are authoritative state and deliberately bypass the object cache. -->
 		<exclude-pattern>inc/job-storage.php</exclude-pattern>
+		<exclude-pattern>inc/jobs/engine.php</exclude-pattern>
 	</rule>
 
 	<rule ref="WordPress.DB.PreparedSQL.InterpolatedNotPrepared">
 		<!-- Job-table names are generated internally; all row values still use placeholders. -->
 		<exclude-pattern>inc/job-storage.php</exclude-pattern>
+		<exclude-pattern>inc/jobs/engine.php</exclude-pattern>
 		<!-- Integration fixtures interpolate only trusted table names created by the test harness. -->
 		<exclude-pattern>tests/phpunit/test-job-storage-installation.php</exclude-pattern>
 		<exclude-pattern>tests/phpunit/test-job-storage.php</exclude-pattern>
@@ -48,6 +50,7 @@
 
 	<rule ref="WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber">
 		<exclude-pattern>inc/job-storage.php</exclude-pattern>
+		<exclude-pattern>inc/jobs/engine.php</exclude-pattern>
 	</rule>
 
 	<rule ref="WordPress.PHP.NoSilencedErrors.Discouraged">
