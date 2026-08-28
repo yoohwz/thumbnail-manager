@@ -538,7 +538,7 @@ function yotm_build_recommendation_result( $sizes, $metadata_usage, $content_usa
  *
  * This projection is response-only. It must never be persisted back to the job.
  *
- * @param array $result Persisted recommendation result.
+ * @param mixed $result Persisted recommendation result.
  * @return array
  */
 function yotm_recommendation_result_for_response( $result ) {
@@ -561,8 +561,8 @@ function yotm_build_recommendation_progress_response( $job, $done ) {
 	$processed = min( (int) $job['processed'], $total );
 	$result    = null;
 
-	if ( $done && is_array( $payload['result'] ?? null ) ) {
-		$result = yotm_recommendation_result_for_response( $payload['result'] );
+	if ( $done ) {
+		$result = yotm_recommendation_result_for_response( $payload['result'] ?? array() );
 	}
 
 	return array(

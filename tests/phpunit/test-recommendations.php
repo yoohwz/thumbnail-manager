@@ -219,6 +219,31 @@ class YOTM_Recommendations_Test extends WP_UnitTestCase {
 		$this->assertSame( array( 'thumbnail' ), $job['payload']['result']['recommended_keep'] );
 	}
 
+	public function test_completed_progress_response_projects_missing_and_scalar_results_safely() {
+		$this->add_size( 'tm_aud_malformed_progress', 445, 223, false );
+
+		foreach ( array( '__missing__', 'malformed-result' ) as $stored_result ) {
+			$payload = array( 'scan_phase' => 'completed' );
+			if ( '__missing__' !== $stored_result ) {
+				$payload['result'] = $stored_result;
+			}
+
+			$job = array(
+				'token'     => 'malformed-recommendation-token',
+				'type'      => 'recommendation',
+				'status'    => 'completed',
+				'phase'     => 'completed',
+				'total'     => 1,
+				'processed' => 1,
+				'payload'   => $payload,
+			);
+
+			$response = yotm_build_recommendation_progress_response( $job, true );
+			$this->assert_cached_v1_apply_preserves_current_sizes( $response['result'] );
+			$this->assertSame( $payload, $job['payload'] );
+		}
+	}
+
 	public function test_content_reference_patterns_are_bounded_and_count_once_per_post() {
 		$matching_post = self::factory()->post->create(
 			array( 'post_content' => '<img class="size-custom.name"> {"sizeSlug":"custom.name"} {"image_size":"other-size"}' )
@@ -277,5 +302,23 @@ class YOTM_Recommendations_Test extends WP_UnitTestCase {
 		$this->assertSame( $status, $item['status'] );
 		$this->assertSame( $confidence, $item['confidence'] );
 		$this->assertSame( $action, $item['apply_action'] );
+	}
+
+	/**
+	 * Simulate cached-v1 Apply and prove every current size is re-enabled.
+	 *
+	 * @param array $result Browser-facing result.
+	 */
+	private function assert_cached_v1_apply_preserves_current_sizes( $result ) {
+		$current = array_keys( yotm_get_registered_sizes() );
+		$checked = array_fill_keys( $current, false );
+
+		foreach ( $result['recommended_keep'] ?? array() as $name ) {
+			if ( array_key_exists( $name, $checked ) ) {
+				$checked[ $name ] = true;
+			}
+		}
+
+		$this->assertSame( array(), array_keys( $checked, false, true ) );
 	}
 }

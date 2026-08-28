@@ -2033,7 +2033,7 @@ add_action( 'yotm_cleanup_jobs', 'yotm_cleanup_expired_jobs' );
 /**
  * Project a recommendation result for public delivery.
  *
- * @param array         $result Persisted recommendation result.
+ * @param mixed         $result Persisted recommendation result.
  * @param callable|null $projector Optional projector override for tests.
  * @return array|null
  */
@@ -2094,9 +2094,8 @@ function yotm_job_public_data( $job ) {
 	if (
 		'recommendation' === ( $job['type'] ?? '' )
 		&& 'completed' === ( $job['status'] ?? '' )
-		&& is_array( $context['result'] ?? null )
 	) {
-		$projected_result = yotm_job_public_recommendation_result( $context['result'] );
+		$projected_result = yotm_job_public_recommendation_result( $context['result'] ?? array() );
 		if ( is_array( $projected_result ) ) {
 			$context['result'] = $projected_result;
 		} else {

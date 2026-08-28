@@ -737,6 +737,39 @@ class YOTM_Job_Storage_Test extends WP_UnitTestCase {
 		$this->assertSame( $result, yotm_job_public_data( $job )['context']['result'] );
 	}
 
+	public function test_completed_recommendation_public_data_projects_missing_and_scalar_results_safely() {
+		add_image_size( 'tm_aud_malformed_public', 334, 223, false );
+
+		try {
+			foreach ( array( '__missing__', 'malformed-result' ) as $stored_result ) {
+				$payload = array();
+				if ( '__missing__' !== $stored_result ) {
+					$payload['result'] = $stored_result;
+				}
+
+				$job = yotm_job_create(
+					'recommendation',
+					$payload,
+					array(
+						'status'    => 'completed',
+						'phase'     => 'completed',
+						'exclusive' => false,
+					)
+				);
+				$this->assertIsArray( $job );
+
+				$public  = yotm_job_public_data( $job );
+				$current = array_keys( yotm_get_registered_sizes() );
+				$keep    = $public['context']['result']['recommended_keep'];
+
+				$this->assertSame( array(), array_values( array_diff( $current, $keep ) ) );
+				$this->assertSame( $payload, yotm_job_get_by_id( $job['id'] )['payload'] );
+			}
+		} finally {
+			remove_image_size( 'tm_aud_malformed_public' );
+		}
+	}
+
 	private function clear_jobs() {
 		global $wpdb;
 
