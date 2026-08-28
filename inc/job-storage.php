@@ -1356,13 +1356,15 @@ function yotm_job_existing_item_keys( $job_id, $item_keys ) {
 	$tables       = yotm_job_table_names();
 	$placeholders = implode( ',', array_fill( 0, count( $keys ), '%s' ) );
 	$args         = array_merge( array( absint( $job_id ) ), $keys );
-	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Bounded placeholder list is generated from validated hashes.
+	// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Bounded placeholder list is generated from validated hashes.
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Exact existing-key lookup must bypass object caching.
 	$found = $wpdb->get_col(
 		$wpdb->prepare(
 			"SELECT item_key FROM {$tables['items']} WHERE job_id = %d AND item_key IN ({$placeholders})",
 			...$args
 		)
 	);
+	// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
 
 	return array_fill_keys( array_map( 'strval', (array) $found ), true );
 }
@@ -1774,13 +1776,14 @@ function yotm_job_has_remaining_items( $job_id ) {
 	global $wpdb;
 
 	$tables = yotm_job_table_names();
-	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Existing indexed job/status lookup; prepared below.
-	return (bool) $wpdb->get_var(
-		$wpdb->prepare(
-			"SELECT 1 FROM {$tables['items']} WHERE job_id = %d AND status IN ('queued','processing') LIMIT 1",
-			absint( $job_id )
-		)
+	// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name is plugin-owned.
+	$sql = $wpdb->prepare(
+		"SELECT 1 FROM {$tables['items']} WHERE job_id = %d AND status IN ('queued','processing') LIMIT 1",
+		absint( $job_id )
 	);
+	// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Existing indexed job/status lookup; prepared above.
+	return (bool) $wpdb->get_var( $sql );
 }
 
 /**
@@ -1798,16 +1801,17 @@ function yotm_job_has_recovery_journals( $job_id ) {
 
 	$tables           = yotm_job_table_names();
 	$wpdb->last_error = '';
-	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Rare recovery boundary must include requeued journals; plugin-owned JSON keys fail closed on false positives.
-	$found = $wpdb->get_var(
-		$wpdb->prepare(
-			"SELECT 1 FROM {$tables['items']} WHERE job_id = %d AND status IN ('queued','processing')
-			AND (payload LIKE %s OR payload LIKE %s) LIMIT 1",
-			absint( $job_id ),
-			'%' . $wpdb->esc_like( '"prune_operation_journal_v1"' ) . '%',
-			'%' . $wpdb->esc_like( '"regeneration_journal"' ) . '%'
-		)
+	// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name is plugin-owned.
+	$sql = $wpdb->prepare(
+		"SELECT 1 FROM {$tables['items']} WHERE job_id = %d AND status IN ('queued','processing')
+		AND (payload LIKE %s OR payload LIKE %s) LIMIT 1",
+		absint( $job_id ),
+		'%' . $wpdb->esc_like( '"prune_operation_journal_v1"' ) . '%',
+		'%' . $wpdb->esc_like( '"regeneration_journal"' ) . '%'
 	);
+	// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Rare recovery boundary must include requeued journals; plugin-owned JSON keys fail closed on false positives.
+	$found = $wpdb->get_var( $sql );
 
 	return '' !== (string) $wpdb->last_error || (bool) $found;
 }
