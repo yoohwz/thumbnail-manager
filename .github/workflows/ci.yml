@@ -241,9 +241,9 @@ jobs:
         env:
           WP_TESTS_DIR: /tmp/wordpress-tests-lib
 
-      - name: PHPUnit multisite storage isolation
+      - name: PHPUnit multisite storage and deactivation
         if: ${{ matrix.label == 'tested-modern' }}
-        run: composer test -- --filter test_multisite_storage_state_is_isolated_between_sites
+        run: composer test -- --filter test_multisite_
         env:
           WP_TESTS_DIR: /tmp/wordpress-tests-lib
           WP_MULTISITE: 1
