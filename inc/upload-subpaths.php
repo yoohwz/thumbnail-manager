@@ -33,9 +33,8 @@ function yotm_list_upload_subpaths( $base_dir ) {
 				$years[] = $name;
 			}
 		}
-	} catch ( Throwable $e ) {
-		// Ignore an unreadable base and return only the default option.
-		$years = array();
+	} catch ( Throwable $e ) { // phpcs:ignore Generic.CodeAnalysis.EmptyStatement.DetectedCatch -- Preserve partial results.
+		// Preserve any year entries discovered before the iterator failed.
 	}
 	rsort( $years );
 	foreach ( $years as $y ) {
