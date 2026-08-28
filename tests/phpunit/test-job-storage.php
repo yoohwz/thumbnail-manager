@@ -694,6 +694,82 @@ class YOTM_Job_Storage_Test extends WP_UnitTestCase {
 		$this->assertSame( 1, $batch['job']['payload']['orphan_summary']['ambiguous_siblings'] );
 	}
 
+	public function test_public_recommendation_result_projects_current_registered_sizes_without_persisting() {
+		$legacy_result = array(
+			'items'            => array(),
+			'recommended_keep' => array( 'thumbnail' ),
+		);
+		add_image_size( 'tm_aud_public_projection', 333, 222, false );
+
+		try {
+			$job = yotm_job_create(
+				'recommendation',
+				array( 'result' => $legacy_result ),
+				array(
+					'status'    => 'completed',
+					'phase'     => 'completed',
+					'exclusive' => false,
+				)
+			);
+			$this->assertIsArray( $job );
+
+			$public = yotm_job_public_data( $job );
+			$this->assertContains( 'tm_aud_public_projection', $public['context']['result']['recommended_keep'] );
+			$this->assertSame( $legacy_result, yotm_job_get_by_id( $job['id'] )['payload']['result'] );
+		} finally {
+			remove_image_size( 'tm_aud_public_projection' );
+		}
+	}
+
+	public function test_public_projection_is_recommendation_only_and_fails_closed_without_callable() {
+		$this->assertNull( yotm_job_public_recommendation_result( array( 'recommended_keep' => array( 'thumbnail' ) ), 'yotm_missing_projector' ) );
+
+		$result = array( 'recommended_keep' => array( 'legacy-only' ) );
+		$job    = yotm_job_create(
+			'regenerate',
+			array( 'result' => $result ),
+			array(
+				'status' => 'completed',
+				'phase'  => 'completed',
+			)
+		);
+		$this->assertIsArray( $job );
+		$this->assertSame( $result, yotm_job_public_data( $job )['context']['result'] );
+	}
+
+	public function test_completed_recommendation_public_data_projects_missing_and_scalar_results_safely() {
+		add_image_size( 'tm_aud_malformed_public', 334, 223, false );
+
+		try {
+			foreach ( array( '__missing__', 'malformed-result' ) as $stored_result ) {
+				$payload = array();
+				if ( '__missing__' !== $stored_result ) {
+					$payload['result'] = $stored_result;
+				}
+
+				$job = yotm_job_create(
+					'recommendation',
+					$payload,
+					array(
+						'status'    => 'completed',
+						'phase'     => 'completed',
+						'exclusive' => false,
+					)
+				);
+				$this->assertIsArray( $job );
+
+				$public  = yotm_job_public_data( $job );
+				$current = array_keys( yotm_get_registered_sizes() );
+				$keep    = $public['context']['result']['recommended_keep'];
+
+				$this->assertSame( array(), array_values( array_diff( $current, $keep ) ) );
+				$this->assertSame( $payload, yotm_job_get_by_id( $job['id'] )['payload'] );
+			}
+		} finally {
+			remove_image_size( 'tm_aud_malformed_public' );
+		}
+	}
+
 	private function clear_jobs() {
 		global $wpdb;
 

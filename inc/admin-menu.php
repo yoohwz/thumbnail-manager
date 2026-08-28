@@ -45,6 +45,9 @@ add_action( 'admin_enqueue_scripts', function( $hook ) {
 	            'ajaxurl' => admin_url( 'admin-ajax.php' ),
 		            'nonce'   => wp_create_nonce( 'yotm_prune_nonce' ),
 		            'siteId'  => get_current_blog_id(),
+		            'registeredSizesSignature' => function_exists( 'yotm_recommend_registered_sizes_signature' )
+			            ? yotm_recommend_registered_sizes_signature( yotm_get_registered_sizes() )
+			            : '',
 	            'i18n'    => [
 	                'allSizesEnabled'              => __( 'All sizes are enabled — there are no disabled sizes to prune.', 'thumbnail-manager' ),
 	                'scanning'                     => __( 'Scanning…', 'thumbnail-manager' ),
@@ -118,6 +121,15 @@ add_action( 'admin_enqueue_scripts', function( $hook ) {
 	                'status'                       => __( 'Status', 'thumbnail-manager' ),
 	                'reason'                       => __( 'Reason', 'thumbnail-manager' ),
 	                'recommendation'               => __( 'Recommendation', 'thumbnail-manager' ),
+	                'confidence'                   => __( 'Keep confidence', 'thumbnail-manager' ),
+	                'confidenceHigh'               => __( 'High', 'thumbnail-manager' ),
+	                'confidenceMedium'             => __( 'Medium', 'thumbnail-manager' ),
+	                'confidenceLow'                => __( 'Low', 'thumbnail-manager' ),
+	                'evidence'                     => __( 'Evidence', 'thumbnail-manager' ),
+	                'legacyRecommendationResult'   => __( 'This result uses an older recommendation format. Run a new scan before applying recommendations.', 'thumbnail-manager' ),
+	                'staleRecommendationResult'    => __( 'Registered image sizes changed after this scan. Run a new scan before applying recommendations.', 'thumbnail-manager' ),
+	                'invalidRecommendationResult'  => __( 'This recommendation result is incomplete. Run a new scan before applying recommendations.', 'thumbnail-manager' ),
+	                'conservativeApplyReady'       => __( 'Safe recommendations are ready. Unknown sizes will keep their current setting.', 'thumbnail-manager' ),
 		                'scanningMediaUsage'           => __( 'Scanning media usage…', 'thumbnail-manager' ),
 		                'scanningAttachmentMetadata'   => __( 'Scanning attachment metadata…', 'thumbnail-manager' ),
 		                'scanningContentReferences'    => __( 'Scanning content references…', 'thumbnail-manager' ),
@@ -421,7 +433,7 @@ function yotm_manage_thumbnails_page() {
             </h2>
 
             <p>
-                <?php echo esc_html__( 'These suggestions combine protected size names, generated thumbnail metadata, and content references. They are still heuristic, so always review the manifest before approving deletion.', 'thumbnail-manager' ); ?>
+                <?php echo esc_html__( 'These suggestions use policy protections and positive content-reference heuristics to recommend keeping sizes. Missing evidence never proves a size is unused, and recommendations never authorize deletion.', 'thumbnail-manager' ); ?>
             </p>
 
 	            <div class="yo-row">
@@ -442,23 +454,23 @@ function yotm_manage_thumbnails_page() {
             <div class="yo-card-grid" id="yotm_recommend_summary">
 
                 <div class="yo-card">
-                    <strong><?php echo esc_html__( 'Recommended Keep', 'thumbnail-manager' ); ?></strong>
-                    <div class="yo-card-value" id="yotm_recommend_keep_count">—</div>
+	                    <strong><?php echo esc_html__( 'Protected', 'thumbnail-manager' ); ?></strong>
+	                    <div class="yo-card-value" id="yotm_recommend_protected_count">—</div>
                 </div>
 
                 <div class="yo-card">
-                    <strong><?php echo esc_html__( 'Likely Unused', 'thumbnail-manager' ); ?></strong>
-                    <div class="yo-card-value" id="yotm_recommend_unused_count">—</div>
+	                    <strong><?php echo esc_html__( 'Detected References', 'thumbnail-manager' ); ?></strong>
+	                    <div class="yo-card-value" id="yotm_recommend_reference_count">—</div>
                 </div>
 
                 <div class="yo-card">
-                    <strong><?php echo esc_html__( 'Protected', 'thumbnail-manager' ); ?></strong>
-                    <div class="yo-card-value" id="yotm_recommend_protected_count">—</div>
+	                    <strong><?php echo esc_html__( 'Unknown / Review', 'thumbnail-manager' ); ?></strong>
+	                    <div class="yo-card-value" id="yotm_recommend_unknown_count">—</div>
                 </div>
 
                 <div class="yo-card">
-                    <strong><?php echo esc_html__( 'Potential Savings', 'thumbnail-manager' ); ?></strong>
-                    <div class="yo-card-value" id="yotm_recommend_savings">—</div>
+	                    <strong><?php echo esc_html__( 'Generated Footprint', 'thumbnail-manager' ); ?></strong>
+	                    <div class="yo-card-value" id="yotm_recommend_generated_bytes">—</div>
                 </div>
 
             </div>
@@ -468,7 +480,7 @@ function yotm_manage_thumbnails_page() {
             <div class="yo-row">
 
                 <button type="button" id="yotm_apply_recommendations" class="button button-primary yo-hidden">
-                    <?php echo esc_html__( 'Apply recommended sizes', 'thumbnail-manager' ); ?>
+	                    <?php echo esc_html__( 'Apply safe recommendations', 'thumbnail-manager' ); ?>
                 </button>
 
                 <button type="button" id="yotm_recommend_go_prune" class="button yo-hidden">
@@ -476,6 +488,10 @@ function yotm_manage_thumbnails_page() {
                 </button>
 
             </div>
+
+	            <p class="description">
+	                <?php echo esc_html__( 'Apply only enables sizes supported by keep evidence. Unknown sizes keep their current setting; saving remains a separate action.', 'thumbnail-manager' ); ?>
+	            </p>
 
         </div>
 

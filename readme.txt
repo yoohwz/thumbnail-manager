@@ -23,7 +23,7 @@ Large operations run as persistent, cursor-based jobs. They continue in bounded 
 * Review every registered image size and decide which sizes WordPress should generate for future uploads.
 * Generate only missing sizes or force-regenerate selected image attachments.
 * Process all images, selected attachments, the current year, or selected upload folders.
-* Review recommendations based on protected WordPress sizes, WooCommerce-related sizes, attachment metadata, and common content references.
+* Review conservative keep recommendations with explicit evidence and confidence based on protected size policies, attachment metadata, and common content references.
 * Resume or cancel persistent jobs and review recent job results and per-item errors.
 
 = Review-first cleanup =
@@ -44,7 +44,7 @@ Metadata-backed legacy sizes can be included in the review. Disk-only files that
 
 Thumbnail Manager controls image-size generation, regeneration, and cleanup. It does not compress images, convert them to WebP or AVIF, configure a CDN, offload media, or unregister a size from the theme or plugin that originally registered it.
 
-Recommendations are an informed starting point. Verify the sizes used by the active theme, plugins, WooCommerce templates, and custom code before disabling generation or approving deletion.
+Recommendations are an informed starting point, not proof that a size is used or unused. Missing scan evidence leaves the current size setting unchanged. Verify the sizes used by the active theme, plugins, WooCommerce templates, and custom code before disabling generation or approving deletion.
 
 == Installation ==
 
