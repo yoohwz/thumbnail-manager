@@ -337,9 +337,42 @@ function yotm_maybe_install_job_tables() {
 
 /**
  * Remove the scheduled cleanup event when deactivating the plugin.
+ *
+ * @param bool $network_deactivating Whether the plugin is network-deactivated.
  */
-function yotm_deactivate_job_cleanup() {
-	wp_clear_scheduled_hook( 'yotm_cleanup_jobs' );
+function yotm_deactivate_job_cleanup( $network_deactivating = false ) {
+	if ( ! $network_deactivating || ! is_multisite() ) {
+		wp_clear_scheduled_hook( 'yotm_cleanup_jobs' );
+
+		return;
+	}
+
+	$offset = 0;
+	$limit  = 100;
+
+	do {
+		$site_ids   = get_sites(
+			array(
+				'fields'  => 'ids',
+				'number'  => $limit,
+				'offset'  => $offset,
+				'orderby' => 'id',
+				'order'   => 'ASC',
+			)
+		);
+		$page_count = count( $site_ids );
+
+		foreach ( $site_ids as $site_id ) {
+			switch_to_blog( $site_id );
+			try {
+				wp_clear_scheduled_hook( 'yotm_cleanup_jobs' );
+			} finally {
+				restore_current_blog();
+			}
+		}
+
+		$offset += $page_count;
+	} while ( $page_count === $limit );
 }
 
 /**

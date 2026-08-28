@@ -141,6 +141,14 @@ Safety-sensitive ambiguity fails closed. Examples include:
 
 Partial failures should be recorded per item when possible and must not erase the audit state of successful/failed/skipped items.
 
+## 12. Deactivation and plugin deletion
+
+Deactivation and plugin-file deletion do not authorize media or recovery cleanup. Thumbnail Manager retains its persistent database state when plugin files are deleted, including job/item recovery evidence and the derived media-source index.
+
+Attachment rows and postmeta, original uploads, generated thumbnails, and `.yotm-regenerate-*` recovery paths remain untouched. The staging paths are plugin-created recovery state, but their ownership does not make them uninstall-delete candidates.
+
+Network deactivation may clear only the `yotm_cleanup_jobs` scheduled hook for existing sites through bounded, best-effort iteration. It must not introduce lifecycle locks or change the runtime locking, recovery, or media-deletion contracts above.
+
 ## Required regression evidence
 
 A Controlled change touching this contract must preserve or deliberately update automated coverage for the affected invariants. Existing high-value regression areas include:
