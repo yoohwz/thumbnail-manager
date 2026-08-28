@@ -29,7 +29,7 @@ Do not store WordPress.org email/tokenized Release Confirmation links in GitHub.
    - `changelog.txt` newest release;
    - POT `Project-Id-Version`;
    - `Tested up to` only when the exact stable WordPress version has supporting matrix evidence.
-   The current historical `1.4.0` release alone may retain `1.4` in its two changelog headings. Every future release must use the selected exact numeric version string in all active release fields.
+   Every active release field must use the selected exact numeric version string.
 3. Open a normal reviewed PR. Merge only with the protected `CI Gate` green.
 4. From the Actions UI on **main**, manually run `Prepare WordPress.org Release Candidate` with:
    - the exact 40-character merged candidate SHA;
@@ -39,7 +39,7 @@ Do not store WordPress.org email/tokenized Release Confirmation links in GitHub.
    - deterministic package SHA-256;
    - manifest and expanded-tree SHA-256;
    - release-control bundle SHA-256 covering the allowlist, Plugin Check baseline, builder/validators and preparation workflow;
-   - exact 17-file positive payload;
+   - manifest-expanded positive payload and the exact file count recorded in the release evidence;
    - Plugin Check result and reviewed warning-baseline delta;
    - successful exact-SHA `CI Gate`.
 

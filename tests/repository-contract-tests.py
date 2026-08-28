@@ -30,16 +30,6 @@ def match(pattern: str, text: str, label: str) -> str:
     return found.group(1).strip()
 
 
-def normalized_release(version: str) -> tuple[int, int, int]:
-    parts = version.split(".")
-    if not all(part.isdigit() for part in parts) or not 2 <= len(parts) <= 3:
-        fail(f"unsupported release version format: {version}")
-    values = [int(part) for part in parts]
-    if len(values) == 2:
-        values.append(0)
-    return tuple(values)  # type: ignore[return-value]
-
-
 plugin = read("thumbnail-manager.php")
 readme = read("readme.txt")
 changelog = read("changelog.txt")
@@ -102,7 +92,7 @@ if not re.fullmatch(r"\d+\.\d+(?:\.\d+)?", tested_up_to):
     fail(f"invalid Tested up to version: {tested_up_to}")
 
 changelog_version = match(r"^=\s*([0-9]+(?:\.[0-9]+){1,2})\s*\(", changelog, "latest changelog version")
-if normalized_release(changelog_version) != normalized_release(plugin_version):
+if changelog_version != plugin_version:
     fail(
         "latest changelog release does not match plugin version: "
         f"changelog={changelog_version}, plugin={plugin_version}"
@@ -299,11 +289,12 @@ for component in (
 ):
     if f'"{component}"' not in release_validator:
         fail(f"release-control bundle is missing {component}")
-for historical_field in ("changelog_version", "readme_changelog_version"):
-    if f'("1.4.0", "{historical_field}", "1.4")' not in release_validator:
-        fail(f"release metadata contract is missing the known 1.4.0 compatibility for {historical_field}")
+if "historical_compatibility" in release_validator:
+    fail("release metadata validation must not contain active-version compatibility exceptions")
+if 'if metadata[field] != metadata["version"]:' not in release_validator:
+    fail("release metadata validation must enforce exact active-version equality")
 if "must exactly equal active release version" not in release_validator:
-    fail("future release metadata must use exact active version strings")
+    fail("release metadata mismatch must report the exact active-version contract")
 
 for needle, label in (
     ("bash bin/build-release.sh", "shared deterministic builder"),
