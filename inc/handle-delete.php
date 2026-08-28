@@ -511,13 +511,15 @@ function yotm_prune_validate_selector_bindings( $item, $job_payload ) {
  * @return array|WP_Error
  */
 function yotm_delete_prune_item_recoverable( &$item, $payload, $uploads_base, $recovery_only = false, $journal_barrier = null ) {
-	$path    = yotm_normalize_filesystem_path( (string) ( $payload['path'] ?? '' ) );
+	$path    = yotm_prune_journal_lexical_path( $payload['path'] ?? '' );
 	$journal = is_array( $item['payload']['prune_operation_journal_v1'] ?? null ) ? $item['payload']['prune_operation_journal_v1'] : array();
 
 	if ( ! empty( $journal ) ) {
+		$journal_path = yotm_prune_journal_lexical_path( $journal['path'] ?? '' );
 		if (
 			1 !== absint( $journal['version'] ?? 0 )
-			|| ! hash_equals( $path, (string) ( $journal['path'] ?? '' ) )
+			|| '' === $path
+			|| ! hash_equals( $path, $journal_path )
 			|| ! preg_match( '/^[a-f0-9]{64}$/', (string) ( $journal['file_hash'] ?? '' ) )
 			|| ! isset( $journal['bytes'] )
 			|| 0 > (int) $journal['bytes']
@@ -647,13 +649,26 @@ function yotm_delete_prune_item_recoverable( &$item, $payload, $uploads_base, $r
 }
 
 /**
+ * Normalize an immutable prune path without resolving its final filesystem node.
+ *
+ * Journal identity and lstat inspection must address the reviewed path itself;
+ * resolving a replacement symlink here would inspect its target instead.
+ *
+ * @param string $path Reviewed candidate path.
+ * @return string
+ */
+function yotm_prune_journal_lexical_path( $path ) {
+	return untrailingslashit( wp_normalize_path( (string) $path ) );
+}
+
+/**
  * Inspect the exact filesystem node at an armed prune path without following symlinks.
  *
- * @param string $path Canonical candidate path.
+ * @param string $path Reviewed candidate path.
  * @return array{state:string,bytes:int}|WP_Error
  */
 function yotm_prune_journal_path_state( $path ) {
-	$path = yotm_normalize_filesystem_path( (string) $path );
+	$path = yotm_prune_journal_lexical_path( $path );
 	clearstatcache( true, $path );
 	// phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- A false lstat result is classified explicitly below and must not emit during recovery.
 	$stat = @lstat( $path );
