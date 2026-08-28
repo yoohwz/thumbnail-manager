@@ -7,9 +7,9 @@ class YOTM_Scan_Performance_Test extends WP_UnitTestCase {
 	public function test_literal_subpath_membership_does_not_interpret_wildcards() {
 		$this->assertTrue( yotm_attached_file_is_in_subpaths( '2026/08/photo.jpg', array( '2026/08' ) ) );
 		$this->assertFalse( yotm_attached_file_is_in_subpaths( '2026/080/photo.jpg', array( '2026/08' ) ) );
-		$this->assertTrue( yotm_attached_file_is_in_subpaths( 'sale_%/photo.jpg', array( 'sale_%' ) ) );
-		$this->assertFalse( yotm_attached_file_is_in_subpaths( 'sale-xy/photo.jpg', array( 'sale_%' ) ) );
-		$this->assertTrue( yotm_attached_file_is_in_subpaths( 'regex.[x]/photo.jpg', array( 'regex.[x]' ) ) );
+		$this->assertTrue( yotm_attached_file_is_in_subpaths( 'sale_x/photo.jpg', array( 'sale_x' ) ) );
+		$this->assertFalse( yotm_attached_file_is_in_subpaths( 'saleAx/photo.jpg', array( 'sale_x' ) ) );
+		$this->assertTrue( yotm_attached_file_is_in_subpaths( 'regex.x/photo.jpg', array( 'regex.x' ) ) );
 	}
 
 	public function test_attached_file_normalization_accepts_relative_separators_and_rejects_unsafe_values() {
@@ -92,6 +92,43 @@ class YOTM_Scan_Performance_Test extends WP_UnitTestCase {
 		} finally {
 			remove_filter( 'get_attached_file', $filter, 10 );
 		}
+	}
+
+	public function test_prune_selector_binding_rejects_reinserted_attached_file_row() {
+		$fixture = $this->create_raw_attachment( '2026/08/prune-bound.jpg' );
+		$item    = array(
+			'ownership_evidence' => array(
+				array(
+					'attachment_id'     => $fixture['attachment_id'],
+					'selection_meta_id' => $fixture['meta_id'],
+				),
+			),
+		);
+		$job     = array(
+			'selector'           => 'attached_meta_v2',
+			'selection_meta_max' => $fixture['meta_id'],
+			'selection_subpaths' => array( '2026/08' ),
+		);
+		$this->assertTrue( yotm_prune_validate_selector_bindings( $item, $job ) );
+
+		global $wpdb;
+		$this->assertSame( 1, $wpdb->delete( $wpdb->postmeta, array( 'meta_id' => $fixture['meta_id'] ), array( '%d' ) ) );
+		$this->assertSame(
+			1,
+			$wpdb->insert(
+				$wpdb->postmeta,
+				array(
+					'post_id'    => $fixture['attachment_id'],
+					'meta_key'   => '_wp_attached_file',
+					'meta_value' => '2026/08/prune-replacement.jpg',
+				),
+				array( '%d', '%s', '%s' )
+			)
+		);
+
+		$result = yotm_prune_validate_selector_bindings( $item, $job );
+		$this->assertWPError( $result );
+		$this->assertSame( 'yotm_attached_file_scope_replaced', $result->get_error_code() );
 	}
 
 	/**

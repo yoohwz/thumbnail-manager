@@ -1254,9 +1254,10 @@ function yotm_job_merge_item_payload( $job_id, $item_key, $payload ) {
 
 		$key          = absint( $ref['attachment_id'] ?? 0 ) . ':' . sanitize_key( $ref['size'] ?? '' ) . ':' . sanitize_file_name( $ref['filename'] ?? '' );
 		$refs[ $key ] = array(
-			'attachment_id' => absint( $ref['attachment_id'] ?? 0 ),
-			'size'          => sanitize_key( $ref['size'] ?? '' ),
-			'filename'      => sanitize_file_name( $ref['filename'] ?? '' ),
+			'attachment_id'     => absint( $ref['attachment_id'] ?? 0 ),
+			'size'              => sanitize_key( $ref['size'] ?? '' ),
+			'filename'          => sanitize_file_name( $ref['filename'] ?? '' ),
+			'selection_meta_id' => absint( $ref['selection_meta_id'] ?? 0 ),
 		);
 	}
 
@@ -1278,11 +1279,12 @@ function yotm_job_merge_item_payload( $job_id, $item_key, $payload ) {
 		}
 
 		$evidence[ $key ] = array(
-			'attachment_id' => $attachment_id,
-			'size'          => $size,
-			'filename'      => $filename,
-			'mime'          => sanitize_mime_type( $proof['mime'] ?? '' ),
-			'selection'     => $selection,
+			'attachment_id'     => $attachment_id,
+			'size'              => $size,
+			'filename'          => $filename,
+			'mime'              => sanitize_mime_type( $proof['mime'] ?? '' ),
+			'selection'         => $selection,
+			'selection_meta_id' => absint( $proof['selection_meta_id'] ?? 0 ),
 		);
 	}//end foreach
 
@@ -1459,9 +1461,10 @@ function yotm_job_get_items( $job_id, $statuses = array( 'queued' ), $limit = 10
  *
  * @param array $worker Worker ownership data.
  * @param int   $limit Maximum items.
+ * @param bool  $recovery_only Claim only items containing a persisted recovery journal.
  * @return array[]|WP_Error
  */
-function yotm_job_claim_items( $worker, $limit = 100 ) {
+function yotm_job_claim_items( $worker, $limit = 100, $recovery_only = false ) {
 	global $wpdb;
 
 	if ( ! yotm_job_refresh_worker( $worker ) ) {
@@ -1491,10 +1494,16 @@ function yotm_job_claim_items( $worker, $limit = 100 ) {
 		$job_args           = array_merge( $job_args, $phases );
 	}
 
-	$job_where .= ' AND jobs.expires_at >= %s';
-	$job_args[] = $now;
-	$args       = array( $claim_token, $claim_expires, $now, absint( $worker['job_id'] ?? 0 ), $now );
-	$args       = array_merge( $args, $job_args, array( $limit ) );
+	$job_where  .= ' AND jobs.expires_at >= %s';
+	$job_args[]  = $now;
+	$args        = array( $claim_token, $claim_expires, $now, absint( $worker['job_id'] ?? 0 ), $now );
+	$journal_sql = '';
+	if ( $recovery_only ) {
+		$journal_sql = ' AND (payload LIKE %s OR payload LIKE %s)';
+		$args[]      = '%' . $wpdb->esc_like( '"prune_operation_journal_v1"' ) . '%';
+		$args[]      = '%' . $wpdb->esc_like( '"regeneration_journal"' ) . '%';
+	}
+	$args = array_merge( $args, $job_args, array( $limit ) );
 	// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Tables and worker predicates are plugin-owned; arguments are assembled above.
 	$sql = $wpdb->prepare(
 		"UPDATE {$tables['items']}
@@ -1503,6 +1512,7 @@ function yotm_job_claim_items( $worker, $limit = 100 ) {
 		WHERE job_id = %d
 		AND (status = 'queued' OR (status = 'processing'
 			AND (claim_token = '' OR claim_expires_at IS NULL OR claim_expires_at < %s)))
+		{$journal_sql}
 		AND EXISTS (SELECT 1 FROM {$tables['jobs']} jobs WHERE {$job_where})
 		ORDER BY id ASC LIMIT %d",
 		...$args
@@ -1777,8 +1787,9 @@ function yotm_job_has_remaining_items( $job_id ) {
 /**
  * Return whether an in-flight item has a recoverable media journal.
  *
- * The processing set is bounded by the maximum claim batch. Payloads are read
- * only at cancel/expiry boundaries, never on a normal queue batch.
+ * A journal may be processing or requeued after a retryable storage/fence
+ * failure. The rare cancel/expiry boundary scans plugin-owned JSON keys and
+ * deliberately treats a false positive as recovery-required.
  *
  * @param int $job_id Job ID.
  * @return bool
@@ -1786,23 +1797,20 @@ function yotm_job_has_remaining_items( $job_id ) {
 function yotm_job_has_recovery_journals( $job_id ) {
 	global $wpdb;
 
-	$tables = yotm_job_table_names();
-	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Bounded recovery guard reads plugin-owned payload rows directly.
-	$payloads = $wpdb->get_col(
+	$tables           = yotm_job_table_names();
+	$wpdb->last_error = '';
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Rare recovery boundary must include requeued journals; plugin-owned JSON keys fail closed on false positives.
+	$found = $wpdb->get_var(
 		$wpdb->prepare(
-			"SELECT payload FROM {$tables['items']} WHERE job_id = %d AND status = 'processing' ORDER BY id ASC LIMIT 1000",
-			absint( $job_id )
+			"SELECT 1 FROM {$tables['items']} WHERE job_id = %d AND status IN ('queued','processing')
+			AND (payload LIKE %s OR payload LIKE %s) LIMIT 1",
+			absint( $job_id ),
+			'%' . $wpdb->esc_like( '"prune_operation_journal_v1"' ) . '%',
+			'%' . $wpdb->esc_like( '"regeneration_journal"' ) . '%'
 		)
 	);
 
-	foreach ( (array) $payloads as $payload_json ) {
-		$payload = yotm_job_decode_payload( $payload_json );
-		if ( ! empty( $payload['prune_operation_journal_v1'] ) || ! empty( $payload['regeneration_journal'] ) ) {
-			return true;
-		}
-	}
-
-	return false;
+	return '' !== (string) $wpdb->last_error || (bool) $found;
 }
 
 /**

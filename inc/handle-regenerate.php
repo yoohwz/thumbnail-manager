@@ -362,7 +362,7 @@ function yotm_regenerate_item_batch( $job, $worker, $batch ) {
 		$payload = $job['payload'];
 	}//end if
 
-	$items = yotm_job_claim_items( $worker, $batch );
+	$items = yotm_job_claim_items( $worker, $batch, ! empty( $job['payload']['recovery_only'] ) );
 	if ( is_wp_error( $items ) ) {
 		return array_merge(
 			yotm_build_regenerate_response( yotm_job_get_by_id( $job['id'] ), false ),
@@ -386,7 +386,7 @@ function yotm_regenerate_item_batch( $job, $worker, $batch ) {
 				: yotm_job_finish_item( $item, 'failed', __( 'Attachment ID is missing.', 'thumbnail-manager' ) );
 			continue;
 		}
-		if ( 'attached_meta_v2' === ( $payload['selector'] ?? '' ) ) {
+		if ( 'attached_meta_v2' === ( $payload['selector'] ?? '' ) && empty( $item['payload']['regeneration_journal'] ) ) {
 			$authorized = yotm_authorize_attached_file_selector_scope(
 				$attachment_id,
 				absint( $item['payload']['selection_meta_id'] ?? 0 ),

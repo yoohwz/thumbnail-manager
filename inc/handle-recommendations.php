@@ -343,7 +343,7 @@ function yotm_recommend_extract_content_size_names( $content, $size_names ) {
 			return 0 !== $length ? $length : strcmp( $left, $right );
 		}
 	);
-	$alternation = implode(
+	$alternation   = implode(
 		'|',
 		array_map(
 			static function ( $name ) {
@@ -352,20 +352,29 @@ function yotm_recommend_extract_content_size_names( $content, $size_names ) {
 			$names
 		)
 	);
-	$patterns    = array(
-		'/\bsize-(' . $alternation . ')\b/',
-		'/["\'](?:size|sizeSlug|image_size|thumbnail_size)["\']\s*:\s*["\'](' . $alternation . ')["\']/',
-	);
-	$matched     = array();
+	$class_pattern = '/\bsize-(' . $alternation . ')\b/';
+	$json_pattern  = '/["\'](?:size|sizeSlug|image_size|thumbnail_size)["\']\s*:\s*["\'](' . $alternation . ')["\']/';
+	$matched       = array();
+	$class_result  = preg_match_all( $class_pattern, $content, $class_matches, PREG_OFFSET_CAPTURE );
+	if ( false === $class_result ) {
+		return false;
+	}
 
-	foreach ( $patterns as $pattern ) {
-		$result = preg_match_all( $pattern, $content, $matches );
-		if ( false === $result ) {
-			return false;
+	foreach ( (array) ( $class_matches[0] ?? array() ) as $class_match ) {
+		$tail = substr( $content, absint( $class_match[1] ?? 0 ) );
+		foreach ( $names as $name ) {
+			if ( 1 === preg_match( '/^size-' . preg_quote( $name, '/' ) . '\b/', $tail ) ) {
+				$matched[ $name ] = true;
+			}
 		}
-		foreach ( (array) ( $matches[1] ?? array() ) as $name ) {
-			$matched[ (string) $name ] = true;
-		}
+	}
+
+	$json_result = preg_match_all( $json_pattern, $content, $json_matches );
+	if ( false === $json_result ) {
+		return false;
+	}
+	foreach ( (array) ( $json_matches[1] ?? array() ) as $name ) {
+		$matched[ (string) $name ] = true;
 	}
 
 	return array_keys( $matched );

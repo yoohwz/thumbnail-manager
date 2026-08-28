@@ -114,7 +114,7 @@ Folder-scoped `attached_meta_v2` jobs freeze the maximum authoritative `_wp_atta
 
 `item_v3` is limited to media operations with persisted recovery evidence. Prune arms an exact file/hash/byte journal before unlink and reconciles an absent armed path idempotently. Force regeneration retains its transactional promotion journal. Their terminal item row and job counters advance together under the exact worker and claim generation. Normal and missing-only Core regeneration remain `item_v2` and retain their existing at-least-once retry contract.
 
-Cancellation or expiry must not make an armed journal look safely terminal. An ambiguous in-flight journal remains recovery-only/resumable; recovery may reconcile an already-achieved postcondition or roll back an existing Force transaction, but it must not use expiry recovery to authorize a new delete or promotion.
+Cancellation or expiry must not make an armed journal look safely terminal, including after a retry has requeued the item. An ambiguous in-flight journal remains recovery-only/resumable; recovery may reconcile an already-achieved postcondition or roll back an existing Force transaction, but it must not use expiry recovery to authorize a new delete or promotion.
 
 ## 10. Recommendation boundary
 

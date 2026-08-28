@@ -186,8 +186,9 @@ function yotm_prune_scan_batch() {
 		}
 
 		if ( ! empty( $rows ) ) {
-			$ids      = array();
-			$subpaths = (array) ( $payload['selection_subpaths'] ?? array() );
+			$ids                = array();
+			$selection_meta_ids = array();
+			$subpaths           = (array) ( $payload['selection_subpaths'] ?? array() );
 			foreach ( $rows as $row ) {
 				$relative = yotm_normalize_attached_file_relative_path( $row['value'] ?? null );
 				if ( is_wp_error( $relative ) || ! yotm_attached_file_is_in_subpaths( $relative, $subpaths ) ) {
@@ -200,12 +201,14 @@ function yotm_prune_scan_batch() {
 					$subpaths
 				);
 				if ( ! is_wp_error( $authorized ) ) {
-					$ids[ absint( $row['attachment_id'] ) ] = absint( $row['attachment_id'] );
+					$attachment_id                        = absint( $row['attachment_id'] );
+					$ids[ $attachment_id ]                = $attachment_id;
+					$selection_meta_ids[ $attachment_id ] = absint( $row['meta_id'] );
 				}
 			}
 
 			if ( ! empty( $ids ) ) {
-				yotm_prune_store_metadata_candidates( $job, array_values( $ids ), $payload );
+				yotm_prune_store_metadata_candidates( $job, array_values( $ids ), $payload, $selection_meta_ids );
 			}
 			$payload['selection_meta_after'] = max( array_map( 'absint', wp_list_pluck( $rows, 'meta_id' ) ) );
 			$payload['selection_scanned']    = (int) ( $payload['selection_scanned'] ?? 0 ) + count( $rows );
@@ -325,8 +328,9 @@ function yotm_prune_scan_batch() {
  * @param array $job Prune job.
  * @param int[] $ids Attachment IDs.
  * @param array $payload Job payload, updated by reference.
+ * @param int[] $selection_meta_ids Exact selected meta IDs keyed by attachment ID.
  */
-function yotm_prune_store_metadata_candidates( $job, $ids, &$payload ) {
+function yotm_prune_store_metadata_candidates( $job, $ids, &$payload, $selection_meta_ids = array() ) {
 	$candidates = array();
 	yotm_collect_metadata_prune_candidates_for_ids(
 		$ids,
@@ -342,6 +346,22 @@ function yotm_prune_store_metadata_candidates( $job, $ids, &$payload ) {
 	foreach ( $candidates as $candidate ) {
 		if ( empty( $candidate['path'] ) ) {
 			continue;
+		}
+		if ( 'attached_meta_v2' === ( $payload['selector'] ?? '' ) ) {
+			$bound = true;
+			foreach ( array( 'metadata_refs', 'ownership_evidence' ) as $field ) {
+				foreach ( (array) ( $candidate[ $field ] ?? array() ) as $index => $evidence ) {
+					$attachment_id = absint( $evidence['attachment_id'] ?? 0 );
+					if ( empty( $selection_meta_ids[ $attachment_id ] ) ) {
+						$bound = false;
+						break 2;
+					}
+					$candidate[ $field ][ $index ]['selection_meta_id'] = absint( $selection_meta_ids[ $attachment_id ] );
+				}
+			}
+			if ( ! $bound ) {
+				continue;
+			}
 		}
 
 		$candidate                    = yotm_prune_normalize_candidate_evidence( $candidate );

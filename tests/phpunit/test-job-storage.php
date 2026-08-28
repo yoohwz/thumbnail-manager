@@ -319,6 +319,62 @@ class YOTM_Job_Storage_Test extends WP_UnitTestCase {
 		yotm_job_release_worker( $worker );
 	}
 
+	public function test_requeued_journal_blocks_cancel_and_expiry_claims_only_recovery_item() {
+		global $wpdb;
+
+		$job = yotm_job_create(
+			'regenerate',
+			array( 'discovery_done' => 1 ),
+			array(
+				'status'       => 'running',
+				'phase'        => 'regenerate',
+				'counter_mode' => 'item_v3',
+				'total'        => 2,
+			)
+		);
+		$this->assertTrue( yotm_job_add_item( $job['id'], 'first-unjournaled', array( 'attachment_id' => 10 ) ) );
+		$this->assertTrue(
+			yotm_job_add_item(
+				$job['id'],
+				'second-journaled',
+				array(
+					'attachment_id'        => 20,
+					'regeneration_journal' => array( 'phase' => 'promoted' ),
+				)
+			)
+		);
+
+		$worker = yotm_job_acquire_worker( $job['id'], array( 'running' ), array( 'regenerate' ) );
+		$items  = yotm_job_claim_items( $worker, 2 );
+		$this->assertCount( 2, $items );
+		foreach ( $items as $item ) {
+			$this->assertTrue( yotm_job_release_item_claim( $item ) );
+		}
+		yotm_job_release_worker( $worker );
+
+		$this->assertTrue( yotm_job_has_recovery_journals( $job['id'] ) );
+		$cancelled = yotm_job_cancel( yotm_job_get_by_id( $job['id'] ) );
+		$this->assertWPError( $cancelled );
+		$this->assertSame( 'yotm_job_cancel_busy', $cancelled->get_error_code() );
+
+		$tables = yotm_job_table_names();
+		$wpdb->update(
+			$tables['jobs'],
+			array( 'expires_at' => gmdate( 'Y-m-d H:i:s', time() - MINUTE_IN_SECONDS ) ),
+			array( 'id' => $job['id'] )
+		);
+		$recovering = yotm_job_expire_if_inactive( yotm_job_get_by_id( $job['id'] ) );
+		$this->assertSame( 'running', $recovering['status'] );
+		$this->assertSame( 1, $recovering['payload']['recovery_only'] );
+
+		$worker = yotm_job_acquire_worker( $job['id'], array( 'running' ), array( 'regenerate' ) );
+		$items  = yotm_job_claim_items( $worker, 1, true );
+		$this->assertCount( 1, $items );
+		$this->assertSame( 20, $items[0]['payload']['attachment_id'] );
+		yotm_job_release_item_claim( $items[0] );
+		yotm_job_release_worker( $worker );
+	}
+
 	public function test_cancel_is_retryable_while_worker_lock_is_contended() {
 		$job = yotm_job_create(
 			'recommendation',

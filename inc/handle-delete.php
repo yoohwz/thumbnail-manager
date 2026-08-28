@@ -116,7 +116,7 @@ function yotm_prune_delete_batch() {
 		$job = yotm_job_get_by_id( $job['id'] );
 	}
 
-	$items = yotm_job_claim_items( $worker, $batch );
+	$items = yotm_job_claim_items( $worker, $batch, ! empty( $job['payload']['recovery_only'] ) );
 	if ( is_wp_error( $items ) ) {
 		wp_send_json_error( array( 'msg' => $items->get_error_message() ), 409 );
 	}
@@ -399,8 +399,20 @@ function yotm_process_claimed_prune_item( $item, $job, $worker, $uploads_base, $
 			if ( ! yotm_job_refresh_worker( $worker ) || ! yotm_job_refresh_item_claim( $item ) ) {
 				return new WP_Error( 'yotm_job_worker_stale', __( 'This job worker no longer owns the current batch.', 'thumbnail-manager' ) );
 			}
+			$journaled = 'item_v3' === ( $job['counter_mode'] ?? '' ) && ! empty( $item['payload']['prune_operation_journal_v1'] );
+			if ( ! $journaled || is_file( $path ) ) {
+				$selector = yotm_prune_validate_selector_bindings( $item['payload'] ?? array(), $job['payload'] ?? array() );
+				if ( is_wp_error( $selector ) ) {
+					return array(
+						'deleted' => false,
+						'skipped' => false,
+						'bytes'   => 0,
+						'error'   => $selector->get_error_message(),
+					);
+				}
+			}
 
-			$references = yotm_prune_validate_live_reference_evidence( $item['payload'] ?? array(), $path );
+			$references = $journaled && ! is_file( $path ) ? true : yotm_prune_validate_live_reference_evidence( $item['payload'] ?? array(), $path );
 			if ( is_wp_error( $references ) ) {
 				if ( 'yotm_prune_path_protected' === $references->get_error_code() ) {
 					return array(
@@ -429,6 +441,46 @@ function yotm_process_claimed_prune_item( $item, $job, $worker, $uploads_base, $
 	} finally {
 		yotm_media_source_fence_release( $source_fence );
 	}//end try
+}
+
+/**
+ * Reauthorize every exact folder-selector binding before a new prune side effect.
+ *
+ * @param array $item Immutable prune item payload.
+ * @param array $job_payload Prune job payload.
+ * @return true|WP_Error
+ */
+function yotm_prune_validate_selector_bindings( $item, $job_payload ) {
+	if ( 'attached_meta_v2' !== ( $job_payload['selector'] ?? '' ) ) {
+		return true;
+	}
+
+	$bindings = array();
+	foreach ( (array) ( $item['ownership_evidence'] ?? array() ) as $evidence ) {
+		$attachment_id = absint( $evidence['attachment_id'] ?? 0 );
+		$meta_id       = absint( $evidence['selection_meta_id'] ?? 0 );
+		if ( ! $attachment_id || ! $meta_id || ( isset( $bindings[ $attachment_id ] ) && $bindings[ $attachment_id ] !== $meta_id ) ) {
+			return new WP_Error( 'yotm_prune_selector_binding_invalid', __( 'The prune item is not bound to its exact folder-selection row.', 'thumbnail-manager' ) );
+		}
+		$bindings[ $attachment_id ] = $meta_id;
+	}
+	if ( empty( $bindings ) ) {
+		return new WP_Error( 'yotm_prune_selector_binding_invalid', __( 'The prune item is not bound to its exact folder-selection row.', 'thumbnail-manager' ) );
+	}
+
+	foreach ( $bindings as $attachment_id => $meta_id ) {
+		$authorized = yotm_authorize_attached_file_selector_scope(
+			$attachment_id,
+			$meta_id,
+			absint( $job_payload['selection_meta_max'] ?? 0 ),
+			(array) ( $job_payload['selection_subpaths'] ?? array() )
+		);
+		if ( is_wp_error( $authorized ) ) {
+			return $authorized;
+		}
+	}
+
+	return true;
 }
 
 /**
