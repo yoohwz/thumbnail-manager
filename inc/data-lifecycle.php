@@ -243,7 +243,12 @@ function yotm_data_lifecycle_delete_option( $name ) {
 }
 
 /**
- * Return one database-stable lifecycle lock name.
+ * Return the database-stable plugin lifecycle lock name.
+ *
+ * One physical name deliberately covers topology, every site, workers, and
+ * media-source mutations. WordPress supports database versions where taking a
+ * second named lock releases the first one, so lifecycle safety must never
+ * depend on one connection owning multiple distinct GET_LOCK() names.
  *
  * @param string $kind Lock kind.
  * @param int    $blog_id Optional blog ID.
@@ -252,13 +257,99 @@ function yotm_data_lifecycle_delete_option( $name ) {
 function yotm_data_lifecycle_lock_name( $kind, $blog_id = 0 ) {
 	global $wpdb;
 
+	unset( $kind, $blog_id );
 	$database = defined( 'DB_NAME' ) ? DB_NAME : 'WordPress';
-	$scope    = $database . '|' . (string) $wpdb->base_prefix . '|' . sanitize_key( $kind );
-	if ( $blog_id ) {
-		$scope .= '|' . absint( $blog_id ) . '|' . (string) $wpdb->get_blog_prefix( absint( $blog_id ) );
-	}
+	$scope    = $database . '|' . (string) $wpdb->base_prefix . '|plugin';
 
 	return 'yotm_lifecycle_' . md5( $scope );
+}
+
+/**
+ * Return the current connection and exact owner of a named lock.
+ *
+ * The single SELECT also detects an automatic wpdb reconnect: the new
+ * connection ID cannot match a request-local handle captured before the loss.
+ *
+ * @param string $name Lock name.
+ * @return array{connection_id:string,owner_id:string,owned:bool}|WP_Error
+ */
+function yotm_data_lifecycle_named_lock_state( $name ) {
+	global $wpdb;
+
+	$wpdb->last_error = '';
+	$sql              = $wpdb->prepare(
+		'SELECT CONNECTION_ID() AS connection_id, IS_USED_LOCK(%s) AS owner_id',
+		sanitize_text_field( $name )
+	);
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared -- Advisory lock ownership is connection-local and uncached.
+	$row = $wpdb->get_row( $sql, ARRAY_A );
+	if ( '' !== (string) $wpdb->last_error || ! is_array( $row ) || ! is_numeric( $row['connection_id'] ?? null ) ) {
+		return new WP_Error( 'yotm_uninstall_fence_database', 'Could not verify the lifecycle database fence.' );
+	}
+
+	$connection_id = (string) $row['connection_id'];
+	$owner_id      = is_numeric( $row['owner_id'] ?? null ) ? (string) $row['owner_id'] : '';
+
+	return array(
+		'connection_id' => $connection_id,
+		'owner_id'      => $owner_id,
+		'owned'         => '' !== $owner_id && hash_equals( $connection_id, $owner_id ),
+	);
+}
+
+/**
+ * Verify one request-local lifecycle handle against the live DB connection.
+ *
+ * @param string $name Lock name.
+ * @return true|false|WP_Error
+ */
+function yotm_data_lifecycle_request_fence_owned( $name ) {
+	$handle = $GLOBALS['yotm_data_lifecycle_request_fences'][ $name ] ?? null;
+	if ( ! is_array( $handle ) || ! is_string( $handle['connection_id'] ?? null ) ) {
+		return false;
+	}
+
+	$state = yotm_data_lifecycle_named_lock_state( $name );
+	if ( is_wp_error( $state ) ) {
+		return $state;
+	}
+	if ( ! $state['owned'] || ! hash_equals( $handle['connection_id'], $state['connection_id'] ) ) {
+		return new WP_Error( 'yotm_uninstall_fence_lost', 'The request lost its lifecycle database fence and cannot resume persistent mutations.' );
+	}
+
+	return true;
+}
+
+/** Register the single lifecycle shutdown coordinator once. */
+function yotm_data_lifecycle_register_shutdown() {
+	if ( empty( $GLOBALS['yotm_data_lifecycle_fence_shutdown'] ) ) {
+		$GLOBALS['yotm_data_lifecycle_fence_shutdown'] = true;
+		register_shutdown_function( 'yotm_data_lifecycle_shutdown' );
+	}
+}
+
+/**
+ * Record one newly acquired request-local lifecycle fence.
+ *
+ * @param string $name Lock name.
+ * @return true|WP_Error
+ */
+function yotm_data_lifecycle_record_request_fence( $name ) {
+	$state = yotm_data_lifecycle_named_lock_state( $name );
+	if ( is_wp_error( $state ) || ! $state['owned'] ) {
+		yotm_data_lifecycle_release_named_lock( $name );
+
+		return is_wp_error( $state ) ? $state : new WP_Error( 'yotm_uninstall_fence_lost', 'The lifecycle database fence was lost after acquisition.' );
+	}
+	if ( ! isset( $GLOBALS['yotm_data_lifecycle_request_fences'] ) || ! is_array( $GLOBALS['yotm_data_lifecycle_request_fences'] ) ) {
+		$GLOBALS['yotm_data_lifecycle_request_fences'] = array();
+	}
+	$GLOBALS['yotm_data_lifecycle_request_fences'][ $name ] = array(
+		'connection_id' => $state['connection_id'],
+	);
+	yotm_data_lifecycle_register_shutdown();
+
+	return true;
 }
 
 /**
@@ -308,7 +399,11 @@ function yotm_data_lifecycle_release_named_lock( $name ) {
 function yotm_data_lifecycle_require_runtime_fence() {
 	$blog_id = absint( get_current_blog_id() );
 	$name    = yotm_data_lifecycle_lock_name( 'site', $blog_id );
-	if ( ! empty( $GLOBALS['yotm_data_lifecycle_request_fences'][ $name ] ) ) {
+	$owned   = yotm_data_lifecycle_request_fence_owned( $name );
+	if ( is_wp_error( $owned ) ) {
+		return $owned;
+	}
+	if ( $owned ) {
 		return true;
 	}
 
@@ -327,16 +422,7 @@ function yotm_data_lifecycle_require_runtime_fence() {
 		return is_wp_error( $intent ) ? $intent : new WP_Error( 'yotm_uninstall_in_progress', 'Persistent work is blocked while uninstall cleanup is pending.' );
 	}
 
-	if ( ! isset( $GLOBALS['yotm_data_lifecycle_request_fences'] ) || ! is_array( $GLOBALS['yotm_data_lifecycle_request_fences'] ) ) {
-		$GLOBALS['yotm_data_lifecycle_request_fences'] = array();
-	}
-	$GLOBALS['yotm_data_lifecycle_request_fences'][ $name ] = true;
-	if ( empty( $GLOBALS['yotm_data_lifecycle_fence_shutdown'] ) ) {
-		$GLOBALS['yotm_data_lifecycle_fence_shutdown'] = true;
-		register_shutdown_function( 'yotm_data_lifecycle_release_request_fences' );
-	}
-
-	return true;
+	return yotm_data_lifecycle_record_request_fence( $name );
 }
 
 /**
@@ -355,38 +441,87 @@ function yotm_data_lifecycle_release_request_fences() {
 }
 
 /**
- * Hold the network topology fence before a newly inserted site is initialized.
- *
- * The blogs row is inserted by Core immediately before this hook. An uninstall
- * whose final topology proof has not yet run will therefore see the new row;
- * one already past that proof keeps initialization behind this fence until its
- * cleanup completes.
+ * Drain mutation-bearing shutdown work before releasing lifecycle ownership.
  *
  * @return void
  */
-function yotm_data_lifecycle_fence_new_site_initialization() {
+function yotm_data_lifecycle_shutdown() {
+	if ( function_exists( 'yotm_media_source_shutdown_cleanup' ) ) {
+		yotm_media_source_shutdown_cleanup();
+	}
+	if ( function_exists( 'yotm_job_release_all_workers' ) ) {
+		yotm_job_release_all_workers();
+	}
+	yotm_data_lifecycle_release_request_fences();
+}
+
+/**
+ * Acquire the request topology fence before Core changes site membership.
+ *
+ * @return true|WP_Error
+ */
+function yotm_data_lifecycle_require_topology_fence() {
 	if ( ! is_multisite() ) {
+		return true;
+	}
+	$name  = yotm_data_lifecycle_lock_name( 'topology' );
+	$owned = yotm_data_lifecycle_request_fence_owned( $name );
+	if ( is_wp_error( $owned ) ) {
+		return $owned;
+	}
+	if ( $owned ) {
+		return true;
+	}
+	$acquired = yotm_data_lifecycle_acquire_named_lock( $name, 0 );
+	if ( is_wp_error( $acquired ) ) {
+		return $acquired;
+	}
+	if ( ! $acquired ) {
+		return new WP_Error( 'yotm_uninstall_topology_busy', 'Site topology changes are blocked by the plugin lifecycle fence.' );
+	}
+
+	return yotm_data_lifecycle_record_request_fence( $name );
+}
+
+/**
+ * Fail closed before Core inserts a new multisite row.
+ *
+ * @param WP_Error     $errors Validation errors.
+ * @param array        $data Prepared site data.
+ * @param WP_Site|null $old_site Existing site for updates.
+ * @return void
+ */
+function yotm_data_lifecycle_validate_site_insert( $errors, $data, $old_site ) {
+	unset( $data );
+	if ( null !== $old_site || ! $errors instanceof WP_Error ) {
 		return;
 	}
-	$name = yotm_data_lifecycle_lock_name( 'topology' );
-	if ( ! empty( $GLOBALS['yotm_data_lifecycle_request_fences'][ $name ] ) ) {
-		return;
-	}
-	$acquired = yotm_data_lifecycle_acquire_named_lock( $name, 10 );
-	if ( true !== $acquired ) {
-		return;
-	}
-	if ( ! isset( $GLOBALS['yotm_data_lifecycle_request_fences'] ) || ! is_array( $GLOBALS['yotm_data_lifecycle_request_fences'] ) ) {
-		$GLOBALS['yotm_data_lifecycle_request_fences'] = array();
-	}
-	$GLOBALS['yotm_data_lifecycle_request_fences'][ $name ] = true;
-	if ( empty( $GLOBALS['yotm_data_lifecycle_fence_shutdown'] ) ) {
-		$GLOBALS['yotm_data_lifecycle_fence_shutdown'] = true;
-		register_shutdown_function( 'yotm_data_lifecycle_release_request_fences' );
+	$fence = yotm_data_lifecycle_require_topology_fence();
+	if ( is_wp_error( $fence ) ) {
+		$errors->add( $fence->get_error_code(), $fence->get_error_message() );
 	}
 }
 
-add_action( 'wp_insert_site', 'yotm_data_lifecycle_fence_new_site_initialization', 0 );
+/**
+ * Fail closed before Core deletes a multisite row or uninitializes its tables.
+ *
+ * @param WP_Error $errors Validation errors.
+ * @param WP_Site  $old_site Site being deleted.
+ * @return void
+ */
+function yotm_data_lifecycle_validate_site_deletion( $errors, $old_site ) {
+	unset( $old_site );
+	if ( ! $errors instanceof WP_Error ) {
+		return;
+	}
+	$fence = yotm_data_lifecycle_require_topology_fence();
+	if ( is_wp_error( $fence ) ) {
+		$errors->add( $fence->get_error_code(), $fence->get_error_message() );
+	}
+}
+
+add_action( 'wp_validate_site_data', 'yotm_data_lifecycle_validate_site_insert', 0, 3 );
+add_action( 'wp_validate_site_deletion', 'yotm_data_lifecycle_validate_site_deletion', 0, 2 );
 
 /**
  * Read the physical presence and columns of one exact table.
@@ -1120,10 +1255,16 @@ function yotm_data_lifecycle_acquire_scope_fences( $site_ids ) {
 	foreach ( $site_ids as $blog_id ) {
 		$names[] = yotm_data_lifecycle_lock_name( 'site', $blog_id );
 	}
+	$names = array_values( array_unique( $names ) );
 
 	$locks = array();
 	foreach ( $names as $name ) {
-		$borrowed = ! empty( $GLOBALS['yotm_data_lifecycle_request_fences'][ $name ] );
+		$borrowed = yotm_data_lifecycle_request_fence_owned( $name );
+		if ( is_wp_error( $borrowed ) ) {
+			yotm_data_lifecycle_release_scope_fences( $locks );
+
+			return $borrowed;
+		}
 		if ( ! $borrowed ) {
 			$acquired = yotm_data_lifecycle_acquire_named_lock( $name, 0 );
 			if ( is_wp_error( $acquired ) || ! $acquired ) {
@@ -1132,13 +1273,70 @@ function yotm_data_lifecycle_acquire_scope_fences( $site_ids ) {
 				return is_wp_error( $acquired ) ? $acquired : new WP_Error( 'yotm_uninstall_fence_busy', 'An in-flight request requires retained plugin data.' );
 			}
 		}
+		$state = yotm_data_lifecycle_named_lock_state( $name );
+		if ( is_wp_error( $state ) || ! $state['owned'] ) {
+			if ( ! $borrowed ) {
+				yotm_data_lifecycle_release_named_lock( $name );
+			}
+			yotm_data_lifecycle_release_scope_fences( $locks );
+
+			return is_wp_error( $state ) ? $state : new WP_Error( 'yotm_uninstall_fence_lost', 'The lifecycle database fence was lost after acquisition.' );
+		}
 		$locks[] = array(
-			'name'  => $name,
-			'owned' => ! $borrowed,
+			'name'          => $name,
+			'owned'         => ! $borrowed,
+			'connection_id' => $state['connection_id'],
+		);
+	}//end foreach
+
+	return $locks;
+}
+
+/**
+ * Verify every uninstall scope handle against the current DB connection.
+ *
+ * @param array[] $locks Lock handles.
+ * @return true|WP_Error
+ */
+function yotm_data_lifecycle_verify_scope_fences( $locks ) {
+	foreach ( $locks as $lock ) {
+		if ( ! is_string( $lock['name'] ?? null ) || ! is_string( $lock['connection_id'] ?? null ) ) {
+			return new WP_Error( 'yotm_uninstall_fence_lost', 'A lifecycle database fence handle is invalid.' );
+		}
+		$state = yotm_data_lifecycle_named_lock_state( $lock['name'] );
+		if ( is_wp_error( $state ) ) {
+			return $state;
+		}
+		if ( ! $state['owned'] || ! hash_equals( $lock['connection_id'], $state['connection_id'] ) ) {
+			return new WP_Error( 'yotm_uninstall_fence_lost', 'A lifecycle database fence was lost before cleanup completed.' );
+		}
+	}
+
+	return true;
+}
+
+/**
+ * Roll back intents only while every scope fence is still owned.
+ *
+ * A lost DB connection also loses its named lock. In that state the durable
+ * intents must remain as a recovery blocker; attempting an unfenced rollback
+ * would reopen the mutation window that the intents closed.
+ *
+ * @param array[] $previous Previous intent states.
+ * @param string  $reason Failure reason.
+ * @param array[] $locks Lock handles.
+ * @return array{status:string,reason:string}
+ */
+function yotm_data_lifecycle_rollback_with_fences( $previous, $reason, $locks ) {
+	$valid = yotm_data_lifecycle_verify_scope_fences( $locks );
+	if ( is_wp_error( $valid ) ) {
+		return array(
+			'status' => 'partial',
+			'reason' => $valid->get_error_code(),
 		);
 	}
 
-	return $locks;
+	return yotm_data_lifecycle_rollback_result( $previous, $reason );
 }
 
 /**
@@ -1210,8 +1408,21 @@ function yotm_data_lifecycle_uninstall( $options = array() ) {
 	}
 
 	try {
+		$fences_valid = yotm_data_lifecycle_verify_scope_fences( $fences );
+		if ( is_wp_error( $fences_valid ) ) {
+			return array(
+				'status' => 'retained',
+				'reason' => $fences_valid->get_error_code(),
+			);
+		}
 		$verified_sites = yotm_data_lifecycle_uninstall_site_ids( $limits, $started );
-		if ( is_wp_error( $verified_sites ) || $verified_sites !== $sites || ! hash_equals( $scope_hash, yotm_data_lifecycle_scope_hash( $verified_sites ) ) ) {
+		if ( is_wp_error( $verified_sites ) ) {
+			return array(
+				'status' => 'retained',
+				'reason' => $verified_sites->get_error_code(),
+			);
+		}
+		if ( $verified_sites !== $sites || ! hash_equals( $scope_hash, yotm_data_lifecycle_scope_hash( $verified_sites ) ) ) {
 			return array(
 				'status' => 'retained',
 				'reason' => 'yotm_uninstall_scope_changed',
@@ -1229,21 +1440,38 @@ function yotm_data_lifecycle_uninstall( $options = array() ) {
 		if ( is_callable( $options['after_intents'] ?? null ) ) {
 			call_user_func( $options['after_intents'], $plans );
 		}
+		$fences_valid = yotm_data_lifecycle_verify_scope_fences( $fences );
+		if ( is_wp_error( $fences_valid ) ) {
+			return array(
+				'status' => 'partial',
+				'reason' => $fences_valid->get_error_code(),
+			);
+		}
 
 		$final_sites = yotm_data_lifecycle_uninstall_site_ids( $limits, $started );
-		if ( is_wp_error( $final_sites ) || $final_sites !== $sites || ! hash_equals( $scope_hash, yotm_data_lifecycle_scope_hash( $final_sites ) ) ) {
-			return yotm_data_lifecycle_rollback_result( $previous, 'yotm_uninstall_scope_changed' );
+		if ( is_wp_error( $final_sites ) ) {
+			return yotm_data_lifecycle_rollback_with_fences( $previous, $final_sites->get_error_code(), $fences );
+		}
+		if ( $final_sites !== $sites || ! hash_equals( $scope_hash, yotm_data_lifecycle_scope_hash( $final_sites ) ) ) {
+			return yotm_data_lifecycle_rollback_with_fences( $previous, 'yotm_uninstall_scope_changed', $fences );
 		}
 
 		$verified = yotm_data_lifecycle_preflight_scope( $final_sites, $scope_hash, $limits, $started );
 		if ( is_wp_error( $verified ) ) {
-			return yotm_data_lifecycle_rollback_result( $previous, $verified->get_error_code() );
+			return yotm_data_lifecycle_rollback_with_fences( $previous, $verified->get_error_code(), $fences );
 		}
 		if ( ! yotm_data_lifecycle_within_deadline( $started, $limits['max_seconds'] ) ) {
-			return yotm_data_lifecycle_rollback_result( $previous, 'yotm_uninstall_time_limit' );
+			return yotm_data_lifecycle_rollback_with_fences( $previous, 'yotm_uninstall_time_limit', $fences );
 		}
 
 		foreach ( $verified as $plan ) {
+			$fences_valid = yotm_data_lifecycle_verify_scope_fences( $fences );
+			if ( is_wp_error( $fences_valid ) ) {
+				return array(
+					'status' => 'partial',
+					'reason' => $fences_valid->get_error_code(),
+				);
+			}
 			$result = yotm_data_lifecycle_in_blog(
 				$plan['blog_id'],
 				static function () use ( $plan ) {
@@ -1256,7 +1484,7 @@ function yotm_data_lifecycle_uninstall( $options = array() ) {
 					'reason' => $result->get_error_code(),
 				);
 			}
-		}
+		}//end foreach
 
 		return array(
 			'status' => 'purged',

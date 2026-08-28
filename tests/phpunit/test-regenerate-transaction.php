@@ -26,7 +26,8 @@ class YOTM_Regenerate_Transaction_Test extends WP_UnitTestCase {
 
 	public function setUp(): void {
 		parent::setUp();
-		unset( $GLOBALS['yotm_job_storage_readiness'], $GLOBALS['yotm_media_source_last_error'] );
+		yotm_data_lifecycle_release_request_fences();
+		unset( $GLOBALS['yotm_job_storage_readiness'], $GLOBALS['yotm_job_logical_locks'], $GLOBALS['yotm_media_source_last_error'] );
 		$this->assertTrue( yotm_run_job_table_migration() );
 		yotm_media_source_shutdown_cleanup();
 		$this->administrator_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
@@ -73,6 +74,8 @@ class YOTM_Regenerate_Transaction_Test extends WP_UnitTestCase {
 		delete_option( YOTM_MEDIA_REFERENCE_STATE_OPTION );
 		delete_option( YOTM_MEDIA_SOURCE_DIRTY_OPTION );
 		wp_set_current_user( 0 );
+		unset( $GLOBALS['yotm_job_logical_locks'] );
+		yotm_data_lifecycle_release_request_fences();
 		parent::tearDown();
 	}
 

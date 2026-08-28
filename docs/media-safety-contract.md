@@ -149,6 +149,8 @@ The uninstall decision relies only on exact persisted schema, job quiescence, it
 
 Lifecycle schema markers and cleanup intents must be read and verified from the exact persisted options rows, without filter or object-cache authority. Recovery JSON classification rejects decoded duplicate object names. The final topology and full recovery proof run after all scope-bound intents are durable and while network/site lifecycle fences exclude runtime job, worker, claim, journal, and source-index mutations; a failed proof requires verified intent rollback before retain-all.
 
+The lifecycle fence is one database-global physical named lock for the plugin. Worker, destructive-job, source-index, attachment, and path locks are request-local logical scopes under that same physical fence; this avoids relying on simultaneous distinct `GET_LOCK()` ownership on database versions supported by WordPress. A request-local fence handle is authoritative only while its captured DB connection still owns the physical lock. Multisite insert and delete validation must acquire the topology/lifecycle fence before Core changes site membership, and failure to acquire it must block the topology change. At request shutdown, pending source reconciliation and worker-ownership cleanup must complete before the physical lifecycle fence is released.
+
 ## Required regression evidence
 
 A Controlled change touching this contract must preserve or deliberately update automated coverage for the affected invariants. Existing high-value regression areas include:

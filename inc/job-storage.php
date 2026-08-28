@@ -435,44 +435,50 @@ function yotm_job_worker_lock_name( $job_id ) {
 }
 
 /**
- * Acquire a named MySQL lock without waiting.
+ * Acquire one logical lock under the request's physical lifecycle fence.
+ *
+ * All plugin lock classes intentionally share the single physical lifecycle
+ * lock. This remains safe on pre-5.7.5 MySQL, where acquiring a different
+ * GET_LOCK() name would otherwise release the lifecycle fence.
  *
  * @param string $lock_name Lock name.
  * @return bool|WP_Error True when acquired, false for contention, or a persistence error.
  */
 function yotm_job_acquire_named_lock( $lock_name ) {
-	global $wpdb;
-
-	$sql = $wpdb->prepare( 'SELECT GET_LOCK(%s, 0)', sanitize_text_field( $lock_name ) );
-
-	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared -- Advisory locks are connection state and cannot use the object cache.
-	$result      = $wpdb->get_var( $sql );
-	$query_error = yotm_job_last_database_error();
-
-	if ( is_wp_error( $query_error ) ) {
-		return $query_error;
-	}
-
-	if ( null === $result || ! in_array( (string) $result, array( '0', '1' ), true ) ) {
+	$lock_name = sanitize_text_field( $lock_name );
+	if ( '' === $lock_name ) {
 		return yotm_job_storage_error();
 	}
+	$fence = yotm_data_lifecycle_require_runtime_fence();
+	if ( is_wp_error( $fence ) ) {
+		return 'yotm_uninstall_fence_busy' === $fence->get_error_code() ? false : $fence;
+	}
+	if ( ! isset( $GLOBALS['yotm_job_logical_locks'] ) || ! is_array( $GLOBALS['yotm_job_logical_locks'] ) ) {
+		$GLOBALS['yotm_job_logical_locks'] = array();
+	}
+	$GLOBALS['yotm_job_logical_locks'][ $lock_name ] = 1 + absint( $GLOBALS['yotm_job_logical_locks'][ $lock_name ] ?? 0 );
 
-	return '1' === (string) $result;
+	return true;
 }
 
 /**
- * Release a named MySQL lock owned by this connection.
+ * Release one request-local logical lock reference.
  *
  * @param string $lock_name Lock name.
  * @return bool
  */
 function yotm_job_release_named_lock( $lock_name ) {
-	global $wpdb;
+	$lock_name = sanitize_text_field( $lock_name );
+	if ( '' === $lock_name || empty( $GLOBALS['yotm_job_logical_locks'][ $lock_name ] ) ) {
+		return false;
+	}
 
-	$sql = $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', sanitize_text_field( $lock_name ) );
+	--$GLOBALS['yotm_job_logical_locks'][ $lock_name ];
+	if ( $GLOBALS['yotm_job_logical_locks'][ $lock_name ] <= 0 ) {
+		unset( $GLOBALS['yotm_job_logical_locks'][ $lock_name ] );
+	}
 
-	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared -- Advisory locks are connection state and cannot use the object cache.
-	return 1 === (int) $wpdb->get_var( $sql );
+	return true;
 }
 
 /**
@@ -517,6 +523,13 @@ function yotm_job_acquire_worker( $job_id, $statuses, $phases = array() ) {
 	global $wpdb;
 	$fence = yotm_data_lifecycle_require_runtime_fence();
 	if ( is_wp_error( $fence ) ) {
+		if ( 'yotm_uninstall_fence_busy' === $fence->get_error_code() ) {
+			return new WP_Error(
+				'yotm_job_worker_busy',
+				__( 'Another request is processing this job. Retrying shortly.', 'thumbnail-manager' ),
+				array( 'job' => yotm_job_get_by_id( absint( $job_id ) ) )
+			);
+		}
 		return $fence;
 	}
 
@@ -903,15 +916,18 @@ function yotm_job_create( $type, $payload = array(), $args = array() ) {
 	if ( $exclusive ) {
 		$database  = defined( 'DB_NAME' ) ? DB_NAME : 'WordPress';
 		$lock_name = 'yotm_' . md5( $database . '|' . $wpdb->prefix . '|' . get_current_blog_id() );
-		$acquired  = (int) $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK(%s, 5)', $lock_name ) );
+		$acquired  = yotm_job_acquire_named_lock( $lock_name );
 
-		if ( 1 !== $acquired ) {
+		if ( is_wp_error( $acquired ) ) {
+			return $acquired;
+		}
+		if ( ! $acquired ) {
 			return new WP_Error( 'yotm_lock_unavailable', __( 'Could not acquire the media maintenance lock. Please try again.', 'thumbnail-manager' ) );
 		}
 
 		$locked = yotm_job_find_destructive_lock();
 		if ( is_wp_error( $locked ) ) {
-			$wpdb->get_var( $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', $lock_name ) );
+			yotm_job_release_named_lock( $lock_name );
 
 			return $locked;
 		}
@@ -929,7 +945,7 @@ function yotm_job_create( $type, $payload = array(), $args = array() ) {
 					'type'  => $locked['type'],
 				)
 			);
-			$wpdb->get_var( $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', $lock_name ) );
+			yotm_job_release_named_lock( $lock_name );
 
 			return $error;
 		}
@@ -967,7 +983,7 @@ function yotm_job_create( $type, $payload = array(), $args = array() ) {
 	$insert_error = $wpdb->last_error;
 
 	if ( '' !== $lock_name ) {
-		$wpdb->get_var( $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', $lock_name ) );
+		yotm_job_release_named_lock( $lock_name );
 	}
 
 	if ( false === $insert ) {

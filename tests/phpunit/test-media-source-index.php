@@ -86,6 +86,8 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 		}
 		delete_option( YOTM_MEDIA_SOURCE_DIRTY_OPTION );
 		delete_option( YOTM_MEDIA_REFERENCE_STATE_OPTION );
+		unset( $GLOBALS['yotm_job_logical_locks'] );
+		yotm_data_lifecycle_release_request_fences();
 		parent::tearDown();
 	}
 
@@ -589,7 +591,7 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 		yotm_job_release_worker( $worker );
 	}
 
-	public function test_prune_path_lock_contention_is_retryable_without_side_effects() {
+	public function test_prune_lifecycle_fence_loss_is_retryable_without_side_effects() {
 		$fixture    = $this->create_attachment_with_thumbnail( 'delete-busy.jpg', 'delete-busy-150x150.jpg' );
 		$candidates = $this->collect_candidates( $fixture['attachment_id'] );
 		$candidate  = reset( $candidates );
@@ -621,12 +623,13 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 		$item         = yotm_job_claim_items( $worker, 1 )[0];
 		$source_fence = yotm_media_source_fence_acquire();
 		$this->assertIsArray( $source_fence );
+		yotm_data_lifecycle_release_request_fences();
 		add_filter( 'query', array( $this, 'force_named_lock_contention' ) );
 		$result = yotm_process_claimed_prune_item( $item, yotm_job_get_by_id( $job['id'] ), $worker, $this->uploads_base );
 		remove_filter( 'query', array( $this, 'force_named_lock_contention' ) );
 		yotm_media_source_fence_release( $source_fence );
 		$this->assertWPError( $result );
-		$this->assertSame( 'yotm_media_path_busy', $result->get_error_code() );
+		$this->assertSame( 'yotm_job_worker_stale', $result->get_error_code() );
 		$this->assertFileExists( $fixture['thumbnail'] );
 		$this->assertArrayHasKey( 'thumbnail', wp_get_attachment_metadata( $fixture['attachment_id'] )['sizes'] );
 		yotm_job_release_item_claim( $item );
@@ -640,6 +643,7 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 			$wpdb->prepare( "SELECT meta_id FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key = '_wp_attached_file' LIMIT 1", $fixture['attachment_id'] )
 		);
 		$before  = get_post_meta( $fixture['attachment_id'], '_wp_attached_file', true );
+		yotm_data_lifecycle_release_request_fences();
 		add_filter( 'query', array( $this, 'force_named_lock_contention' ) );
 		$this->assertFalse( update_metadata_by_mid( 'post', $meta_id, $this->relative_path( $fixture['thumbnail'] ), false ) );
 		remove_filter( 'query', array( $this, 'force_named_lock_contention' ) );
@@ -1126,7 +1130,7 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 		$wpdb->last_error               = '';
 	}
 
-	public function test_multi_alias_lock_order_is_deterministic_and_partial_acquisition_is_released() {
+	public function test_multi_alias_lock_order_is_deterministic_under_one_physical_lifecycle_fence() {
 		$first  = trailingslashit( $this->test_dir ) . 'z-lock.jpg';
 		$second = trailingslashit( $this->test_dir ) . 'a-lock.jpg';
 		$this->write_file( $first, 'first' );
@@ -1141,6 +1145,9 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 		}
 		ksort( $sorted );
 		$expected_names = array_map( 'yotm_media_path_lock_name', array_values( $sorted ) );
+		yotm_data_lifecycle_release_request_fences();
+		$this->named_lock_attempts = 0;
+		$this->named_lock_names    = array();
 		add_filter( 'query', array( $this, 'fail_second_named_lock' ) );
 		$result = yotm_media_path_lock_aliases(
 			array(
@@ -1149,11 +1156,15 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 			)
 		);
 		remove_filter( 'query', array( $this, 'fail_second_named_lock' ) );
-		$this->assertWPError( $result );
-		$this->assertSame( $expected_names, $this->named_lock_names );
+		$this->assertIsArray( $result );
+		$this->assertSame( $expected_names, array_column( $result, 'name' ) );
+		$this->assertSame( array( yotm_data_lifecycle_lock_name( 'site', get_current_blog_id() ) ), $this->named_lock_names );
+		foreach ( array_reverse( $result ) as $handle ) {
+			yotm_media_path_lock_release( $handle );
+		}
 		$this->assertEmpty( $GLOBALS['yotm_media_path_locks'] );
-		global $wpdb;
-		$this->assertSame( '1', (string) $wpdb->get_var( $wpdb->prepare( 'SELECT IS_FREE_LOCK(%s)', $expected_names[0] ) ) );
+		$state = yotm_data_lifecycle_named_lock_state( yotm_data_lifecycle_lock_name( 'site', get_current_blog_id() ) );
+		$this->assertTrue( $state['owned'] );
 	}
 
 	public function test_lock_names_are_stable_and_site_scoped() {

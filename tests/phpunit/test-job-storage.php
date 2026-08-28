@@ -27,7 +27,12 @@ class YOTM_Job_Storage_Test extends WP_UnitTestCase {
 
 	public function setUp(): void {
 		parent::setUp();
-		yotm_install_job_tables();
+		yotm_data_lifecycle_release_request_fences();
+		unset( $GLOBALS['yotm_job_storage_readiness'], $GLOBALS['yotm_job_logical_locks'] );
+		if ( ! yotm_job_tables_exist() ) {
+			delete_option( 'yotm_job_db_version' );
+		}
+		$this->assertTrue( yotm_run_job_table_migration() );
 		delete_option( YOTM_MEDIA_SOURCE_DIRTY_OPTION );
 		$this->assertTrue( yotm_media_source_clear_index() );
 		$reference_state = yotm_media_reference_index_state();
@@ -56,6 +61,8 @@ class YOTM_Job_Storage_Test extends WP_UnitTestCase {
 		wp_set_current_user( 0 );
 		delete_option( YOTM_MEDIA_REFERENCE_STATE_OPTION );
 		delete_option( YOTM_MEDIA_SOURCE_DIRTY_OPTION );
+		unset( $GLOBALS['yotm_job_logical_locks'] );
+		yotm_data_lifecycle_release_request_fences();
 		parent::tearDown();
 	}
 
@@ -175,6 +182,7 @@ class YOTM_Job_Storage_Test extends WP_UnitTestCase {
 			)
 		);
 		$this->assertIsArray( $job );
+		yotm_data_lifecycle_release_request_fences();
 
 		$suppressing = $wpdb->suppress_errors();
 		add_filter( 'query', array( $this, 'fail_named_lock_query' ) );
@@ -182,7 +190,7 @@ class YOTM_Job_Storage_Test extends WP_UnitTestCase {
 		try {
 			$worker = yotm_job_acquire_worker( $job['id'], array( 'scanning' ), array( 'metadata' ) );
 			$this->assertWPError( $worker );
-			$this->assertSame( 'yotm_job_storage_unavailable', $worker->get_error_code() );
+			$this->assertSame( 'yotm_uninstall_fence_database', $worker->get_error_code() );
 			$this->assertNotSame( 'yotm_job_worker_busy', $worker->get_error_code() );
 		} finally {
 			remove_filter( 'query', array( $this, 'fail_named_lock_query' ) );
@@ -391,6 +399,7 @@ class YOTM_Job_Storage_Test extends WP_UnitTestCase {
 				'exclusive' => false,
 			)
 		);
+		yotm_data_lifecycle_release_request_fences();
 		add_filter( 'query', array( $this, 'force_named_lock_contention' ) );
 		$result = yotm_job_cancel( $job );
 		remove_filter( 'query', array( $this, 'force_named_lock_contention' ) );

@@ -30,6 +30,12 @@ class YOTM_Data_Lifecycle_Test extends WP_UnitTestCase {
 	/** @var string */
 	private $failed_option_delete = '';
 
+	/** @var int */
+	private $named_lock_queries = 0;
+
+	/** @var string[] */
+	private $shutdown_queries = array();
+
 	public function setUp(): void {
 		parent::setUp();
 		$this->primary_blog_id = get_current_blog_id();
@@ -44,6 +50,9 @@ class YOTM_Data_Lifecycle_Test extends WP_UnitTestCase {
 		remove_filter( 'query', array( $this, 'fail_selected_option_read' ), 1 );
 		remove_filter( 'query', array( $this, 'fail_selected_option_write' ), 1 );
 		remove_filter( 'query', array( $this, 'fail_selected_option_delete' ), 1 );
+		remove_filter( 'query', array( $this, 'force_lifecycle_lock_contention' ), 1 );
+		remove_filter( 'query', array( $this, 'count_named_lock_queries' ), 1 );
+		remove_filter( 'query', array( $this, 'record_shutdown_queries' ), 1 );
 		remove_filter( 'pre_option_yotm_job_db_version', array( $this, 'virtual_current_schema' ) );
 		remove_filter( 'pre_option_' . YOTM_UNINSTALL_INTENT_OPTION, array( $this, 'hide_cleanup_intent' ) );
 		yotm_data_lifecycle_release_request_fences();
@@ -77,6 +86,7 @@ class YOTM_Data_Lifecycle_Test extends WP_UnitTestCase {
 		}
 		$this->test_dir = '';
 		unset( $GLOBALS['yotm_job_storage_readiness'] );
+		unset( $GLOBALS['yotm_job_logical_locks'] );
 		yotm_data_lifecycle_release_request_fences();
 		parent::tearDown();
 
@@ -85,6 +95,7 @@ class YOTM_Data_Lifecycle_Test extends WP_UnitTestCase {
 		$this->clear_owned_options();
 		update_option( 'yotm_job_db_version', YOTM_JOB_DB_VERSION, false );
 		unset( $GLOBALS['yotm_job_storage_readiness'] );
+		unset( $GLOBALS['yotm_job_logical_locks'] );
 		yotm_data_lifecycle_release_request_fences();
 	}
 
@@ -382,6 +393,23 @@ class YOTM_Data_Lifecycle_Test extends WP_UnitTestCase {
 		$this->assertRetained( $result, 'yotm_uninstall_prune_recovery' );
 	}
 
+	public function test_lost_scope_fence_after_intents_keeps_durable_recovery_blocker() {
+		$this->create_job( 'completed' );
+		$result = yotm_data_lifecycle_uninstall(
+			array(
+				'after_intents' => static function () {
+					$name = yotm_data_lifecycle_lock_name( 'site', get_current_blog_id() );
+					yotm_data_lifecycle_release_named_lock( $name );
+				},
+			)
+		);
+
+		$this->assertSame( 'partial', $result['status'] );
+		$this->assertSame( 'yotm_uninstall_fence_lost', $result['reason'] );
+		$this->assertIsArray( get_option( YOTM_UNINSTALL_INTENT_OPTION, null ) );
+		$this->assertTrue( yotm_job_tables_exist() );
+	}
+
 	public function test_persisted_cleanup_intent_blocks_new_runtime_job() {
 		yotm_data_lifecycle_release_request_fences();
 		$intent = yotm_data_lifecycle_intent(
@@ -432,6 +460,63 @@ class YOTM_Data_Lifecycle_Test extends WP_UnitTestCase {
 			$other->get_var( $other->prepare( 'SELECT RELEASE_LOCK(%s)', $name ) );
 			$other->close();
 		}
+	}
+
+	public function test_stale_request_handle_after_lost_connection_cannot_authorize_mutation() {
+		yotm_data_lifecycle_release_request_fences();
+		$this->assertTrue( yotm_data_lifecycle_require_runtime_fence() );
+		$name = yotm_data_lifecycle_lock_name( 'site', get_current_blog_id() );
+		$this->assertTrue( yotm_data_lifecycle_release_named_lock( $name ) );
+
+		$other = new wpdb( DB_USER, DB_PASSWORD, DB_NAME, DB_HOST );
+		$this->assertTrue( $other->ready );
+		$this->assertSame( '1', (string) $other->get_var( $other->prepare( 'SELECT GET_LOCK(%s, 0)', $name ) ) );
+
+		try {
+			$job = $this->create_job( 'running' );
+
+			$this->assertWPError( $job );
+			$this->assertSame( 'yotm_uninstall_fence_lost', $job->get_error_code() );
+		} finally {
+			$other->get_var( $other->prepare( 'SELECT RELEASE_LOCK(%s)', $name ) );
+			$other->close();
+		}
+	}
+
+	public function test_logical_locks_reuse_one_physical_lifecycle_fence() {
+		yotm_data_lifecycle_release_request_fences();
+		$this->assertTrue( yotm_data_lifecycle_require_runtime_fence() );
+		$name   = yotm_data_lifecycle_lock_name( 'site', get_current_blog_id() );
+		$before = yotm_data_lifecycle_named_lock_state( $name );
+		$this->assertTrue( $before['owned'] );
+
+		$this->named_lock_queries = 0;
+		add_filter( 'query', array( $this, 'count_named_lock_queries' ), 1 );
+		$logical = yotm_job_acquire_named_lock( 'yotm_test_distinct_logical_name' );
+		remove_filter( 'query', array( $this, 'count_named_lock_queries' ), 1 );
+
+		$this->assertTrue( $logical );
+		$this->assertSame( 0, $this->named_lock_queries );
+		$after = yotm_data_lifecycle_named_lock_state( $name );
+		$this->assertTrue( $after['owned'] );
+		$this->assertSame( $before['connection_id'], $after['connection_id'] );
+		$this->assertTrue( yotm_job_release_named_lock( 'yotm_test_distinct_logical_name' ) );
+	}
+
+	public function test_shutdown_drains_worker_mutation_before_lifecycle_release() {
+		$job    = $this->create_job( 'running' );
+		$worker = yotm_job_acquire_worker( $job['id'], array( 'running' ), array( 'running' ) );
+		$this->assertIsArray( $worker );
+
+		$this->shutdown_queries = array();
+		add_filter( 'query', array( $this, 'record_shutdown_queries' ), 1 );
+		yotm_data_lifecycle_shutdown();
+		remove_filter( 'query', array( $this, 'record_shutdown_queries' ), 1 );
+
+		$this->assertSame( array( 'worker_release', 'lifecycle_release' ), $this->shutdown_queries );
+		$stored = yotm_job_get_by_id( $job['id'] );
+		$this->assertSame( '', $stored['worker_token'] );
+		$this->assertEmpty( $GLOBALS['yotm_data_lifecycle_request_fences'] );
 	}
 
 	public function test_item_limit_retains_everything() {
@@ -665,6 +750,45 @@ class YOTM_Data_Lifecycle_Test extends WP_UnitTestCase {
 		$this->assertSame( YOTM_JOB_DB_VERSION, get_option( 'yotm_job_db_version' ) );
 	}
 
+	public function test_multisite_insert_fails_before_row_creation_when_topology_fence_is_contended() {
+		if ( ! is_multisite() ) {
+			$this->markTestSkipped( 'Requires WordPress Multisite.' );
+		}
+		yotm_data_lifecycle_release_request_fences();
+		$domain = 'blocked-' . wp_generate_password( 8, false, false ) . '.example.org';
+		add_filter( 'query', array( $this, 'force_lifecycle_lock_contention' ), 1 );
+		$result = wp_insert_site(
+			array(
+				'domain'     => $domain,
+				'path'       => '/',
+				'network_id' => get_current_network_id(),
+			)
+		);
+		remove_filter( 'query', array( $this, 'force_lifecycle_lock_contention' ), 1 );
+
+		$this->assertWPError( $result );
+		$this->assertSame( 'yotm_uninstall_topology_busy', $result->get_error_code() );
+		$this->assertSame( array(), get_sites( array( 'domain' => $domain ) ) );
+	}
+
+	public function test_multisite_delete_fails_before_uninitialization_when_topology_fence_is_contended() {
+		global $wpdb;
+
+		if ( ! is_multisite() ) {
+			$this->markTestSkipped( 'Requires WordPress Multisite.' );
+		}
+		$blog_id = $this->create_second_site();
+		yotm_data_lifecycle_release_request_fences();
+		add_filter( 'query', array( $this, 'force_lifecycle_lock_contention' ), 1 );
+		$result = wp_delete_site( $blog_id );
+		remove_filter( 'query', array( $this, 'force_lifecycle_lock_contention' ), 1 );
+
+		$this->assertWPError( $result );
+		$this->assertSame( 'yotm_uninstall_topology_busy', $result->get_error_code() );
+		$this->assertInstanceOf( WP_Site::class, get_site( $blog_id ) );
+		$this->assertTrue( $this->table_exists( $wpdb->get_blog_prefix( $blog_id ) . 'options' ) );
+	}
+
 	public function test_multisite_site_cap_retains_every_site() {
 		if ( ! is_multisite() ) {
 			$this->markTestSkipped( 'Requires WordPress Multisite.' );
@@ -769,6 +893,28 @@ class YOTM_Data_Lifecycle_Test extends WP_UnitTestCase {
 	public function fail_selected_drop( $query ) {
 		if ( $this->failed_drop_table && false !== strpos( $query, "DROP TABLE IF EXISTS `{$this->failed_drop_table}`" ) ) {
 			return 'SELECT * FROM yotm_forced_lifecycle_failure';
+		}
+
+		return $query;
+	}
+
+	public function force_lifecycle_lock_contention( $query ) {
+		return preg_match( '/^SELECT GET_LOCK\(/i', ltrim( $query ) ) ? 'SELECT 0' : $query;
+	}
+
+	public function count_named_lock_queries( $query ) {
+		if ( preg_match( '/^SELECT GET_LOCK\(/i', ltrim( $query ) ) ) {
+			++$this->named_lock_queries;
+		}
+
+		return $query;
+	}
+
+	public function record_shutdown_queries( $query ) {
+		if ( preg_match( '/^UPDATE\s+\S+\s+SET worker_token = \'\'/i', ltrim( $query ) ) ) {
+			$this->shutdown_queries[] = 'worker_release';
+		} elseif ( preg_match( '/^SELECT RELEASE_LOCK\(/i', ltrim( $query ) ) ) {
+			$this->shutdown_queries[] = 'lifecycle_release';
 		}
 
 		return $query;
