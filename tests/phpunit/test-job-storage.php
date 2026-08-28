@@ -290,6 +290,97 @@ class YOTM_Job_Storage_Test extends WP_UnitTestCase {
 		yotm_job_release_worker( $worker );
 	}
 
+	public function test_item_v3_finalizes_item_and_job_counters_exactly_once() {
+		$job = yotm_job_create(
+			'regenerate',
+			array( 'discovery_done' => 1 ),
+			array(
+				'status'       => 'running',
+				'phase'        => 'regenerate',
+				'counter_mode' => 'item_v3',
+				'total'        => 1,
+			)
+		);
+		$this->assertTrue( yotm_job_add_item( $job['id'], 'item-v3-once', array( 'attachment_id' => 77 ), 'queued', 12 ) );
+		$worker = yotm_job_acquire_worker( $job['id'], array( 'running' ), array( 'regenerate' ) );
+		$item   = yotm_job_claim_items( $worker, 1 )[0];
+
+		$this->assertTrue( yotm_job_finish_item_v3( $item, $worker, 'done', '', 12 ) );
+		$this->assertFalse( yotm_job_finish_item_v3( $item, $worker, 'done', '', 12 ) );
+
+		$current = yotm_job_get_by_id( $job['id'] );
+		$this->assertSame( 1, $current['processed'] );
+		$this->assertSame( 1, $current['succeeded'] );
+		$this->assertSame( 0, $current['failed'] );
+		$this->assertSame( 12, $current['bytes'] );
+		$this->assertFalse( yotm_job_has_remaining_items( $job['id'] ) );
+		$this->assertSame( 1, yotm_job_item_counters( $job['id'] )['processed'] );
+
+		yotm_job_release_worker( $worker );
+	}
+
+	public function test_requeued_journal_blocks_cancel_and_expiry_claims_only_recovery_item() {
+		global $wpdb;
+
+		$job = yotm_job_create(
+			'regenerate',
+			array( 'discovery_done' => 1 ),
+			array(
+				'status'       => 'running',
+				'phase'        => 'regenerate',
+				'counter_mode' => 'item_v3',
+				'total'        => 2,
+			)
+		);
+		$this->assertTrue( yotm_job_add_item( $job['id'], 'first-unjournaled', array( 'attachment_id' => 10 ) ) );
+		$this->assertTrue(
+			yotm_job_add_item(
+				$job['id'],
+				'second-journaled',
+				array(
+					'attachment_id'        => 20,
+					'regeneration_journal' => array( 'phase' => 'promoted' ),
+				)
+			)
+		);
+
+		$worker = yotm_job_acquire_worker( $job['id'], array( 'running' ), array( 'regenerate' ) );
+		$items  = yotm_job_claim_items( $worker, 2 );
+		$this->assertCount( 2, $items );
+		foreach ( $items as $item ) {
+			$this->assertTrue( yotm_job_release_item_claim( $item ) );
+		}
+		yotm_job_release_worker( $worker );
+
+		$this->assertTrue( yotm_job_has_recovery_journals( $job['id'] ) );
+		$tables = yotm_job_table_names();
+		$wpdb->update(
+			$tables['jobs'],
+			array( 'expires_at' => gmdate( 'Y-m-d H:i:s', time() - MINUTE_IN_SECONDS ) ),
+			array( 'id' => $job['id'] )
+		);
+		$recovering = yotm_job_expire_if_inactive( yotm_job_get_by_id( $job['id'] ) );
+		$this->assertSame( 'running', $recovering['status'] );
+		$this->assertSame( 1, $recovering['payload']['recovery_only'] );
+		$this->assertSame( 'expired', $recovering['payload']['recovery_terminal_status'] );
+
+		$cancelled = yotm_job_cancel( $recovering );
+		$this->assertWPError( $cancelled );
+		$this->assertSame( 'yotm_job_cancel_busy', $cancelled->get_error_code() );
+		$recovering = yotm_job_get_by_id( $job['id'] );
+		$this->assertSame( 1, $recovering['payload']['recovery_only'] );
+		$this->assertSame( 'cancelled', $recovering['payload']['recovery_terminal_status'] );
+		$this->assertNotEmpty( $recovering['payload']['cancel_requested_at'] );
+		$this->assertSame( 'cancelled', yotm_job_recovery_terminal_status( $recovering ) );
+
+		$worker = yotm_job_acquire_worker( $job['id'], array( 'running' ), array( 'regenerate' ) );
+		$items  = yotm_job_claim_items( $worker, 1, true );
+		$this->assertCount( 1, $items );
+		$this->assertSame( 20, $items[0]['payload']['attachment_id'] );
+		yotm_job_release_item_claim( $items[0] );
+		yotm_job_release_worker( $worker );
+	}
+
 	public function test_cancel_is_retryable_while_worker_lock_is_contended() {
 		$job = yotm_job_create(
 			'recommendation',
@@ -629,10 +720,13 @@ class YOTM_Job_Storage_Test extends WP_UnitTestCase {
 		$uploads             = wp_get_upload_dir();
 		$directory           = trailingslashit( $uploads['basedir'] ) . 'yotm-disk-cursor-' . wp_generate_uuid4();
 		$second_directory    = trailingslashit( $uploads['basedir'] ) . 'yotm-disk-cursor-' . wp_generate_uuid4();
+		$nested_directory    = trailingslashit( $second_directory ) . 'nested';
 		$this->directories[] = $directory;
 		$this->directories[] = $second_directory;
+		$this->directories[] = $nested_directory;
 		wp_mkdir_p( $directory );
 		wp_mkdir_p( $second_directory );
+		wp_mkdir_p( $nested_directory );
 
 		for ( $index = 1; $index <= 5; ++$index ) {
 			$file          = trailingslashit( $directory ) . 'image-' . $index . '-100x100.jpg';
@@ -650,6 +744,9 @@ class YOTM_Job_Storage_Test extends WP_UnitTestCase {
 		$this->files[] = $backup;
 		file_put_contents( $sidecar, 'sidecar' );
 		file_put_contents( $backup, 'backup' );
+		$nested_file   = trailingslashit( $nested_directory ) . 'nested-300x300.jpg';
+		$this->files[] = $nested_file;
+		file_put_contents( $nested_file, 'thumbnail' );
 
 		$job = yotm_job_create(
 			'prune',
@@ -669,6 +766,7 @@ class YOTM_Job_Storage_Test extends WP_UnitTestCase {
 					),
 				),
 				'disk_entries_processed' => 0,
+				'disk_cursor_version'    => 'dfs_v2',
 				'orphan_summary'         => yotm_initial_orphan_summary(),
 			),
 			array(
@@ -688,8 +786,8 @@ class YOTM_Job_Storage_Test extends WP_UnitTestCase {
 		} while ( ! $batch['done'] && $loops < 10 );
 
 		$this->assertTrue( $batch['done'] );
-		$this->assertSame( 10, $batch['job']['payload']['orphan_summary']['total_files'] );
-		$this->assertSame( 10, $batch['job']['payload']['orphan_summary']['unmapped_skipped'] );
+		$this->assertSame( 11, $batch['job']['payload']['orphan_summary']['total_files'] );
+		$this->assertSame( 11, $batch['job']['payload']['orphan_summary']['unmapped_skipped'] );
 		$this->assertSame( 1, $batch['job']['payload']['orphan_summary']['unverified_sidecars'] );
 		$this->assertSame( 1, $batch['job']['payload']['orphan_summary']['ambiguous_siblings'] );
 	}

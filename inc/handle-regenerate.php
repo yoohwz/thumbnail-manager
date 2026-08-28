@@ -34,6 +34,7 @@ function yotm_regenerate_prepare() {
 	$query_args   = array();
 	$scope_label  = __( 'All media', 'thumbnail-manager' );
 	$cursor_mode  = true;
+	$selector     = 'attachment_id_v1';
 	$ids          = array();
 
 	if ( 'year' === $scope ) {
@@ -59,6 +60,7 @@ function yotm_regenerate_prepare() {
 				'compare' => 'REGEXP',
 			),
 		);
+		$selector                 = 'attached_meta_v2';
 		$scope_label              = yotm_uploads_relative_label( $base, $target_dir );
 	} elseif ( 'ids' === $scope ) {
 		preg_match_all( '/\d+/', $ids_raw, $matches );
@@ -82,14 +84,19 @@ function yotm_regenerate_prepare() {
 		$scope_label = __( 'Specific attachment IDs', 'thumbnail-manager' );
 	}//end if
 
-	$total  = $cursor_mode ? yotm_count_image_attachments( $query_args ) : count( $ids );
-	$max_id = $cursor_mode ? yotm_get_max_image_attachment_id( $query_args ) : 0;
-	$job    = yotm_job_create(
+	$selection_meta_max = 'attached_meta_v2' === $selector ? yotm_get_max_attached_file_meta_id() : 0;
+	if ( is_wp_error( $selection_meta_max ) ) {
+		wp_send_json_error( array( 'msg' => $selection_meta_max->get_error_message() ), 503 );
+	}
+	$total         = 'attached_meta_v2' === $selector ? 0 : ( $cursor_mode ? yotm_count_image_attachments( $query_args ) : count( $ids ) );
+	$max_id        = 'attached_meta_v2' === $selector ? 0 : ( $cursor_mode ? yotm_get_max_image_attachment_id( $query_args ) : 0 );
+	$initial_phase = $force_all ? 'source_index' : ( 'attached_meta_v2' === $selector ? 'selection' : 'regenerate' );
+	$job           = yotm_job_create(
 		'regenerate',
 		array(
 			'only_missing'             => $only_missing ? 1 : 0,
 			'force_all'                => $force_all ? 1 : 0,
-			'scan_phase'               => $force_all ? 'source_index' : 'regenerate',
+			'scan_phase'               => $initial_phase,
 			'source_index_initialized' => 0,
 			'source_index_complete'    => 0,
 			'source_index_cursor'      => 0,
@@ -97,14 +104,21 @@ function yotm_regenerate_prepare() {
 			'scope'                    => $scope,
 			'scope_label'              => $scope_label,
 			'subpath'                  => $subpath,
+			'selector'                 => $selector,
+			'selection_done'           => 'attached_meta_v2' === $selector ? 0 : 1,
+			'selection_meta_after'     => 0,
+			'selection_meta_max'       => absint( $selection_meta_max ),
+			'selection_scanned'        => 0,
+			'selection_matched'        => 0,
+			'selection_subpaths'       => 'attached_meta_v2' === $selector ? array( $subpath ) : array(),
 			'cursor_mode'              => $cursor_mode ? 1 : 0,
-			'discovery_done'           => $cursor_mode ? 0 : 1,
+			'discovery_done'           => 'attached_meta_v2' === $selector ? 0 : ( $cursor_mode ? 0 : 1 ),
 			'query_args'               => $query_args,
 		),
 		array(
 			'status'       => 'running',
-			'phase'        => $force_all ? 'source_index' : 'regenerate',
-			'counter_mode' => 'item_v2',
+			'phase'        => $initial_phase,
+			'counter_mode' => $force_all ? 'item_v3' : 'item_v2',
 			'total'        => $total,
 			'max_id'       => $max_id,
 			'ttl'          => DAY_IN_SECONDS,
@@ -170,7 +184,7 @@ function yotm_regenerate_batch() {
 		wp_send_json_error( array( 'msg' => __( 'This regeneration job is not runnable.', 'thumbnail-manager' ) ), 409 );
 	}
 
-	$worker = yotm_job_acquire_worker( $job['id'], array( 'running' ), array( 'source_index', 'regenerate' ) );
+	$worker = yotm_job_acquire_worker( $job['id'], array( 'running' ), array( 'source_index', 'selection', 'regenerate' ) );
 	if ( is_wp_error( $worker ) ) {
 		if ( 'yotm_job_worker_busy' !== $worker->get_error_code() ) {
 			wp_send_json_error( array( 'msg' => $worker->get_error_message() ), 503 );
@@ -193,11 +207,103 @@ function yotm_regenerate_batch() {
 		$response['retry_after_ms'] = 50;
 		wp_send_json_success( $response );
 	}
-	if ( 'item_v2' === $job['counter_mode'] ) {
+	if ( 'selection' === $job['phase'] ) {
+		$selected = yotm_regenerate_select_folder_batch( $job, $worker, $batch );
+		if ( is_wp_error( $selected ) ) {
+			wp_send_json_error( array( 'msg' => $selected->get_error_message() ), 503 );
+		}
+		$response                   = yotm_build_regenerate_response( $selected, false );
+		$response['retry_after_ms'] = 50;
+		wp_send_json_success( $response );
+	}
+	if ( in_array( $job['counter_mode'], array( 'item_v2', 'item_v3' ), true ) ) {
 		wp_send_json_success( yotm_regenerate_item_batch( $job, $worker, $batch ) );
 	}
 
 	wp_send_json_success( yotm_regenerate_legacy_batch( $job, $worker, $batch ) );
+}
+
+/**
+ * Materialize one bounded folder-selector page into regeneration items.
+ *
+ * @param array $job Regeneration job.
+ * @param array $worker Current worker ownership.
+ * @param int   $batch Batch size.
+ * @return array|WP_Error
+ */
+function yotm_regenerate_select_folder_batch( $job, $worker, $batch ) {
+	$payload = $job['payload'];
+	if ( 'attached_meta_v2' !== ( $payload['selector'] ?? '' ) ) {
+		return new WP_Error( 'yotm_regenerate_selector_invalid', __( 'The regeneration folder selector is invalid.', 'thumbnail-manager' ) );
+	}
+
+	$rows = yotm_get_attached_file_selector_rows_after(
+		absint( $payload['selection_meta_after'] ?? 0 ),
+		absint( $payload['selection_meta_max'] ?? 0 ),
+		$batch
+	);
+	if ( is_wp_error( $rows ) ) {
+		return $rows;
+	}
+
+	if ( empty( $rows ) ) {
+		$total                        = yotm_job_count_items( $job['id'] );
+		$payload['selection_done']    = 1;
+		$payload['discovery_done']    = 1;
+		$payload['selection_matched'] = $total;
+		$payload['scan_phase']        = 'regenerate';
+		if ( ! yotm_job_worker_update(
+			$worker,
+			array(
+				'payload' => $payload,
+				'phase'   => 'regenerate',
+				'total'   => $total,
+			)
+		) ) {
+			return yotm_job_storage_error();
+		}
+		return yotm_job_get_by_id( $job['id'] );
+	}
+
+	$subpaths = (array) ( $payload['selection_subpaths'] ?? array() );
+	$inserted = 0;
+	foreach ( $rows as $row ) {
+		$relative = yotm_normalize_attached_file_relative_path( $row['value'] ?? null );
+		if ( is_wp_error( $relative ) || ! yotm_attached_file_is_in_subpaths( $relative, $subpaths ) ) {
+			continue;
+		}
+		$authorized = yotm_authorize_attached_file_selector_scope(
+			$row['attachment_id'],
+			$row['meta_id'],
+			$payload['selection_meta_max'],
+			$subpaths
+		);
+		if ( is_wp_error( $authorized ) ) {
+			continue;
+		}
+		$item_key = hash( 'sha256', 'attachment:' . absint( $row['attachment_id'] ) );
+		if ( yotm_job_add_item(
+			$job['id'],
+			$item_key,
+			array(
+				'attachment_id'     => absint( $row['attachment_id'] ),
+				'selection_meta_id' => absint( $row['meta_id'] ),
+			)
+		) ) {
+			++$inserted;
+		} elseif ( ! yotm_job_item_exists( $job['id'], $item_key ) ) {
+			return yotm_job_storage_error();
+		}
+	}//end foreach
+
+	$payload['selection_meta_after'] = max( array_map( 'absint', wp_list_pluck( $rows, 'meta_id' ) ) );
+	$payload['selection_scanned']    = (int) ( $payload['selection_scanned'] ?? 0 ) + count( $rows );
+	$payload['selection_matched']    = (int) ( $payload['selection_matched'] ?? 0 ) + $inserted;
+	if ( ! yotm_job_worker_update( $worker, array( 'payload' => $payload ) ) ) {
+		return yotm_job_storage_error();
+	}
+
+	return yotm_job_get_by_id( $job['id'] );
 }
 
 /**
@@ -211,7 +317,10 @@ function yotm_regenerate_batch() {
 function yotm_regenerate_item_batch( $job, $worker, $batch ) {
 	$payload     = $job['payload'];
 	$cursor_mode = ! empty( $payload['cursor_mode'] );
-	$counters    = yotm_job_item_counters( $job['id'] );
+	$item_v3     = 'item_v3' === ( $job['counter_mode'] ?? '' );
+	$counters    = $item_v3
+		? array( 'remaining' => yotm_job_has_remaining_items( $job['id'] ) ? 1 : 0 )
+		: yotm_job_item_counters( $job['id'] );
 
 	if ( $cursor_mode && 0 === $counters['remaining'] && empty( $payload['discovery_done'] ) ) {
 		$ids = yotm_get_image_attachment_ids_after(
@@ -253,7 +362,7 @@ function yotm_regenerate_item_batch( $job, $worker, $batch ) {
 		$payload = $job['payload'];
 	}//end if
 
-	$items = yotm_job_claim_items( $worker, $batch );
+	$items = yotm_job_claim_items( $worker, $batch, ! empty( $job['payload']['recovery_only'] ) );
 	if ( is_wp_error( $items ) ) {
 		return array_merge(
 			yotm_build_regenerate_response( yotm_job_get_by_id( $job['id'] ), false ),
@@ -262,35 +371,77 @@ function yotm_regenerate_item_batch( $job, $worker, $batch ) {
 	}
 
 	foreach ( $items as $item ) {
+		if ( ! empty( $job['payload']['recovery_only'] ) && empty( $item['payload']['regeneration_journal'] ) ) {
+			yotm_job_release_item_claim( $item );
+			continue;
+		}
 		if ( ! yotm_job_refresh_worker( $worker ) || ! yotm_job_refresh_item_claim( $item ) ) {
 			break;
 		}
 
 		$attachment_id = absint( $item['payload']['attachment_id'] ?? 0 );
 		if ( ! $attachment_id ) {
-			yotm_job_finish_item( $item, 'failed', __( 'Attachment ID is missing.', 'thumbnail-manager' ) );
+			$item_v3
+				? yotm_job_finish_item_v3( $item, $worker, 'failed', __( 'Attachment ID is missing.', 'thumbnail-manager' ) )
+				: yotm_job_finish_item( $item, 'failed', __( 'Attachment ID is missing.', 'thumbnail-manager' ) );
 			continue;
+		}
+		if ( 'attached_meta_v2' === ( $payload['selector'] ?? '' ) && empty( $item['payload']['regeneration_journal'] ) ) {
+			$authorized = yotm_authorize_attached_file_selector_scope(
+				$attachment_id,
+				absint( $item['payload']['selection_meta_id'] ?? 0 ),
+				absint( $payload['selection_meta_max'] ?? 0 ),
+				(array) ( $payload['selection_subpaths'] ?? array() )
+			);
+			if ( is_wp_error( $authorized ) ) {
+				$item_v3
+					? yotm_job_finish_item_v3( $item, $worker, 'skipped', $authorized->get_error_message() )
+					: yotm_job_finish_item( $item, 'skipped', $authorized->get_error_message() );
+				continue;
+			}
 		}
 
 		$result = ! empty( $payload['force_all'] )
 			? yotm_regenerate_force_attachment( $attachment_id, $item, $worker )
 			: yotm_regenerate_attachment( $attachment_id, ! empty( $payload['only_missing'] ), false );
 		if ( 'regenerated' === $result['status'] ) {
-			yotm_job_finish_item( $item, 'done' );
+			$item_v3 ? yotm_job_finish_item_v3( $item, $worker, 'done' ) : yotm_job_finish_item( $item, 'done' );
 		} elseif ( 'skipped' === $result['status'] ) {
-			yotm_job_finish_item( $item, 'skipped', (string) $result['message'] );
+			$item_v3
+				? yotm_job_finish_item_v3( $item, $worker, 'skipped', (string) $result['message'] )
+				: yotm_job_finish_item( $item, 'skipped', (string) $result['message'] );
 		} elseif ( 'retry' === $result['status'] ) {
 			yotm_job_release_item_claim( $item );
 		} else {
-			yotm_job_finish_item( $item, 'failed', (string) $result['message'] );
+			$item_v3
+				? yotm_job_finish_item_v3( $item, $worker, 'failed', (string) $result['message'] )
+				: yotm_job_finish_item( $item, 'failed', (string) $result['message'] );
 		}
 	}//end foreach
 
-	$job      = yotm_job_sync_item_counters( $job['id'] );
-	$counters = yotm_job_item_counters( $job['id'] );
-	$done     = ! empty( $job['payload']['discovery_done'] ) && 0 === $counters['remaining'];
+	$job = $item_v3 ? yotm_job_get_by_id( $job['id'] ) : yotm_job_sync_item_counters( $job['id'] );
+	if ( $item_v3 && ! empty( $job['payload']['recovery_only'] ) && ! yotm_job_has_recovery_journals( $job['id'] ) ) {
+		$terminal = yotm_job_recovery_terminal_status( $job );
+		yotm_job_worker_update(
+			$worker,
+			array(
+				'status'     => $terminal,
+				'phase'      => $terminal,
+				'expires_at' => gmdate( 'Y-m-d H:i:s', time() + YOTM_JOB_AUDIT_RETENTION_SECONDS ),
+			)
+		);
+		return yotm_build_regenerate_response( yotm_job_get_by_id( $job['id'] ), false );
+	}
+	$remaining = $item_v3 ? yotm_job_has_remaining_items( $job['id'] ) : 0 !== yotm_job_item_counters( $job['id'] )['remaining'];
+	$done      = ! empty( $job['payload']['discovery_done'] ) && ! $remaining;
 
 	if ( $done && 'running' === $job['status'] ) {
+		if ( $item_v3 ) {
+			$audit = yotm_job_item_counters( $job['id'] );
+			if ( (int) $job['processed'] !== $audit['processed'] || (int) $job['succeeded'] !== $audit['succeeded'] || (int) $job['failed'] !== $audit['failed'] ) {
+				return array_merge( yotm_build_regenerate_response( $job, false ), array( 'retry_after_ms' => 250 ) );
+			}
+		}
 		yotm_job_worker_update(
 			$worker,
 			array(
@@ -592,29 +743,35 @@ function yotm_cleanup_obsolete_generated_files( $attached_file, $source_file, $o
  * @return array
  */
 function yotm_build_regenerate_response( $job, $done ) {
-	$payload   = $job['payload'];
-	$total     = (int) $job['total'];
-	$processed = (int) $job['processed'];
-	$failed    = (int) $job['failed'];
-	$skipped   = max( 0, $processed - (int) $job['succeeded'] - $failed );
-	$percent   = $done ? 100 : ( $total > 0 ? min( 99.9, ( $processed / $total ) * 100 ) : 100 );
+	$payload     = $job['payload'];
+	$total       = (int) $job['total'];
+	$processed   = (int) $job['processed'];
+	$failed      = (int) $job['failed'];
+	$skipped     = max( 0, $processed - (int) $job['succeeded'] - $failed );
+	$selector_v2 = 'attached_meta_v2' === ( $payload['selector'] ?? '' );
+	$total_known = ! $selector_v2 || ! empty( $payload['selection_done'] );
+	$percent     = $done ? 100 : ( $total_known ? ( $total > 0 ? min( 99.9, ( $processed / $total ) * 100 ) : 100 ) : null );
 
 	return array(
-		'token'        => $job['token'],
-		'status'       => $job['status'],
-		'processed'    => $processed,
-		'total'        => $total,
-		'regenerated'  => (int) $job['succeeded'],
-		'skipped'      => $skipped,
-		'failed'       => $failed,
-		'remaining'    => max( 0, $total - $processed ),
-		'percent'      => $percent,
-		'done'         => (bool) $done,
-		'stopped'      => in_array( $job['status'], array( 'cancelled', 'expired' ), true ),
-		'scope'        => (string) ( $payload['scope'] ?? 'all' ),
-		'scope_label'  => (string) ( $payload['scope_label'] ?? __( 'All media', 'thumbnail-manager' ) ),
-		'only_missing' => ! empty( $payload['only_missing'] ) ? 1 : 0,
-		'force_all'    => ! empty( $payload['force_all'] ) ? 1 : 0,
-		'errors'       => yotm_job_get_error_sample( $job['id'] ),
+		'token'             => $job['token'],
+		'status'            => $job['status'],
+		'phase'             => $job['phase'],
+		'processed'         => $processed,
+		'total'             => $total,
+		'regenerated'       => (int) $job['succeeded'],
+		'skipped'           => $skipped,
+		'failed'            => $failed,
+		'remaining'         => $total_known ? max( 0, $total - $processed ) : null,
+		'percent'           => $percent,
+		'total_known'       => $total_known,
+		'selection_done'    => ! empty( $payload['selection_done'] ),
+		'selection_scanned' => (int) ( $payload['selection_scanned'] ?? 0 ),
+		'done'              => (bool) $done,
+		'stopped'           => in_array( $job['status'], array( 'cancelled', 'expired' ), true ),
+		'scope'             => (string) ( $payload['scope'] ?? 'all' ),
+		'scope_label'       => (string) ( $payload['scope_label'] ?? __( 'All media', 'thumbnail-manager' ) ),
+		'only_missing'      => ! empty( $payload['only_missing'] ) ? 1 : 0,
+		'force_all'         => ! empty( $payload['force_all'] ) ? 1 : 0,
+		'errors'            => yotm_job_get_error_sample( $job['id'] ),
 	);
 }

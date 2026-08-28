@@ -116,7 +116,7 @@ function yotm_prune_delete_batch() {
 		$job = yotm_job_get_by_id( $job['id'] );
 	}
 
-	$items = yotm_job_claim_items( $worker, $batch );
+	$items = yotm_job_claim_items( $worker, $batch, ! empty( $job['payload']['recovery_only'] ) );
 	if ( is_wp_error( $items ) ) {
 		wp_send_json_error( array( 'msg' => $items->get_error_message() ), 409 );
 	}
@@ -125,8 +125,13 @@ function yotm_prune_delete_batch() {
 	$failed_now  = 0;
 	$retry       = false;
 	$base        = (string) ( $job['payload']['base'] ?? ( wp_get_upload_dir()['basedir'] ?? '' ) );
+	$item_v3     = 'item_v3' === ( $job['counter_mode'] ?? '' );
 
 	foreach ( $items as $item ) {
+		if ( ! empty( $job['payload']['recovery_only'] ) && empty( $item['payload']['prune_operation_journal_v1'] ) ) {
+			yotm_job_release_item_claim( $item );
+			continue;
+		}
 		$result = yotm_process_claimed_prune_item( $item, $job, $worker, $base );
 		if ( is_wp_error( $result ) ) {
 			yotm_job_release_item_claim( $item );
@@ -135,21 +140,53 @@ function yotm_prune_delete_batch() {
 		}
 
 		if ( ! empty( $result['deleted'] ) ) {
-			if ( yotm_job_finish_item( $item, 'done', '', (int) $result['bytes'] ) ) {
+			$finished = $item_v3
+				? yotm_job_finish_item_v3( $item, $worker, 'done', '', (int) $result['bytes'] )
+				: yotm_job_finish_item( $item, 'done', '', (int) $result['bytes'] );
+			if ( $finished ) {
 				++$deleted_now;
 			}
 		} elseif ( ! empty( $result['skipped'] ) ) {
-			yotm_job_finish_item( $item, 'skipped', (string) ( $result['message'] ?? '' ) );
-		} elseif ( yotm_job_finish_item( $item, 'failed', (string) ( $result['error'] ?? __( 'Could not delete the file.', 'thumbnail-manager' ) ) ) ) {
-			++$failed_now;
+			$item_v3
+				? yotm_job_finish_item_v3( $item, $worker, 'skipped', (string) ( $result['message'] ?? '' ) )
+				: yotm_job_finish_item( $item, 'skipped', (string) ( $result['message'] ?? '' ) );
+		} else {
+			$finished = $item_v3
+				? yotm_job_finish_item_v3( $item, $worker, 'failed', (string) ( $result['error'] ?? __( 'Could not delete the file.', 'thumbnail-manager' ) ) )
+				: yotm_job_finish_item( $item, 'failed', (string) ( $result['error'] ?? __( 'Could not delete the file.', 'thumbnail-manager' ) ) );
+			if ( $finished ) {
+				++$failed_now;
+			}
 		}
-	}
+	}//end foreach
 
-	$current  = yotm_job_sync_item_counters( $job['id'] );
-	$counters = yotm_job_item_counters( $job['id'] );
-	$done     = 0 === $counters['remaining'];
+	$current = $item_v3 ? yotm_job_get_by_id( $job['id'] ) : yotm_job_sync_item_counters( $job['id'] );
+	if ( $item_v3 && ! empty( $current['payload']['recovery_only'] ) && ! yotm_job_has_recovery_journals( $job['id'] ) ) {
+		$terminal = yotm_job_recovery_terminal_status( $current );
+		yotm_job_worker_update(
+			$worker,
+			array(
+				'status'     => $terminal,
+				'phase'      => $terminal,
+				'expires_at' => gmdate( 'Y-m-d H:i:s', time() + YOTM_JOB_AUDIT_RETENTION_SECONDS ),
+			)
+		);
+		wp_send_json_success( yotm_build_prune_delete_response( yotm_job_get_by_id( $job['id'] ), $deleted_now, $failed_now, false ) );
+	}
+	$done = $item_v3 ? ! yotm_job_has_remaining_items( $job['id'] ) : 0 === yotm_job_item_counters( $job['id'] )['remaining'];
 
 	if ( $done && is_array( $current ) && 'deleting' === $current['status'] ) {
+		if ( $item_v3 ) {
+			$audit = yotm_job_item_counters( $job['id'] );
+			if (
+				(int) $current['processed'] !== $audit['processed']
+				|| (int) $current['succeeded'] !== $audit['succeeded']
+				|| (int) $current['failed'] !== $audit['failed']
+				|| (int) $current['bytes'] !== $audit['bytes']
+			) {
+				wp_send_json_error( array( 'msg' => __( 'Prune counters did not match the terminal item audit.', 'thumbnail-manager' ) ), 503 );
+			}
+		}
 		yotm_job_worker_update(
 			$worker,
 			array(
@@ -158,7 +195,7 @@ function yotm_prune_delete_batch() {
 				'expires_at' => gmdate( 'Y-m-d H:i:s', time() + YOTM_JOB_AUDIT_RETENTION_SECONDS ),
 			)
 		);
-	}
+	}//end if
 
 	wp_send_json_success( yotm_build_prune_delete_response( yotm_job_get_by_id( $job['id'] ), $deleted_now, $failed_now, $retry ) );
 }
@@ -173,12 +210,13 @@ function yotm_prune_delete_batch() {
  * @return array
  */
 function yotm_build_prune_delete_response( $job, $deleted_now = 0, $failed_now = 0, $retry = false ) {
-	$counters  = yotm_job_item_counters( $job['id'] );
 	$processed = (int) $job['processed'];
 	$deleted   = (int) $job['succeeded'];
 	$failed    = (int) $job['failed'];
 	$bytes     = (int) $job['bytes'];
-	$remaining = $counters['remaining'];
+	$remaining = 'item_v3' === ( $job['counter_mode'] ?? '' )
+		? max( 0, (int) $job['total'] - $processed )
+		: yotm_job_item_counters( $job['id'] )['remaining'];
 	$stopped   = in_array( $job['status'], array( 'cancelled', 'expired' ), true );
 	$done      = 'completed' === $job['status'];
 	$total     = max( 1, (int) $job['total'] );
@@ -362,8 +400,36 @@ function yotm_process_claimed_prune_item( $item, $job, $worker, $uploads_base, $
 			if ( ! yotm_job_refresh_worker( $worker ) || ! yotm_job_refresh_item_claim( $item ) ) {
 				return new WP_Error( 'yotm_job_worker_stale', __( 'This job worker no longer owns the current batch.', 'thumbnail-manager' ) );
 			}
+			$journaled      = 'item_v3' === ( $job['counter_mode'] ?? '' ) && ! empty( $item['payload']['prune_operation_journal_v1'] );
+			$journal_absent = false;
+			if ( $journaled ) {
+				$journal_node = yotm_prune_journal_path_state( $path );
+				if ( is_wp_error( $journal_node ) ) {
+					return $journal_node;
+				}
+				if ( 'changed' === $journal_node['state'] ) {
+					return array(
+						'deleted' => false,
+						'skipped' => false,
+						'bytes'   => 0,
+						'error'   => __( 'The armed prune path contains a changed filesystem node and requires manual inspection.', 'thumbnail-manager' ),
+					);
+				}
+				$journal_absent = 'absent' === $journal_node['state'];
+			}
+			if ( ! $journal_absent ) {
+				$selector = yotm_prune_validate_selector_bindings( $item['payload'] ?? array(), $job['payload'] ?? array() );
+				if ( is_wp_error( $selector ) ) {
+					return array(
+						'deleted' => false,
+						'skipped' => false,
+						'bytes'   => 0,
+						'error'   => $selector->get_error_message(),
+					);
+				}
+			}
 
-			$references = yotm_prune_validate_live_reference_evidence( $item['payload'] ?? array(), $path );
+			$references = $journal_absent ? true : yotm_prune_validate_live_reference_evidence( $item['payload'] ?? array(), $path );
 			if ( is_wp_error( $references ) ) {
 				if ( 'yotm_prune_path_protected' === $references->get_error_code() ) {
 					return array(
@@ -383,13 +449,291 @@ function yotm_process_claimed_prune_item( $item, $job, $worker, $uploads_base, $
 
 			$payload         = $item['payload'];
 			$payload['path'] = $path;
-			return yotm_delete_prune_item( $payload, $uploads_base );
+			return 'item_v3' === ( $job['counter_mode'] ?? '' )
+				? yotm_delete_prune_item_recoverable( $item, $payload, $uploads_base, ! empty( $job['payload']['recovery_only'] ) )
+				: yotm_delete_prune_item( $payload, $uploads_base );
 		} finally {
 			yotm_media_path_lock_release( $path_lock );
 		}//end try
 	} finally {
 		yotm_media_source_fence_release( $source_fence );
 	}//end try
+}
+
+/**
+ * Reauthorize every exact folder-selector binding before a new prune side effect.
+ *
+ * @param array $item Immutable prune item payload.
+ * @param array $job_payload Prune job payload.
+ * @return true|WP_Error
+ */
+function yotm_prune_validate_selector_bindings( $item, $job_payload ) {
+	if ( 'attached_meta_v2' !== ( $job_payload['selector'] ?? '' ) ) {
+		return true;
+	}
+
+	$bindings = array();
+	foreach ( (array) ( $item['ownership_evidence'] ?? array() ) as $evidence ) {
+		$attachment_id = absint( $evidence['attachment_id'] ?? 0 );
+		$meta_id       = absint( $evidence['selection_meta_id'] ?? 0 );
+		if ( ! $attachment_id || ! $meta_id || ( isset( $bindings[ $attachment_id ] ) && $bindings[ $attachment_id ] !== $meta_id ) ) {
+			return new WP_Error( 'yotm_prune_selector_binding_invalid', __( 'The prune item is not bound to its exact folder-selection row.', 'thumbnail-manager' ) );
+		}
+		$bindings[ $attachment_id ] = $meta_id;
+	}
+	if ( empty( $bindings ) ) {
+		return new WP_Error( 'yotm_prune_selector_binding_invalid', __( 'The prune item is not bound to its exact folder-selection row.', 'thumbnail-manager' ) );
+	}
+
+	foreach ( $bindings as $attachment_id => $meta_id ) {
+		$authorized = yotm_authorize_attached_file_selector_scope(
+			$attachment_id,
+			$meta_id,
+			absint( $job_payload['selection_meta_max'] ?? 0 ),
+			(array) ( $job_payload['selection_subpaths'] ?? array() )
+		);
+		if ( is_wp_error( $authorized ) ) {
+			return $authorized;
+		}
+	}
+
+	return true;
+}
+
+/**
+ * Delete or recover one exact prune item using its persisted operation journal.
+ *
+ * @param array         $item Claimed item.
+ * @param array         $payload Validated immutable item payload.
+ * @param string        $uploads_base Uploads base path.
+ * @param bool          $recovery_only Whether only an already-achieved side effect may be reconciled.
+ * @param callable|null $journal_barrier Optional fault-injection barrier after arming and before unlink.
+ * @return array|WP_Error
+ */
+function yotm_delete_prune_item_recoverable( &$item, $payload, $uploads_base, $recovery_only = false, $journal_barrier = null ) {
+	$path    = yotm_prune_journal_lexical_path( $payload['path'] ?? '' );
+	$journal = is_array( $item['payload']['prune_operation_journal_v1'] ?? null ) ? $item['payload']['prune_operation_journal_v1'] : array();
+
+	if ( ! empty( $journal ) ) {
+		$journal_path = yotm_prune_journal_lexical_path( $journal['path'] ?? '' );
+		$fingerprint  = (string) ( $journal['node_fingerprint'] ?? '' );
+		if (
+			1 !== absint( $journal['version'] ?? 0 )
+			|| '' === $path
+			|| ! hash_equals( $path, $journal_path )
+			|| ! preg_match( '/^[a-f0-9]{64}$/', (string) ( $journal['file_hash'] ?? '' ) )
+			|| ( '' !== $fingerprint && ! preg_match( '/^[a-f0-9]{64}$/', $fingerprint ) )
+			|| ! isset( $journal['bytes'] )
+			|| 0 > (int) $journal['bytes']
+		) {
+			return new WP_Error( 'yotm_prune_journal_invalid', __( 'The prune recovery journal is malformed and requires manual inspection.', 'thumbnail-manager' ) );
+		}
+		if ( 'delete_reconciled' === ( $journal['outcome'] ?? '' ) ) {
+			return array(
+				'deleted' => true,
+				'skipped' => false,
+				'bytes'   => absint( $journal['bytes'] ?? 0 ),
+				'error'   => '',
+			);
+		}
+
+		$node = yotm_prune_journal_path_state( $path );
+		if ( is_wp_error( $node ) ) {
+			return $node;
+		}
+		if ( 'absent' === $node['state'] ) {
+			$reconciled = yotm_reconcile_prune_item_metadata( $payload, $path );
+			if ( is_wp_error( $reconciled ) ) {
+				return $reconciled;
+			}
+			$journal['outcome']                         = 'delete_reconciled';
+			$item_payload                               = $item['payload'];
+			$item_payload['prune_operation_journal_v1'] = $journal;
+			if ( ! yotm_job_update_claimed_item_payload( $item, $item_payload ) ) {
+				return new WP_Error( 'yotm_prune_journal_persist_failed', __( 'Could not persist the recovered prune outcome.', 'thumbnail-manager' ) );
+			}
+			$item['payload'] = $item_payload;
+			return array(
+				'deleted' => true,
+				'skipped' => false,
+				'bytes'   => absint( $journal['bytes'] ?? 0 ),
+				'error'   => '',
+			);
+		}
+		if ( 'regular' !== $node['state'] ) {
+			return array(
+				'deleted' => false,
+				'skipped' => false,
+				'bytes'   => 0,
+				'error'   => __( 'The reviewed prune path now contains a different filesystem node and requires manual inspection.', 'thumbnail-manager' ),
+			);
+		}
+
+		$current_hash = hash_file( 'sha256', $path );
+		if (
+			! is_string( $current_hash )
+			|| ! preg_match( '/^[a-f0-9]{64}$/', $fingerprint )
+			|| empty( $node['fingerprint'] )
+			|| ! hash_equals( $fingerprint, (string) $node['fingerprint'] )
+			|| ! hash_equals( (string) ( $journal['file_hash'] ?? '' ), $current_hash )
+			|| (int) $journal['bytes'] !== (int) $node['bytes']
+		) {
+			return array(
+				'deleted' => false,
+				'skipped' => false,
+				'bytes'   => 0,
+				'error'   => __( 'The reviewed prune file changed after the delete journal was armed.', 'thumbnail-manager' ),
+			);
+		}
+		if ( $recovery_only ) {
+			return array(
+				'deleted' => false,
+				'skipped' => false,
+				'bytes'   => 0,
+				'error'   => __( 'Recovery-only processing preserved the intact reviewed prune file.', 'thumbnail-manager' ),
+			);
+		}
+	} else {
+		$node = yotm_prune_journal_path_state( $path );
+		if ( is_wp_error( $node ) ) {
+			return $node;
+		}
+		if ( 'absent' === $node['state'] ) {
+			return yotm_delete_prune_item( $payload, $uploads_base );
+		}
+		if ( 'regular' !== $node['state'] ) {
+			return array(
+				'deleted' => false,
+				'skipped' => false,
+				'bytes'   => 0,
+				'error'   => __( 'The reviewed prune path is not a regular file and could not be journaled.', 'thumbnail-manager' ),
+			);
+		}
+		$file_hash = hash_file( 'sha256', $path );
+		$bytes     = $node['bytes'];
+		if ( ! is_string( $file_hash ) ) {
+			return array(
+				'deleted' => false,
+				'skipped' => false,
+				'bytes'   => 0,
+				'error'   => __( 'The reviewed prune file could not be journaled safely.', 'thumbnail-manager' ),
+			);
+		}
+		$journal                                    = array(
+			'version'          => 1,
+			'path'             => $path,
+			'file_hash'        => $file_hash,
+			'node_fingerprint' => $node['fingerprint'],
+			'bytes'            => (int) $bytes,
+			'outcome'          => '',
+		);
+		$item_payload                               = $item['payload'];
+		$item_payload['prune_operation_journal_v1'] = $journal;
+		if ( ! yotm_job_update_claimed_item_payload( $item, $item_payload ) ) {
+			return new WP_Error( 'yotm_prune_journal_persist_failed', __( 'Could not persist the prune operation journal.', 'thumbnail-manager' ) );
+		}
+		$item['payload'] = $item_payload;
+		if ( is_callable( $journal_barrier ) ) {
+			call_user_func( $journal_barrier, $item, $journal );
+		}
+	}//end if
+
+	$result = yotm_delete_prune_item( $payload, $uploads_base );
+	if ( empty( $result['deleted'] ) ) {
+		return $result;
+	}
+
+	$journal['outcome']                         = 'delete_reconciled';
+	$item_payload                               = $item['payload'];
+	$item_payload['prune_operation_journal_v1'] = $journal;
+	if ( ! yotm_job_update_claimed_item_payload( $item, $item_payload ) ) {
+		return new WP_Error( 'yotm_prune_journal_persist_failed', __( 'Could not persist the completed prune outcome.', 'thumbnail-manager' ) );
+	}
+	$item['payload'] = $item_payload;
+
+	return $result;
+}
+
+/**
+ * Normalize an immutable prune path without resolving its final filesystem node.
+ *
+ * Journal identity and lstat inspection must address the reviewed path itself;
+ * resolving a replacement symlink here would inspect its target instead.
+ *
+ * @param string $path Reviewed candidate path.
+ * @return string
+ */
+function yotm_prune_journal_lexical_path( $path ) {
+	return untrailingslashit( wp_normalize_path( (string) $path ) );
+}
+
+/**
+ * Fingerprint one regular filesystem node from a single lstat snapshot.
+ *
+ * Device and inode bind the node across requests. Mode, link count, owner,
+ * device type, and ctime make inode reuse or intervening stat changes fail
+ * closed. Platforms that cannot expose a usable inode cannot authorize prune.
+ *
+ * @param array $stat lstat result.
+ * @return string|WP_Error
+ */
+function yotm_prune_journal_node_fingerprint( $stat ) {
+	$fields   = array( 'dev', 'ino', 'mode', 'nlink', 'uid', 'gid', 'rdev', 'ctime' );
+	$identity = array();
+
+	foreach ( $fields as $field ) {
+		if ( ! array_key_exists( $field, $stat ) || ! is_int( $stat[ $field ] ) ) {
+			return new WP_Error( 'yotm_prune_node_identity_unavailable', __( 'The reviewed prune file identity could not be established safely.', 'thumbnail-manager' ) );
+		}
+		$identity[] = $field . '=' . (string) $stat[ $field ];
+	}
+	if ( 0 >= $stat['ino'] ) {
+		return new WP_Error( 'yotm_prune_node_identity_unavailable', __( 'The reviewed prune file identity could not be established safely.', 'thumbnail-manager' ) );
+	}
+
+	return hash( 'sha256', implode( '|', $identity ) );
+}
+
+/**
+ * Inspect the exact filesystem node at an armed prune path without following symlinks.
+ *
+ * @param string $path Reviewed candidate path.
+ * @return array{state:string,bytes:int,fingerprint?:string}|WP_Error
+ */
+function yotm_prune_journal_path_state( $path ) {
+	$path = yotm_prune_journal_lexical_path( $path );
+	clearstatcache( true, $path );
+	// phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- A false lstat result is classified explicitly below and must not emit during recovery.
+	$stat = @lstat( $path );
+
+	if ( false === $stat ) {
+		$parent = dirname( $path );
+		if ( ! is_dir( $parent ) || ! is_readable( $parent ) || ! is_executable( $parent ) ) {
+			return new WP_Error( 'yotm_prune_path_inspection_failed', __( 'The reviewed prune path could not be inspected safely.', 'thumbnail-manager' ) );
+		}
+		return array(
+			'state' => 'absent',
+			'bytes' => 0,
+		);
+	}
+
+	$mode = absint( $stat['mode'] ?? 0 ) & 0170000;
+	if ( 0100000 !== $mode || is_link( $path ) || ! is_file( $path ) ) {
+		return array(
+			'state' => 'changed',
+			'bytes' => 0,
+		);
+	}
+	$fingerprint = yotm_prune_journal_node_fingerprint( $stat );
+	if ( is_wp_error( $fingerprint ) ) {
+		return $fingerprint;
+	}
+
+	return array(
+		'state'       => 'regular',
+		'bytes'       => absint( $stat['size'] ?? 0 ),
+		'fingerprint' => $fingerprint,
+	);
 }
 
 /**

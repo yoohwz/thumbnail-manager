@@ -172,7 +172,10 @@ function yotm_recommend_batch() {
 	);
 
 	if ( ! empty( $ids ) ) {
-		yotm_recommend_scan_content_ids( $ids, $payload['size_names'], $payload['content_usage'] );
+		$scanned = yotm_recommend_scan_content_ids( $ids, $payload['size_names'], $payload['content_usage'] );
+		if ( is_wp_error( $scanned ) ) {
+			wp_send_json_error( array( 'msg' => $scanned->get_error_message() ), 503 );
+		}
 		$payload['content_after']  = max( array_map( 'absint', $ids ) );
 		$payload['scan_processed'] = (int) ( $payload['scan_processed'] ?? 0 ) + count( $ids );
 		yotm_job_worker_update(
@@ -226,6 +229,13 @@ function yotm_recommend_batch() {
  * @param array $usage Usage counters, passed by reference.
  */
 function yotm_recommend_scan_attachment_metadata_ids( $ids, &$usage ) {
+	$ids = array_values( array_filter( array_map( 'absint', (array) $ids ) ) );
+	if ( empty( $ids ) ) {
+		return;
+	}
+
+	update_meta_cache( 'post', $ids );
+
 	foreach ( $ids as $attachment_id ) {
 		$file = get_attached_file( $attachment_id );
 		if ( ! $file ) {
@@ -260,31 +270,169 @@ function yotm_recommend_scan_attachment_metadata_ids( $ids, &$usage ) {
 }
 
 /**
+ * Load raw post content for one already-bounded set of post IDs.
+ *
+ * @param int[] $post_ids Post IDs selected by the recommendation cursor.
+ * @return array<int,string>|WP_Error
+ */
+function yotm_recommend_load_content_map( $post_ids ) {
+	global $wpdb;
+
+	$post_ids = array_values( array_unique( array_filter( array_map( 'absint', (array) $post_ids ) ) ) );
+	if ( empty( $post_ids ) ) {
+		return array();
+	}
+
+	$placeholders = implode( ',', array_fill( 0, count( $post_ids ), '%d' ) );
+	// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- Placeholder list is generated from the bounded ID array.
+	$sql = $wpdb->prepare(
+		"SELECT ID, post_content FROM {$wpdb->posts} WHERE ID IN ({$placeholders})",
+		...$post_ids
+	);
+	// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared -- Cursor-selected raw content must be read in one bounded query; prepared above.
+	$rows = $wpdb->get_results( $sql, ARRAY_A );
+
+	if ( '' !== (string) $wpdb->last_error ) {
+		return new WP_Error( 'yotm_recommend_content_read_failed', __( 'Could not read the selected post content batch.', 'thumbnail-manager' ) );
+	}
+
+	$content = array();
+	foreach ( (array) $rows as $row ) {
+		$content[ absint( $row['ID'] ?? 0 ) ] = (string) ( $row['post_content'] ?? '' );
+	}
+
+	return $content;
+}
+
+/**
+ * Match registered size references using the exact legacy boundaries.
+ *
+ * The combined patterns reduce normal work to two content traversals. If the
+ * pattern cannot be compiled, the caller falls back to the legacy per-size
+ * matcher instead of changing recommendation evidence.
+ *
+ * @param string   $content Post content.
+ * @param string[] $size_names Registered size names.
+ * @return string[]|false Matched names, or false when the legacy fallback is required.
+ */
+function yotm_recommend_extract_content_size_names( $content, $size_names ) {
+	$names = array_values(
+		array_unique(
+			array_filter(
+				array_map(
+					static function ( $name ) {
+						return (string) $name;
+					},
+					(array) $size_names
+				),
+				static function ( $name ) {
+					return '' !== $name;
+				}
+			)
+		)
+	);
+	if ( '' === (string) $content || empty( $names ) ) {
+		return array();
+	}
+
+	usort(
+		$names,
+		static function ( $left, $right ) {
+			$length = strlen( $right ) <=> strlen( $left );
+			return 0 !== $length ? $length : strcmp( $left, $right );
+		}
+	);
+	$alternation   = implode(
+		'|',
+		array_map(
+			static function ( $name ) {
+				return preg_quote( $name, '/' );
+			},
+			$names
+		)
+	);
+	$class_pattern = '/\bsize-(' . $alternation . ')\b/';
+	$json_pattern  = '/["\'](?:size|sizeSlug|image_size|thumbnail_size)["\']\s*:\s*["\'](' . $alternation . ')["\']/';
+	$matched       = array();
+	$class_result  = preg_match_all( $class_pattern, $content, $class_matches, PREG_OFFSET_CAPTURE );
+	if ( false === $class_result ) {
+		return false;
+	}
+
+	foreach ( (array) ( $class_matches[0] ?? array() ) as $class_match ) {
+		$tail = substr( $content, absint( $class_match[1] ?? 0 ) );
+		foreach ( $names as $name ) {
+			if ( 1 === preg_match( '/^size-' . preg_quote( $name, '/' ) . '\b/', $tail ) ) {
+				$matched[ $name ] = true;
+			}
+		}
+	}
+
+	$json_result = preg_match_all( $json_pattern, $content, $json_matches );
+	if ( false === $json_result ) {
+		return false;
+	}
+	foreach ( (array) ( $json_matches[1] ?? array() ) as $name ) {
+		$matched[ (string) $name ] = true;
+	}
+
+	return array_keys( $matched );
+}
+
+/**
+ * Return whether one size matches the original recommendation patterns.
+ *
+ * @param string $content Post content.
+ * @param string $name Registered size name.
+ * @return bool
+ */
+function yotm_recommend_content_matches_size( $content, $name ) {
+	$name_rx = preg_quote( (string) $name, '/' );
+
+	return 1 === preg_match( '/\bsize-' . $name_rx . '\b/', (string) $content )
+		|| 1 === preg_match( '/["\'](?:size|sizeSlug|image_size|thumbnail_size)["\']\s*:\s*["\']' . $name_rx . '["\']/', (string) $content );
+}
+
+/**
  * Scan content references for a bounded set of post IDs.
  *
  * @param int[]    $post_ids Post IDs.
  * @param string[] $size_names Registered size names.
  * @param array    $usage Usage counters, passed by reference.
+ * @return true|WP_Error
  */
 function yotm_recommend_scan_content_ids( $post_ids, $size_names, &$usage ) {
+	$content_map = yotm_recommend_load_content_map( $post_ids );
+	if ( is_wp_error( $content_map ) ) {
+		return $content_map;
+	}
+
 	foreach ( $post_ids as $post_id ) {
-		$content = (string) get_post_field( 'post_content', $post_id, 'raw' );
+		$content = (string) ( $content_map[ absint( $post_id ) ] ?? '' );
 
 		if ( '' === $content ) {
 			continue;
 		}
 
-		foreach ( $size_names as $name ) {
-			$name_rx = preg_quote( $name, '/' );
+		$matched = yotm_recommend_extract_content_size_names( $content, $size_names );
+		if ( false === $matched ) {
+			$matched = array_filter(
+				(array) $size_names,
+				static function ( $name ) use ( $content ) {
+					return yotm_recommend_content_matches_size( $content, $name );
+				}
+			);
+		}
 
-			if (
-				preg_match( '/\bsize-' . $name_rx . '\b/', $content )
-				|| preg_match( '/["\'](?:size|sizeSlug|image_size|thumbnail_size)["\']\s*:\s*["\']' . $name_rx . '["\']/', $content )
-			) {
+		foreach ( $matched as $name ) {
+			if ( array_key_exists( $name, $usage ) ) {
 				++$usage[ $name ];
 			}
 		}
-	}
+	}//end foreach
+
+	return true;
 }
 
 /**

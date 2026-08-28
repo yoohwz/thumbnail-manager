@@ -74,8 +74,10 @@ add_action( 'admin_enqueue_scripts', function( $hook ) {
 	                'noMatchingThumbnails'         => __( 'No matching thumbnails found. Try enabling orphan discovery or widen the folder scope.', 'thumbnail-manager' ),
 			                /* translators: 1: deleted file count, 2: formatted bytes freed. */
 			                'doneDeleted'                  => __( 'Done. Deleted %1$s files — Freed %2$s.', 'thumbnail-manager' ),
-	                'regenerationCancelled'        => __( 'Regeneration cancelled.', 'thumbnail-manager' ),
-	                'preparingRegenerationQueue'   => __( 'Preparing regeneration queue…', 'thumbnail-manager' ),
+		                'regenerationCancelled'        => __( 'Regeneration cancelled.', 'thumbnail-manager' ),
+		                'preparingRegenerationQueue'   => __( 'Preparing regeneration queue…', 'thumbnail-manager' ),
+		                /* translators: %s: number of authoritative attachment rows checked. */
+		                'scanningAttachmentRows'       => __( 'Scanning attachment rows… %s checked', 'thumbnail-manager' ),
 	                'starting'                     => __( 'Starting…', 'thumbnail-manager' ),
 			                /* translators: 1: regenerated count, 2: skipped count, 3: failed count. */
 			                'doneRegenerated'              => __( 'Done. Regenerated %1$s attachments, skipped %2$s, failed %3$s.', 'thumbnail-manager' ),

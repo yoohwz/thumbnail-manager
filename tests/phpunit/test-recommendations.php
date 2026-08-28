@@ -262,6 +262,59 @@ class YOTM_Recommendations_Test extends WP_UnitTestCase {
 		$this->assertSame( 2, $usage['other-size'] );
 	}
 
+	public function test_compiled_content_matcher_is_equivalent_to_legacy_patterns() {
+		$names = array( 'thumbnail', 'custom.name', 'prefix', 'prefix-long', 'under_score', '100x100' );
+		$cases = array(
+			'',
+			'<img class="size-thumbnail">',
+			'<img class="size-custom.name other">',
+			'<img class="resize-thumbnail">',
+			'{"sizeSlug":"prefix-long","size":"under_score"}',
+			"{'image_size' : '100x100'}",
+			'{"thumbnail_size":"prefix"}{"size":"prefix"}',
+			'<div class="size-prefix-longer"></div>',
+		);
+
+		mt_srand( 6006 );
+		for ( $index = 0; $index < 100; ++$index ) {
+			$name    = $names[ mt_rand( 0, count( $names ) - 1 ) ];
+			$wrapper = mt_rand( 0, 1 ) ? ' class="size-' . $name . '"' : '{"sizeSlug":"' . $name . '"}';
+			$cases[] = str_repeat( 'x ', mt_rand( 0, 8 ) ) . $wrapper . str_repeat( ' y', mt_rand( 0, 8 ) );
+		}
+
+		foreach ( $cases as $content ) {
+			$expected = array();
+			foreach ( $names as $name ) {
+				if ( yotm_recommend_content_matches_size( $content, $name ) ) {
+					$expected[] = $name;
+				}
+			}
+			$actual = yotm_recommend_extract_content_size_names( $content, $names );
+			sort( $expected );
+			sort( $actual );
+			$this->assertSame( $expected, $actual, 'Matcher drift for: ' . $content );
+		}
+	}
+
+	public function test_content_batch_uses_one_bulk_content_query() {
+		$post_ids = array();
+		for ( $index = 0; $index < 6; ++$index ) {
+			$post_ids[] = self::factory()->post->create(
+				array( 'post_content' => '<img class="size-thumbnail">' )
+			);
+		}
+		$usage = array( 'thumbnail' => 0 );
+
+		global $wpdb;
+		$before = (int) $wpdb->num_queries;
+		$result = yotm_recommend_scan_content_ids( $post_ids, array_keys( $usage ), $usage );
+		$after  = (int) $wpdb->num_queries;
+
+		$this->assertTrue( $result );
+		$this->assertSame( 6, $usage['thumbnail'] );
+		$this->assertLessThanOrEqual( 1, $after - $before );
+	}
+
 	/**
 	 * Add and remember a registered image size.
 	 *

@@ -240,6 +240,158 @@ function yotm_attachment_query_args_for_upload_subpaths( $subpaths ) {
 }
 
 /**
+ * Normalize one raw `_wp_attached_file` value for scope authorization.
+ *
+ * This deliberately does not sanitize or repair path components. A value is
+ * either an unambiguous uploads-relative path or it is rejected.
+ *
+ * @param mixed $value Raw authoritative value.
+ * @return string|WP_Error
+ */
+function yotm_normalize_attached_file_relative_path( $value ) {
+	if ( ! is_string( $value ) || '' === $value || false !== strpos( $value, "\0" ) ) {
+		return new WP_Error( 'yotm_attached_file_scope_invalid', __( 'The authoritative attached-file path is malformed.', 'thumbnail-manager' ) );
+	}
+
+	$value = str_replace( '\\', '/', $value );
+	if ( preg_match( '#^(?:[A-Za-z]:)?/#', $value ) ) {
+		return new WP_Error( 'yotm_attached_file_scope_absolute', __( 'The authoritative attached-file path is not uploads-relative.', 'thumbnail-manager' ) );
+	}
+
+	$parts = explode( '/', $value );
+	foreach ( $parts as $part ) {
+		if ( '' === $part || '.' === $part || '..' === $part ) {
+			return new WP_Error( 'yotm_attached_file_scope_invalid', __( 'The authoritative attached-file path is malformed.', 'thumbnail-manager' ) );
+		}
+	}
+
+	return implode( '/', $parts );
+}
+
+/**
+ * Test literal uploads-subpath membership without wildcard interpretation.
+ *
+ * @param string   $relative_path Normalized uploads-relative file path.
+ * @param string[] $subpaths Normalized selected folders.
+ * @return bool
+ */
+function yotm_attached_file_is_in_subpaths( $relative_path, $subpaths ) {
+	$relative_path = (string) $relative_path;
+	foreach ( yotm_normalize_upload_subpaths( $subpaths ) as $subpath ) {
+		if ( 0 === strpos( $relative_path, trailingslashit( $subpath ) ) ) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+/**
+ * Return the frozen upper boundary for attached-file selector rows.
+ *
+ * @return int|WP_Error
+ */
+function yotm_get_max_attached_file_meta_id() {
+	global $wpdb;
+
+	$wpdb->last_error = '';
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Core postmeta table is trusted; this is a bounded selector snapshot read.
+	$maximum = $wpdb->get_var( $wpdb->prepare( "SELECT MAX(meta_id) FROM {$wpdb->postmeta} WHERE meta_key = %s", '_wp_attached_file' ) );
+	if ( '' !== (string) $wpdb->last_error ) {
+		return new WP_Error( 'yotm_attached_file_selector_failed', __( 'Could not establish the attachment selector boundary.', 'thumbnail-manager' ) );
+	}
+
+	return absint( $maximum );
+}
+
+/**
+ * Read one bounded keyset page of raw attached-file selector rows.
+ *
+ * @param int $after_meta_id Last scanned meta ID.
+ * @param int $max_meta_id Frozen maximum meta ID.
+ * @param int $limit Row limit.
+ * @return array<int,array{meta_id:int,attachment_id:int,value:string}>|WP_Error
+ */
+function yotm_get_attached_file_selector_rows_after( $after_meta_id, $max_meta_id, $limit = 100 ) {
+	global $wpdb;
+
+	$after_meta_id = absint( $after_meta_id );
+	$max_meta_id   = absint( $max_meta_id );
+	$limit         = max( 1, min( 500, absint( $limit ) ) );
+	if ( 0 === $max_meta_id || $after_meta_id >= $max_meta_id ) {
+		return array();
+	}
+
+	$wpdb->last_error = '';
+	// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Core tables are trusted; selector is bounded by exact prepared meta IDs.
+	$stored = $wpdb->get_results(
+		$wpdb->prepare(
+			"SELECT pm.meta_id,pm.post_id attachment_id,pm.meta_value
+			FROM {$wpdb->postmeta} pm
+			INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id
+			WHERE pm.meta_key = %s AND pm.meta_id > %d AND pm.meta_id <= %d
+			AND p.post_type = 'attachment' AND p.post_status = 'inherit' AND p.post_mime_type LIKE %s
+			ORDER BY pm.meta_id ASC LIMIT %d",
+			'_wp_attached_file',
+			$after_meta_id,
+			$max_meta_id,
+			$wpdb->esc_like( 'image/' ) . '%',
+			$limit
+		),
+		ARRAY_A
+	);
+	// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+	if ( '' !== (string) $wpdb->last_error || ! is_array( $stored ) ) {
+		return new WP_Error( 'yotm_attached_file_selector_failed', __( 'Could not read the attachment selector batch.', 'thumbnail-manager' ) );
+	}
+
+	$rows = array();
+	foreach ( $stored as $row ) {
+		$rows[] = array(
+			'meta_id'       => absint( $row['meta_id'] ?? 0 ),
+			'attachment_id' => absint( $row['attachment_id'] ?? 0 ),
+			'value'         => (string) ( $row['meta_value'] ?? '' ),
+		);
+	}
+
+	return $rows;
+}
+
+/**
+ * Authorize one attachment against its exact frozen selector row.
+ *
+ * @param int      $attachment_id Attachment ID.
+ * @param int      $selected_meta_id Meta ID observed within the frozen snapshot.
+ * @param int      $selection_meta_max Frozen selector maximum.
+ * @param string[] $subpaths Selected folder roots.
+ * @return string|WP_Error Normalized authoritative relative file path.
+ */
+function yotm_authorize_attached_file_selector_scope( $attachment_id, $selected_meta_id, $selection_meta_max, $subpaths ) {
+	$rows = yotm_media_reference_raw_postmeta_rows( $attachment_id, '_wp_attached_file' );
+	if ( is_wp_error( $rows ) ) {
+		return $rows;
+	}
+	if ( 1 !== count( $rows ) ) {
+		return new WP_Error( 'yotm_attached_file_scope_ambiguous', __( 'The authoritative attached-file row is missing or ambiguous.', 'thumbnail-manager' ) );
+	}
+
+	$meta_id = absint( $rows[0]['meta_id'] ?? 0 );
+	if ( ! $meta_id || $meta_id !== absint( $selected_meta_id ) || $meta_id > absint( $selection_meta_max ) ) {
+		return new WP_Error( 'yotm_attached_file_scope_replaced', __( 'The authoritative attached-file row changed after folder selection.', 'thumbnail-manager' ) );
+	}
+
+	$relative = yotm_normalize_attached_file_relative_path( $rows[0]['value'] ?? null );
+	if ( is_wp_error( $relative ) ) {
+		return $relative;
+	}
+	if ( ! yotm_attached_file_is_in_subpaths( $relative, $subpaths ) ) {
+		return new WP_Error( 'yotm_attached_file_scope_outside', __( 'The attachment moved outside the selected uploads folder.', 'thumbnail-manager' ) );
+	}
+
+	return $relative;
+}
+
+/**
  * Build a compact, readable label for one or more selected uploads roots.
  *
  * @param string   $base Uploads base directory.
