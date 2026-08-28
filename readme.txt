@@ -99,7 +99,7 @@ Deactivation clears Thumbnail Manager's scheduled cleanup task but retains setti
 
 == Changelog ==
 
-= 1.4 (Jul 17, 2026) =
+= 1.4.0 (Jul 17, 2026) =
 
 * Added persistent job and job-item database storage with ownership, expiry, cancellation, cleanup, locking, resume, and per-item errors
 * Split Prune Files into scan, immutable hashed manifest review, explicit approval, and resumable deletion

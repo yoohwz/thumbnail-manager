@@ -74,7 +74,7 @@ class ReleasePackageTests(unittest.TestCase):
         self.assertEqual(first_manifest.read_bytes(), second_manifest.read_bytes())
 
         manifest = json.loads(first_manifest.read_text(encoding="utf-8"))
-        self.assertEqual(19, manifest["file_count"])
+        self.assertEqual(len(manifest["files"]), manifest["file_count"])
         self.assertRegex(manifest["release_control"]["bundle_sha256"], r"^[0-9a-f]{64}$")
         component_paths = {item["path"] for item in manifest["release_control"]["components"]}
         self.assertEqual(
@@ -89,6 +89,7 @@ class ReleasePackageTests(unittest.TestCase):
             component_paths,
         )
         paths = {item["path"] for item in manifest["files"]}
+        self.assertEqual(len(paths), manifest["file_count"])
         self.assertIn("thumbnail-manager.php", paths)
         self.assertIn("inc/job-storage.php", paths)
         self.assertIn("inc/media-source-index.php", paths)
@@ -96,10 +97,36 @@ class ReleasePackageTests(unittest.TestCase):
         self.assertFalse(any(path.startswith(("tests/", ".github/", "vendor/", "release/")) for path in paths))
 
         with zipfile.ZipFile(first_package) as archive:
+            self.assertEqual(manifest["file_count"], len(archive.namelist()))
             self.assertEqual(
                 {f"thumbnail-manager/{path}" for path in paths},
                 set(archive.namelist()),
             )
+
+    def test_current_release_requires_exact_changelog_versions(self) -> None:
+        for relative, field in (
+            ("changelog.txt", "changelog_version"),
+            ("readme.txt", "readme_changelog_version"),
+        ):
+            with self.subTest(relative=relative):
+                source = self.temp / field
+                shutil.copytree(ROOT, source, ignore=shutil.ignore_patterns(".git", "vendor", "__pycache__"))
+                target = source / relative
+                target.write_text(
+                    target.read_text(encoding="utf-8").replace("= 1.4.0 (", "= 1.4 (", 1),
+                    encoding="utf-8",
+                )
+                result = run(
+                    "python3",
+                    "bin/validate-release.py",
+                    "metadata",
+                    "--source",
+                    str(source),
+                    "--version",
+                    "1.4.0",
+                    expect_success=False,
+                )
+                self.assertIn(f"{field} must exactly equal active release version 1.4.0", result.stderr)
 
     def test_package_tampering_fails_closed(self) -> None:
         package, manifest = self.build(self.temp / "tamper")
@@ -237,8 +264,8 @@ class ReleasePackageTests(unittest.TestCase):
         shutil.copytree(ROOT, source, ignore=shutil.ignore_patterns(".git", "vendor", "__pycache__"))
         replacements = {
             "thumbnail-manager.php": [("1.4.0", "1.5.0"), ("1.4.0", "1.5.0")],
-            "readme.txt": [("Stable tag: 1.4.0", "Stable tag: 1.5.0"), ("= 1.4.0 =", "= 1.5.0 ="), ("= 1.4 (", "= 1.5 (")],
-            "changelog.txt": [("= 1.4 (", "= 1.5 (")],
+            "readme.txt": [("Stable tag: 1.4.0", "Stable tag: 1.5.0"), ("= 1.4.0 =", "= 1.5.0 ="), ("= 1.4.0 (", "= 1.5 (")],
+            "changelog.txt": [("= 1.4.0 (", "= 1.5 (")],
             "languages/thumbnail-manager.pot": [("Thumbnail Manager 1.4.0", "Thumbnail Manager 1.5.0")],
         }
         for relative, changes in replacements.items():
