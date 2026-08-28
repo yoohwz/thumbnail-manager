@@ -57,6 +57,7 @@ class YOTM_Data_Lifecycle_Test extends WP_UnitTestCase {
 		remove_filter( 'query', array( $this, 'count_named_lock_queries' ), 1 );
 		remove_filter( 'query', array( $this, 'record_shutdown_queries' ), 1 );
 		remove_filter( 'query', array( $this, 'lose_fence_during_intent_write' ), 1 );
+		remove_filter( 'query', array( $this, 'lose_fence_during_intent_rollback' ), 1 );
 		remove_filter( 'pre_option_yotm_job_db_version', array( $this, 'virtual_current_schema' ) );
 		remove_filter( 'pre_option_' . YOTM_UNINSTALL_INTENT_OPTION, array( $this, 'hide_cleanup_intent' ) );
 		yotm_data_lifecycle_release_request_fences();
@@ -448,6 +449,34 @@ class YOTM_Data_Lifecycle_Test extends WP_UnitTestCase {
 		$this->assertWPError( $result );
 		$this->assertSame( 'yotm_uninstall_fence_lost', $result->get_error_code() );
 		$this->assertSame( $first, get_option( YOTM_UNINSTALL_INTENT_OPTION ) );
+	}
+
+	public function test_lost_scope_fence_during_intent_rollback_retains_remaining_recovery_blocker() {
+		$site_id = get_current_blog_id();
+		$intent  = yotm_data_lifecycle_intent(
+			$site_id,
+			yotm_data_lifecycle_scope_hash( array( $site_id ) ),
+			array_values( yotm_job_table_names() )
+		);
+		$this->assertTrue( yotm_data_lifecycle_write_option( YOTM_UNINSTALL_INTENT_OPTION, $intent ) );
+		$fences = yotm_data_lifecycle_acquire_scope_fences( array( $site_id ) );
+		$this->assertIsArray( $fences );
+		add_filter( 'query', array( $this, 'lose_fence_during_intent_rollback' ), 1 );
+
+		$result = yotm_data_lifecycle_restore_intents(
+			array(
+				array(
+					'blog_id' => $site_id,
+					'value'   => array( 'exists' => false ),
+				),
+			),
+			$fences
+		);
+
+		remove_filter( 'query', array( $this, 'lose_fence_during_intent_rollback' ), 1 );
+		$this->assertWPError( $result );
+		$this->assertSame( 'yotm_uninstall_fence_lost', $result->get_error_code() );
+		$this->assertSame( $intent, get_option( YOTM_UNINSTALL_INTENT_OPTION ) );
 	}
 
 	public function test_persisted_cleanup_intent_blocks_new_runtime_job() {
@@ -968,6 +997,17 @@ class YOTM_Data_Lifecycle_Test extends WP_UnitTestCase {
 		if ( $this->intent_write_queries_before_fence_loss > 0 ) {
 			--$this->intent_write_queries_before_fence_loss;
 
+			return $query;
+		}
+
+		$name = yotm_data_lifecycle_lock_name( 'site', get_current_blog_id() );
+
+		return "SELECT RELEASE_LOCK('" . esc_sql( $name ) . "')";
+	}
+
+	public function lose_fence_during_intent_rollback( $query ) {
+		$delete = 0 === stripos( ltrim( $query ), 'DELETE FROM' );
+		if ( ! $delete || false === strpos( $query, YOTM_UNINSTALL_INTENT_OPTION ) ) {
 			return $query;
 		}
 

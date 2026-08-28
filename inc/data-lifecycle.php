@@ -1084,7 +1084,10 @@ function yotm_data_lifecycle_prepare_intents( $plans, $locks ) {
 			if ( is_wp_error( $valid ) ) {
 				return $valid;
 			}
-			$restored = yotm_data_lifecycle_restore_intents( $previous );
+			$restored = yotm_data_lifecycle_restore_intents( $previous, $locks );
+			if ( is_wp_error( $restored ) ) {
+				return $restored;
+			}
 
 			return $restored
 				? new WP_Error( 'yotm_uninstall_intent_write', 'Could not persist the complete uninstall intent scope.' )
@@ -1103,11 +1106,16 @@ function yotm_data_lifecycle_prepare_intents( $plans, $locks ) {
  * Restore prior intent state after a pre-delete coordination failure.
  *
  * @param array[] $previous Previous intent values.
- * @return bool
+ * @param array[] $locks Lock handles that authorize rollback mutation.
+ * @return bool|WP_Error
  */
-function yotm_data_lifecycle_restore_intents( $previous ) {
+function yotm_data_lifecycle_restore_intents( $previous, $locks ) {
 	$restored = true;
 	foreach ( array_reverse( $previous ) as $entry ) {
+		$valid = yotm_data_lifecycle_verify_scope_fences( $locks );
+		if ( is_wp_error( $valid ) ) {
+			return $valid;
+		}
 		$result = yotm_data_lifecycle_in_blog(
 			$entry['blog_id'],
 			static function () use ( $entry ) {
@@ -1119,9 +1127,13 @@ function yotm_data_lifecycle_restore_intents( $previous ) {
 			}
 		);
 		if ( is_wp_error( $result ) ) {
+			$valid = yotm_data_lifecycle_verify_scope_fences( $locks );
+			if ( is_wp_error( $valid ) ) {
+				return $valid;
+			}
 			$restored = false;
 		}
-	}
+	}//end foreach
 
 	return $restored;
 }
@@ -1345,7 +1357,7 @@ function yotm_data_lifecycle_rollback_with_fences( $previous, $reason, $locks ) 
 		);
 	}
 
-	return yotm_data_lifecycle_rollback_result( $previous, $reason );
+	return yotm_data_lifecycle_rollback_result( $previous, $reason, $locks );
 }
 
 /**
@@ -1367,12 +1379,21 @@ function yotm_data_lifecycle_release_scope_fences( $locks ) {
  *
  * @param array[] $previous Previous intent states.
  * @param string  $reason Original failure reason.
+ * @param array[] $locks Lock handles that authorize rollback mutation.
  * @return array{status:string,reason:string}
  */
-function yotm_data_lifecycle_rollback_result( $previous, $reason ) {
+function yotm_data_lifecycle_rollback_result( $previous, $reason, $locks ) {
+	$restored = yotm_data_lifecycle_restore_intents( $previous, $locks );
+	if ( is_wp_error( $restored ) ) {
+		return array(
+			'status' => 'partial',
+			'reason' => $restored->get_error_code(),
+		);
+	}
+
 	return array(
 		'status' => 'retained',
-		'reason' => yotm_data_lifecycle_restore_intents( $previous ) ? $reason : 'yotm_uninstall_intent_rollback',
+		'reason' => $restored ? $reason : 'yotm_uninstall_intent_rollback',
 	);
 }
 
