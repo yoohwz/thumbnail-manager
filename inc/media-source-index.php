@@ -133,18 +133,17 @@ function yotm_media_reference_raw_postmeta_rows_batch( $attachment_ids, $meta_ke
 	$key_placeholders = implode( ',', array_fill( 0, count( $meta_keys ), '%s' ) );
 	$args             = array_merge( $attachment_ids, $meta_keys );
 	$wpdb->last_error = '';
-	// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Placeholder lists are generated from validated bounded arrays.
-	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Bounded exact raw rows are required and must bypass object caching.
+	$query            = "SELECT post_id,meta_id,meta_key,meta_value FROM {$wpdb->postmeta} " .
+		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Placeholder lists are generated from validated bounded arrays.
+		"WHERE post_id IN ({$id_placeholders}) AND meta_key IN ({$key_placeholders}) " .
+		'ORDER BY post_id ASC,meta_key ASC,meta_id ASC';
+	// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Query contains only the trusted core table plus validated generated placeholders.
+	$prepared = $wpdb->prepare( $query, ...$args );
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Bounded exact raw rows are required and must bypass object caching; prepared above.
 	$stored = $wpdb->get_results(
-		$wpdb->prepare(
-			"SELECT post_id,meta_id,meta_key,meta_value FROM {$wpdb->postmeta}
-			WHERE post_id IN ({$id_placeholders}) AND meta_key IN ({$key_placeholders})
-			ORDER BY post_id ASC,meta_key ASC,meta_id ASC",
-			...$args
-		),
+		$prepared,
 		ARRAY_A
 	);
-	// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
 	if ( '' !== (string) $wpdb->last_error || ! is_array( $stored ) ) {
 		return yotm_job_storage_error( 'yotm_job_storage_unavailable', (string) $wpdb->last_error );
 	}
