@@ -141,6 +141,7 @@ function yotm_media_reference_raw_postmeta_rows_batch( $attachment_ids, $meta_ke
 	$prepared = $wpdb->prepare( $query, ...$args );
 	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Bounded exact raw rows are required and must bypass object caching; prepared above.
 	$stored = $wpdb->get_results(
+		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Prepared immediately above from the bounded validated query.
 		$prepared,
 		ARRAY_A
 	);
