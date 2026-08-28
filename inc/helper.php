@@ -330,11 +330,12 @@ function yotm_get_attached_file_selector_rows_after( $after_meta_id, $max_meta_i
 			FROM {$wpdb->postmeta} pm
 			INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id
 			WHERE pm.meta_key = %s AND pm.meta_id > %d AND pm.meta_id <= %d
-			AND p.post_type = 'attachment' AND p.post_status = 'inherit' AND p.post_mime_type LIKE 'image/%%'
+			AND p.post_type = 'attachment' AND p.post_status = 'inherit' AND p.post_mime_type LIKE %s
 			ORDER BY pm.meta_id ASC LIMIT %d",
 			'_wp_attached_file',
 			$after_meta_id,
 			$max_meta_id,
+			$wpdb->esc_like( 'image/' ) . '%',
 			$limit
 		),
 		ARRAY_A
