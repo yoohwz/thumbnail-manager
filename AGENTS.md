@@ -23,8 +23,8 @@ These instructions apply to the entire `thumbnail-manager` repository.
 ## Roles
 
 - **Human** owns product direction, unresolved trade-offs, merge approval, release/version decisions, production actions, and WordPress.org publication.
-- **ChatGPT** owns task framing, risk classification, architecture/product decisions, plan review for Controlled work, and independent technical review of the actual pull-request state.
-- **Codex** owns repository discovery, implementation, tests, validation, commits, branch/PR maintenance, and correction of review findings.
+- **ChatGPT** owns task framing, risk classification, architecture/product decisions, plan review for Controlled work, and the single external review gate focused on approved-plan/diff alignment, architecture and invariants, safety boundaries, scope drift, compatibility, and evidence sufficiency.
+- **Codex** owns repository discovery, implementation, tests and runtime reproduction, validation, repo-local technical/adversarial verification before handoff, commits, branch/PR maintenance, and correction of review findings.
 - **GitHub** is the durable record for commits, pull requests, CI, review results, and Controlled-Lane planning handoffs.
 
 ## Human command shorthand and routing
@@ -106,9 +106,9 @@ Use Fast Lane when the change is isolated and cannot materially alter media inte
 
 Normal flow:
 
-`Human -> ChatGPT brief -> Codex implementation -> draft PR/evidence -> ChatGPT technical review -> Human merge gate`
+`Human -> ChatGPT brief -> Codex implementation + validation + local verification -> draft PR/evidence -> ChatGPT lightweight external review -> Human merge gate`
 
-A separate plan-review gate is not required.
+A separate plan-review gate is not required. For very small documentation, test-only, tooling, or governance changes with no runtime or safety-contract impact, the task brief may explicitly waive the ChatGPT external review and use `Codex -> CI -> Human merge`; this is opt-in per task, not the default.
 
 ### Controlled Lane
 
@@ -132,9 +132,31 @@ Classification is semantic, not filename-based. A text-only edit inside a safety
 
 Normal flow:
 
-`Human -> ChatGPT brief -> Codex discovery/plan -> PLAN_REVIEW_REQUIRED -> ChatGPT plan review -> Codex implementation -> draft PR/evidence -> TECHNICAL_REVIEW_REQUIRED -> ChatGPT technical review -> Human merge gate`
+`Human -> ChatGPT brief -> Codex discovery/plan -> PLAN_REVIEW_REQUIRED -> ChatGPT plan review -> Codex implementation + validation + local verification -> draft PR/evidence -> TECHNICAL_REVIEW_REQUIRED -> ChatGPT external review -> Human merge gate`
+
+Before `TECHNICAL_REVIEW_REQUIRED`, Codex must complete the execution cycle `implement -> tests/runtime evidence -> repo-local adversarial review -> fix findings -> exact-head handoff`. The purpose is to make Codex the primary repo-local technical checker while retaining one external review gate rather than adding another mandatory workflow stage.
+
+At `TECHNICAL_REVIEW_REQUIRED`, ChatGPT reviews the approved plan against the actual diff and evidence, with emphasis on architecture/invariants, safety boundaries, scope drift, compatibility, acceptance criteria, and evidence sufficiency. ChatGPT should not mechanically duplicate Codex's exhaustive repo-local verification or act as a second linter.
 
 If Fast-Lane discovery reveals a Controlled risk, stop before risky runtime implementation and promote the task to Controlled Lane.
+
+### Review intensity: fresh independent Codex review
+
+A fresh independent Codex review is a **review intensity**, not a separate workflow stage or status. It runs inside the Codex execution cycle before the external ChatGPT handoff.
+
+A fresh independent Codex review is mandatory for safety-critical Controlled changes that materially touch any of these surfaces:
+
+- file deletion, destructive filesystem work, or path-containment enforcement;
+- metadata transactional integrity or destructive metadata reconciliation;
+- persistent schema or migration behavior;
+- concurrency, locks, worker ownership, cancellation, or replay safety;
+- authorization, nonce/capability enforcement, or other security boundaries;
+- crash recovery or transactional recovery logic;
+- irreversible migration or similarly hard-to-undo state transition.
+
+The independent review must use a fresh context and a separate worktree or clean checkout, bind to the exact PR head, and produce findings that the implementing Codex resolves before posting `TECHNICAL_REVIEW_REQUIRED`. It does not create a new cross-agent status. ChatGPT may require this review during plan review when the change surface warrants it, and the Human may require it at any time.
+
+Other Controlled tasks may use the implementing Codex's own adversarial verification plus strong automated/runtime evidence when a fresh reviewer would add disproportionate overhead.
 
 ## Media safety invariants
 
@@ -170,9 +192,10 @@ Do not add more statuses unless a future workflow demonstrates a real need.
 - Controlled-Lane plan review requires a durable GitHub issue anchor. Reuse an existing issue; otherwise create one lightweight issue before returning `PLAN_REVIEW_REQUIRED`.
 - Codex posts the Controlled plan to that issue before runtime implementation begins.
 - ChatGPT posts `PLAN REVIEW: APPROVED` or `PLAN REVIEW: CHANGES REQUIRED` to the same issue.
-- After implementation, Codex updates the PR body and posts `STATUS: TECHNICAL_REVIEW_REQUIRED` with the current head SHA.
+- Before any technical-review handoff, Codex completes proportional repo-local technical/adversarial verification and records the relevant tests/runtime evidence in the PR. When fresh independent Codex review is required, the PR evidence must identify that exact-head review as completed and summarize any findings/corrections.
+- After implementation and local verification, Codex updates the PR body and posts `STATUS: TECHNICAL_REVIEW_REQUIRED` with the current head SHA.
 - A commit pushed after that handoff invalidates the review target; Codex must post a new handoff for the new head.
-- ChatGPT posts either `STATUS: TECHNICAL_CHANGES_REQUIRED` or `STATUS: READY_FOR_HUMAN_MERGE` to the same PR conversation.
+- ChatGPT's technical review is the single external boundary/acceptance review. It focuses on approved-plan/diff alignment, architecture/invariants, safety, scope, compatibility, acceptance criteria, and evidence sufficiency, and posts either `STATUS: TECHNICAL_CHANGES_REQUIRED` or `STATUS: READY_FOR_HUMAN_MERGE` to the same PR conversation.
 - `Review` means recover the newest applicable durable handoff and route to plan review, technical review, correction re-review, or Human decision as appropriate.
 
 For re-review after corrections, inspect the delta from the previously reviewed SHA first, verify the original blockers and affected invariants, then spot-check the final PR state. Do not repeat a full review from zero unless the change surface materially expanded.
