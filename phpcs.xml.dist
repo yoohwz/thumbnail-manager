@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <ruleset name="Thumbnail Manager">
-	<description>Incremental WordPress coding standards for the v1.4 job and safety layer.</description>
+	<description>Repository-wide WordPress and PHP compatibility standards for production code and tests.</description>
 
 	<arg name="basepath" value="."/>
 	<arg name="colors"/>
@@ -10,25 +10,13 @@
 	<config name="ignore_warnings_on_exit" value="1"/>
 
 	<file>thumbnail-manager.php</file>
-	<file>inc/job-storage.php</file>
-	<file>inc/handle-prune.php</file>
-	<file>inc/handle-delete.php</file>
-	<file>inc/media-source-index.php</file>
-	<file>inc/handle-regenerate.php</file>
-	<file>inc/regenerate-transaction.php</file>
-	<file>inc/handle-recommendations.php</file>
+	<file>inc</file>
 	<file>tests</file>
 
 	<exclude-pattern>tests/bootstrap.php</exclude-pattern>
 	<exclude-pattern>tests/prune-safety-smoke.php</exclude-pattern>
 
-	<rule ref="WordPress">
-		<!-- Persistent job tables intentionally use direct, uncached database queries. -->
-		<exclude name="WordPress.DB.DirectDatabaseQuery"/>
-		<exclude name="WordPress.DB.PreparedSQL.InterpolatedNotPrepared"/>
-		<exclude name="WordPress.DB.PreparedSQL.NotPrepared"/>
-		<exclude name="WordPress.DB.SlowDBQuery.slow_db_query_meta_query"/>
-	</rule>
+	<rule ref="WordPress"/>
 
 	<rule ref="PHPCompatibilityWP"/>
 
@@ -42,6 +30,20 @@
 
 	<rule ref="Generic.Commenting">
 		<exclude-pattern>tests/phpunit/*</exclude-pattern>
+	</rule>
+
+	<rule ref="WordPress.DB.DirectDatabaseQuery">
+		<!-- Persistent job tables are authoritative state and deliberately bypass the object cache. -->
+		<exclude-pattern>inc/job-storage.php</exclude-pattern>
+	</rule>
+
+	<rule ref="WordPress.DB.PreparedSQL.InterpolatedNotPrepared">
+		<!-- Job-table names are generated internally; all row values still use placeholders. -->
+		<exclude-pattern>inc/job-storage.php</exclude-pattern>
+		<!-- Integration fixtures interpolate only trusted table names created by the test harness. -->
+		<exclude-pattern>tests/phpunit/test-job-storage-installation.php</exclude-pattern>
+		<exclude-pattern>tests/phpunit/test-job-storage.php</exclude-pattern>
+		<exclude-pattern>tests/phpunit/test-media-source-index.php</exclude-pattern>
 	</rule>
 
 	<rule ref="WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber">

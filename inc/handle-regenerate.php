@@ -53,6 +53,7 @@ function yotm_regenerate_prepare() {
 			wp_send_json_error( array( 'msg' => $target_dir->get_error_message() ), 400 );
 		}
 
+		// phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query -- Legacy query fallback; new folder-scoped jobs use the bounded raw-meta selector.
 		$query_args['meta_query'] = array(
 			array(
 				'key'     => '_wp_attached_file',
