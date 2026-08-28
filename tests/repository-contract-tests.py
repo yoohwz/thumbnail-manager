@@ -54,6 +54,10 @@ plugin_check_baseline = json.loads(read("release/plugin-check-baseline.json"))
 wporg_policy = json.loads(read("release/wporg-policy.json"))
 wporg_helper = read("bin/wporg-release.py")
 release_validator = read("bin/validate-release.py")
+phpcs_config = read("phpcs.xml.dist")
+admin_php = read("inc/admin-menu.php")
+admin_js = read("js/admin.js")
+pot = read("languages/thumbnail-manager.pot")
 
 plugin_version = match(r"^\s*\*\s*Version:\s*(\S+)", plugin, "plugin header Version")
 constant_version = match(r"define\(\s*'YOTM_VERSION'\s*,\s*'([^']+)'\s*\)", plugin, "YOTM_VERSION")
@@ -146,6 +150,24 @@ if actual_payload_entries != expected_payload_entries:
         "release payload allowlist differs: "
         f"expected={sorted(expected_payload_entries)}, actual={sorted(actual_payload_entries)}"
     )
+
+for required_scope in ("<file>thumbnail-manager.php</file>", "<file>inc</file>"):
+    if required_scope not in phpcs_config:
+        fail(f"PHPCS production coverage is missing {required_scope}")
+if re.search(r'<exclude\s+name="WordPress\.DB\.', phpcs_config):
+    fail("PHPCS must use file-specific or inline DB exceptions, not global DB-sniff exclusions")
+
+js_i18n_keys = set(re.findall(r"\bt\(\s*'([^']+)'", admin_js))
+php_i18n_keys = set(
+    re.findall(r"'([A-Za-z][A-Za-z0-9]*)'\s*=>\s*(?:__|esc_html__|esc_attr__)\(", admin_php)
+)
+missing_i18n_keys = sorted(js_i18n_keys - php_i18n_keys)
+if missing_i18n_keys:
+    fail(f"JavaScript translation keys are missing from the PHP localization map: {missing_i18n_keys}")
+
+for msgid in ('msgid "%s (year)"', 'msgid "— %s"', 'msgid "Scanning attachment rows… %s checked"'):
+    if msgid not in pot:
+        fail(f"translation template is missing shipped source string: {msgid}")
 
 if plugin_check_baseline.get("schema_version") != 1:
     fail("Plugin Check baseline schema must be version 1")
