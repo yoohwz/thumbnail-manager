@@ -516,11 +516,13 @@ function yotm_delete_prune_item_recoverable( &$item, $payload, $uploads_base, $r
 
 	if ( ! empty( $journal ) ) {
 		$journal_path = yotm_prune_journal_lexical_path( $journal['path'] ?? '' );
+		$fingerprint  = (string) ( $journal['node_fingerprint'] ?? '' );
 		if (
 			1 !== absint( $journal['version'] ?? 0 )
 			|| '' === $path
 			|| ! hash_equals( $path, $journal_path )
 			|| ! preg_match( '/^[a-f0-9]{64}$/', (string) ( $journal['file_hash'] ?? '' ) )
+			|| ( '' !== $fingerprint && ! preg_match( '/^[a-f0-9]{64}$/', $fingerprint ) )
 			|| ! isset( $journal['bytes'] )
 			|| 0 > (int) $journal['bytes']
 		) {
@@ -570,6 +572,9 @@ function yotm_delete_prune_item_recoverable( &$item, $payload, $uploads_base, $r
 		$current_hash = hash_file( 'sha256', $path );
 		if (
 			! is_string( $current_hash )
+			|| ! preg_match( '/^[a-f0-9]{64}$/', $fingerprint )
+			|| empty( $node['fingerprint'] )
+			|| ! hash_equals( $fingerprint, (string) $node['fingerprint'] )
 			|| ! hash_equals( (string) ( $journal['file_hash'] ?? '' ), $current_hash )
 			|| (int) $journal['bytes'] !== (int) $node['bytes']
 		) {
@@ -615,11 +620,12 @@ function yotm_delete_prune_item_recoverable( &$item, $payload, $uploads_base, $r
 			);
 		}
 		$journal                                    = array(
-			'version'   => 1,
-			'path'      => $path,
-			'file_hash' => $file_hash,
-			'bytes'     => (int) $bytes,
-			'outcome'   => '',
+			'version'          => 1,
+			'path'             => $path,
+			'file_hash'        => $file_hash,
+			'node_fingerprint' => $node['fingerprint'],
+			'bytes'            => (int) $bytes,
+			'outcome'          => '',
 		);
 		$item_payload                               = $item['payload'];
 		$item_payload['prune_operation_journal_v1'] = $journal;
@@ -662,10 +668,37 @@ function yotm_prune_journal_lexical_path( $path ) {
 }
 
 /**
+ * Fingerprint one regular filesystem node from a single lstat snapshot.
+ *
+ * Device and inode bind the node across requests. Mode, link count, owner,
+ * device type, and ctime make inode reuse or intervening stat changes fail
+ * closed. Platforms that cannot expose a usable inode cannot authorize prune.
+ *
+ * @param array $stat lstat result.
+ * @return string|WP_Error
+ */
+function yotm_prune_journal_node_fingerprint( $stat ) {
+	$fields   = array( 'dev', 'ino', 'mode', 'nlink', 'uid', 'gid', 'rdev', 'ctime' );
+	$identity = array();
+
+	foreach ( $fields as $field ) {
+		if ( ! array_key_exists( $field, $stat ) || ! is_int( $stat[ $field ] ) ) {
+			return new WP_Error( 'yotm_prune_node_identity_unavailable', __( 'The reviewed prune file identity could not be established safely.', 'thumbnail-manager' ) );
+		}
+		$identity[] = $field . '=' . (string) $stat[ $field ];
+	}
+	if ( 0 >= $stat['ino'] ) {
+		return new WP_Error( 'yotm_prune_node_identity_unavailable', __( 'The reviewed prune file identity could not be established safely.', 'thumbnail-manager' ) );
+	}
+
+	return hash( 'sha256', implode( '|', $identity ) );
+}
+
+/**
  * Inspect the exact filesystem node at an armed prune path without following symlinks.
  *
  * @param string $path Reviewed candidate path.
- * @return array{state:string,bytes:int}|WP_Error
+ * @return array{state:string,bytes:int,fingerprint?:string}|WP_Error
  */
 function yotm_prune_journal_path_state( $path ) {
 	$path = yotm_prune_journal_lexical_path( $path );
@@ -691,10 +724,15 @@ function yotm_prune_journal_path_state( $path ) {
 			'bytes' => 0,
 		);
 	}
+	$fingerprint = yotm_prune_journal_node_fingerprint( $stat );
+	if ( is_wp_error( $fingerprint ) ) {
+		return $fingerprint;
+	}
 
 	return array(
-		'state' => 'regular',
-		'bytes' => absint( $stat['size'] ?? 0 ),
+		'state'       => 'regular',
+		'bytes'       => absint( $stat['size'] ?? 0 ),
+		'fingerprint' => $fingerprint,
 	);
 }
 
