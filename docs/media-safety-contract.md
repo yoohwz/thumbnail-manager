@@ -110,7 +110,17 @@ Persistent cursors/queues must allow page reloads or network interruption withou
 
 Batch retry must be idempotent or otherwise protected from repeating already-completed destructive work.
 
-## 10. Failure behavior
+## 10. Recommendation boundary
+
+Recommendation scans are advisory and must not become implicit prune or delete authorization.
+
+Missing generated metadata or content-reference matches is an inconclusive observation, not proof that a registered size is unused. Dynamic theme/plugin calls, custom fields, external consumers, and other runtime paths may not be visible to a bounded scan.
+
+Unknown or uncertain usage must preserve the Human's current enabled/disabled setting. Applying recommendations may enable a size supported by positive keep/protect evidence, but must not silently disable a size because evidence is absent, legacy, malformed, or stale.
+
+Persisted recommendation results must identify their schema and registered-size snapshot. Browser-facing legacy compatibility data must be projected against the currently registered set so an old client cannot disable a size introduced after the scan. Recommendation output never creates, approves, or mutates a prune manifest.
+
+## 11. Failure behavior
 
 Safety-sensitive ambiguity fails closed. Examples include:
 
@@ -140,6 +150,7 @@ A Controlled change touching this contract must preserve or deliberately update 
 - manifest immutability and hash matching;
 - cancellation/audit retention;
 - resumable deletion and persisted cursors.
+- recommendation decision tables, stale/legacy compatibility projection, and conservative Apply behavior.
 
 Use targeted runtime smoke evidence when the change affects actual filesystem/AJAX orchestration in a way PHPUnit does not adequately represent.
 

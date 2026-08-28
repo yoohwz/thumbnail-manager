@@ -2031,6 +2031,31 @@ function yotm_cleanup_expired_jobs() {
 add_action( 'yotm_cleanup_jobs', 'yotm_cleanup_expired_jobs' );
 
 /**
+ * Project a recommendation result for public delivery.
+ *
+ * @param array         $result Persisted recommendation result.
+ * @param callable|null $projector Optional projector override for tests.
+ * @return array|null
+ */
+function yotm_job_public_recommendation_result( $result, $projector = null ) {
+	if ( null === $projector ) {
+		if ( ! function_exists( 'yotm_recommendation_result_for_response' ) ) {
+			return null;
+		}
+
+		$projector = 'yotm_recommendation_result_for_response';
+	}
+
+	if ( ! is_callable( $projector ) ) {
+		return null;
+	}
+
+	$projected = call_user_func( $projector, $result );
+
+	return is_array( $projected ) ? $projected : null;
+}
+
+/**
  * Return safe job state for browser resume.
  *
  * @param array $job Job row.
@@ -2063,6 +2088,19 @@ function yotm_job_public_data( $job ) {
 	foreach ( $allowed as $key ) {
 		if ( array_key_exists( $key, $payload ) ) {
 			$context[ $key ] = $payload[ $key ];
+		}
+	}
+
+	if (
+		'recommendation' === ( $job['type'] ?? '' )
+		&& 'completed' === ( $job['status'] ?? '' )
+		&& is_array( $context['result'] ?? null )
+	) {
+		$projected_result = yotm_job_public_recommendation_result( $context['result'] );
+		if ( is_array( $projected_result ) ) {
+			$context['result'] = $projected_result;
+		} else {
+			unset( $context['result'] );
 		}
 	}
 

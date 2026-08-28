@@ -559,6 +559,24 @@
 	overflow-x: auto;
 }
 
+#yotm_recommend_results table {
+	min-width: 1080px;
+}
+
+.yo-evidence-list {
+	min-width: 240px;
+	margin: 0;
+	padding-left: 18px;
+}
+
+.yo-evidence-list li {
+	margin-bottom: 4px;
+}
+
+.yo-evidence-list li:last-child {
+	margin-bottom: 0;
+}
+
 .yo-manifest-table {
 	min-width: 760px;
 }

@@ -9,6 +9,10 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
+if ( ! defined( 'YOTM_RECOMMENDATION_SCHEMA_VERSION' ) ) {
+	define( 'YOTM_RECOMMENDATION_SCHEMA_VERSION', 2 );
+}
+
 add_action( 'wp_ajax_yotm_recommend_prepare', 'yotm_recommend_prepare' );
 add_action( 'wp_ajax_yotm_recommend_batch', 'yotm_recommend_batch' );
 
@@ -39,19 +43,21 @@ function yotm_recommend_prepare() {
 	$job              = yotm_job_create(
 		'recommendation',
 		array(
-			'sizes'                  => $sizes,
-			'size_names'             => $size_names,
-			'metadata_usage'         => $metadata_usage,
-			'content_usage'          => $content_usage,
-			'scan_phase'             => 'metadata',
-			'attachment_after'       => 0,
-			'attachment_max'         => yotm_get_max_image_attachment_id(),
-			'attachment_total'       => $attachment_total,
-			'content_after'          => 0,
-			'content_max'            => yotm_recommend_get_max_content_post_id(),
-			'content_total'          => $content_total,
-			'scan_processed'         => 0,
-			'scan_total_attachments' => $attachment_total + $content_total,
+			'recommendation_schema_version' => YOTM_RECOMMENDATION_SCHEMA_VERSION,
+			'registered_sizes_signature'    => yotm_recommend_registered_sizes_signature( $sizes ),
+			'sizes'                         => $sizes,
+			'size_names'                    => $size_names,
+			'metadata_usage'                => $metadata_usage,
+			'content_usage'                 => $content_usage,
+			'scan_phase'                    => 'metadata',
+			'attachment_after'              => 0,
+			'attachment_max'                => yotm_get_max_image_attachment_id(),
+			'attachment_total'              => $attachment_total,
+			'content_after'                 => 0,
+			'content_max'                   => yotm_recommend_get_max_content_post_id(),
+			'content_total'                 => $content_total,
+			'scan_processed'                => 0,
+			'scan_total_attachments'        => $attachment_total + $content_total,
 		),
 		array(
 			'status'       => 'scanning',
@@ -184,7 +190,20 @@ function yotm_recommend_batch() {
 		wp_send_json_success( yotm_build_recommendation_progress_response( $current, false ) );
 	}
 
-	$payload['result']     = yotm_build_recommendation_result( $payload['sizes'], $payload['metadata_usage'], $payload['content_usage'] );
+	$payload['result']     = yotm_build_recommendation_result(
+		$payload['sizes'],
+		$payload['metadata_usage'],
+		$payload['content_usage'],
+		array(
+			'registered_sizes_signature' => $payload['registered_sizes_signature'] ?? '',
+			'attachment_after'           => $payload['attachment_after'] ?? 0,
+			'attachment_max'             => $payload['attachment_max'] ?? 0,
+			'attachment_total'           => $payload['attachment_total'] ?? 0,
+			'content_after'              => $payload['content_after'] ?? 0,
+			'content_max'                => $payload['content_max'] ?? 0,
+			'content_total'              => $payload['content_total'] ?? 0,
+		)
+	);
 	$payload['scan_phase'] = 'completed';
 	yotm_job_worker_update(
 		$worker,
@@ -269,21 +288,171 @@ function yotm_recommend_scan_content_ids( $post_ids, $size_names, &$usage ) {
 }
 
 /**
+ * Normalize registered sizes for stable recommendation signatures.
+ *
+ * @param array $sizes Registered sizes.
+ * @return array
+ */
+function yotm_recommend_normalize_registered_sizes( $sizes ) {
+	$normalized = array();
+
+	foreach ( (array) $sizes as $name => $data ) {
+		$crop = $data['crop'] ?? false;
+		if ( is_array( $crop ) ) {
+			$crop = array_values( array_map( 'sanitize_key', $crop ) );
+		} else {
+			$crop = (bool) $crop;
+		}
+
+		$normalized[ (string) $name ] = array(
+			'width'  => absint( $data['width'] ?? 0 ),
+			'height' => absint( $data['height'] ?? 0 ),
+			'crop'   => $crop,
+		);
+	}
+
+	ksort( $normalized, SORT_STRING );
+
+	return $normalized;
+}
+
+/**
+ * Build a stable signature for a registered-size snapshot.
+ *
+ * @param array $sizes Registered sizes.
+ * @return string
+ */
+function yotm_recommend_registered_sizes_signature( $sizes ) {
+	$encoded = wp_json_encode( yotm_recommend_normalize_registered_sizes( $sizes ) );
+
+	return hash( 'sha256', false === $encoded ? '[]' : $encoded );
+}
+
+/**
+ * Classify a recommendation from positive evidence only.
+ *
+ * @param string $protected_type Policy protection label.
+ * @param int    $content_refs Number of detected content references.
+ * @return array
+ */
+function yotm_recommend_classify_item( $protected_type, $content_refs ) {
+	if ( '' !== $protected_type ) {
+		return array(
+			'status'       => 'protected',
+			'confidence'   => 'high',
+			'apply_action' => 'enable',
+		);
+	}
+
+	if ( $content_refs > 0 ) {
+		return array(
+			'status'       => 'detected_reference',
+			'confidence'   => 'medium',
+			'apply_action' => 'enable',
+		);
+	}
+
+	return array(
+		'status'       => 'unknown',
+		'confidence'   => 'low',
+		'apply_action' => 'preserve',
+	);
+}
+
+/**
+ * Build structured evidence for one registered size.
+ *
+ * @param string $protected_type Policy protection label.
+ * @param int    $content_refs Number of detected content references.
+ * @param int    $generated_count Number of generated metadata entries.
+ * @param int    $bytes Readable generated bytes.
+ * @return array
+ */
+function yotm_recommend_build_evidence( $protected_type, $content_refs, $generated_count, $bytes ) {
+	$evidence = array();
+
+	if ( 'core' === $protected_type ) {
+		$evidence[] = array(
+			'code'        => 'policy_core',
+			'strength'    => 'strong',
+			'description' => __( 'WordPress Core policy protects this size.', 'thumbnail-manager' ),
+		);
+	} elseif ( 'woocommerce' === $protected_type ) {
+		$evidence[] = array(
+			'code'        => 'policy_woocommerce',
+			'strength'    => 'strong',
+			'description' => __( 'WooCommerce naming policy protects this size; runtime use is not asserted.', 'thumbnail-manager' ),
+		);
+	}
+
+	if ( $content_refs > 0 ) {
+		$evidence[] = array(
+			'code'        => 'content_reference_detected',
+			'strength'    => 'positive_heuristic',
+			'count'       => $content_refs,
+			'description' => sprintf(
+				/* translators: %d: number of content references detected. */
+				_n( '%d content reference was detected.', '%d content references were detected.', $content_refs, 'thumbnail-manager' ),
+				$content_refs
+			),
+		);
+	} else {
+		$evidence[] = array(
+			'code'        => 'content_reference_not_detected',
+			'strength'    => 'inconclusive',
+			'count'       => 0,
+			'description' => __( 'No matching content reference was detected in this bounded scan; dynamic use remains possible.', 'thumbnail-manager' ),
+		);
+	}
+
+	if ( $generated_count > 0 ) {
+		$evidence[] = array(
+			'code'        => 'generated_metadata_present',
+			'strength'    => 'historical',
+			'count'       => $generated_count,
+			'bytes'       => $bytes,
+			'description' => sprintf(
+				/* translators: 1: generated metadata entry count, 2: formatted readable bytes. */
+				_n(
+					'%1$d generated metadata entry was found using about %2$s.',
+					'%1$d generated metadata entries were found using about %2$s.',
+					$generated_count,
+					'thumbnail-manager'
+				),
+				$generated_count,
+				size_format( $bytes )
+			),
+		);
+	} else {
+		$evidence[] = array(
+			'code'        => 'generated_metadata_not_detected',
+			'strength'    => 'inconclusive',
+			'count'       => 0,
+			'bytes'       => 0,
+			'description' => __( 'No generated metadata entry was detected; this does not prove the size is unused.', 'thumbnail-manager' ),
+		);
+	}//end if
+
+	return $evidence;
+}
+
+/**
  * Build final recommendation rows.
  *
  * @param array $sizes Registered sizes.
  * @param array $metadata_usage Metadata counters.
  * @param array $content_usage Content counters.
+ * @param array $coverage_context Scan coverage context.
  * @return array
  */
-function yotm_build_recommendation_result( $sizes, $metadata_usage, $content_usage ) {
-	$size_names       = array_keys( $sizes );
-	$protected_map    = yotm_recommend_protected_sizes( $size_names );
-	$recommended_keep = array();
-	$items            = array();
-	$potential_bytes  = 0;
-	$protected_count  = 0;
-	$unused_count     = 0;
+function yotm_build_recommendation_result( $sizes, $metadata_usage, $content_usage, $coverage_context = array() ) {
+	$size_names               = array_keys( $sizes );
+	$protected_map            = yotm_recommend_protected_sizes( $size_names );
+	$items                    = array();
+	$generated_bytes          = 0;
+	$protected_count          = 0;
+	$detected_reference_count = 0;
+	$unknown_count            = 0;
 
 	foreach ( $sizes as $name => $data ) {
 		$width           = absint( $data['width'] ?? 0 );
@@ -291,78 +460,92 @@ function yotm_build_recommendation_result( $sizes, $metadata_usage, $content_usa
 		$generated_count = (int) ( $metadata_usage[ $name ]['count'] ?? 0 );
 		$bytes           = (int) ( $metadata_usage[ $name ]['bytes'] ?? 0 );
 		$content_refs    = (int) ( $content_usage[ $name ] ?? 0 );
-		$protected_type  = $protected_map[ $name ] ?? '';
-		$status          = 'unused';
-		$label           = __( 'No files', 'thumbnail-manager' );
-		$reason          = __( 'No generated files or content references were detected.', 'thumbnail-manager' );
-		$recommendation  = __( 'Disable if not needed', 'thumbnail-manager' );
+		$protected_type  = (string) ( $protected_map[ $name ] ?? '' );
+		$classification  = yotm_recommend_classify_item( $protected_type, $content_refs );
+		$label           = __( 'Unknown', 'thumbnail-manager' );
+		$reason          = __( 'Usage remains unresolved because absence of detected references is not proof that this size is unused.', 'thumbnail-manager' );
+		$recommendation  = __( 'Preserve current setting and review', 'thumbnail-manager' );
 
-		if ( '' !== $protected_type ) {
-			$status             = 'protected';
-			$label              = $protected_type;
-			$reason             = __( 'Protected because this is a core or integration-defined image size.', 'thumbnail-manager' );
-			$recommendation     = __( 'Keep', 'thumbnail-manager' );
-			$recommended_keep[] = $name;
+		if ( 'protected' === $classification['status'] ) {
+			$label          = 'core' === $protected_type ? __( 'Core', 'thumbnail-manager' ) : __( 'WooCommerce', 'thumbnail-manager' );
+			$reason         = __( 'Protected by an established Core or integration naming policy.', 'thumbnail-manager' );
+			$recommendation = __( 'Keep enabled', 'thumbnail-manager' );
 			++$protected_count;
-		} elseif ( $content_refs > 0 ) {
-			$status = 'used';
-			$label  = __( 'Referenced', 'thumbnail-manager' );
-			$reason = sprintf(
-				/* translators: 1: content reference count, 2: generated file count. */
-				_n(
-					'Found %1$d content reference and %2$d generated file.',
-					'Found %1$d content references and %2$d generated files.',
-					$content_refs,
-					'thumbnail-manager'
-				),
-				$content_refs,
-				$generated_count
-			);
-			$recommendation     = __( 'Keep', 'thumbnail-manager' );
-			$recommended_keep[] = $name;
-		} elseif ( $generated_count > 0 ) {
-			$status = 'warning';
-			$label  = __( 'Generated', 'thumbnail-manager' );
-			$reason = sprintf(
-				/* translators: 1: generated file count, 2: formatted disk usage. */
-				_n(
-					'Found %1$d generated file using about %2$s, but no content reference.',
-					'Found %1$d generated files using about %2$s, but no content reference.',
-					$generated_count,
-					'thumbnail-manager'
-				),
-				$generated_count,
-				size_format( $bytes )
-			);
-			$recommendation   = __( 'Review before pruning', 'thumbnail-manager' );
-			$potential_bytes += $bytes;
+		} elseif ( 'detected_reference' === $classification['status'] ) {
+			$label          = __( 'Reference detected', 'thumbnail-manager' );
+			$reason         = __( 'A positive content heuristic supports keeping this size, but does not prove current runtime use.', 'thumbnail-manager' );
+			$recommendation = __( 'Keep enabled', 'thumbnail-manager' );
+			++$detected_reference_count;
 		} else {
-			++$unused_count;
-		}//end if
+			++$unknown_count;
+		}
 
-		$items[] = array(
+		$generated_bytes += max( 0, $bytes );
+		$items[]          = array(
 			'name'            => $name,
 			'dimensions'      => $width . '×' . $height,
-			'status'          => $status,
+			'status'          => $classification['status'],
+			'confidence'      => $classification['confidence'],
+			'apply_action'    => $classification['apply_action'],
 			'label'           => $label,
 			'reason'          => $reason,
 			'recommendation'  => $recommendation,
+			'evidence'        => yotm_recommend_build_evidence( $protected_type, $content_refs, $generated_count, $bytes ),
 			'generated_count' => $generated_count,
 			'content_refs'    => $content_refs,
 			'bytes'           => $bytes,
 		);
 	}//end foreach
 
-	$recommended_keep = array_values( array_unique( $recommended_keep ) );
+	$signature = (string) ( $coverage_context['registered_sizes_signature'] ?? '' );
+	if ( '' === $signature ) {
+		$signature = yotm_recommend_registered_sizes_signature( $sizes );
+	}
 
 	return array(
-		'items'            => $items,
-		'keep_count'       => count( $recommended_keep ),
-		'unused_count'     => $unused_count,
-		'protected_count'  => $protected_count,
-		'savings'          => $potential_bytes > 0 ? size_format( $potential_bytes ) : '0 B',
-		'recommended_keep' => $recommended_keep,
+		'schema_version'             => YOTM_RECOMMENDATION_SCHEMA_VERSION,
+		'registered_sizes_signature' => $signature,
+		'items'                      => $items,
+		'protected_count'            => $protected_count,
+		'detected_reference_count'   => $detected_reference_count,
+		'unknown_count'              => $unknown_count,
+		'generated_bytes'            => $generated_bytes,
+		'generated_bytes_human'      => $generated_bytes > 0 ? size_format( $generated_bytes ) : '0 B',
+		'coverage'                   => array(
+			'metadata'    => array(
+				'complete'         => true,
+				'cursor'           => absint( $coverage_context['attachment_after'] ?? 0 ),
+				'max_id'           => absint( $coverage_context['attachment_max'] ?? 0 ),
+				'total_at_prepare' => absint( $coverage_context['attachment_total'] ?? 0 ),
+			),
+			'content'     => array(
+				'complete'         => true,
+				'cursor'           => absint( $coverage_context['content_after'] ?? 0 ),
+				'max_id'           => absint( $coverage_context['content_max'] ?? 0 ),
+				'total_at_prepare' => absint( $coverage_context['content_total'] ?? 0 ),
+			),
+			'limitations' => array( 'bounded_id_snapshot', 'post_content_patterns_only', 'dynamic_usage_not_observed' ),
+		),
+		// Conservative legacy summaries for cached v1 presentation.
+		'keep_count'                 => $protected_count + $detected_reference_count,
+		'unused_count'               => 0,
+		'savings'                    => '0 B',
 	);
+}
+
+/**
+ * Project a recommendation result safely for old browser clients.
+ *
+ * This projection is response-only. It must never be persisted back to the job.
+ *
+ * @param array $result Persisted recommendation result.
+ * @return array
+ */
+function yotm_recommendation_result_for_response( $result ) {
+	$projected                     = is_array( $result ) ? $result : array();
+	$projected['recommended_keep'] = array_values( array_keys( yotm_get_registered_sizes() ) );
+
+	return $projected;
 }
 
 /**
@@ -376,6 +559,11 @@ function yotm_build_recommendation_progress_response( $job, $done ) {
 	$payload   = $job['payload'];
 	$total     = max( 1, (int) $job['total'] );
 	$processed = min( (int) $job['processed'], $total );
+	$result    = null;
+
+	if ( $done && is_array( $payload['result'] ?? null ) ) {
+		$result = yotm_recommendation_result_for_response( $payload['result'] );
+	}
 
 	return array(
 		'token'     => $job['token'],
@@ -386,7 +574,7 @@ function yotm_build_recommendation_progress_response( $job, $done ) {
 		'percent'   => $done ? 100 : min( 99, ( $processed / $total ) * 100 ),
 		'done'      => (bool) $done,
 		'stopped'   => in_array( $job['status'], array( 'cancelled', 'expired' ), true ),
-		'result'    => $done && is_array( $payload['result'] ?? null ) ? $payload['result'] : null,
+		'result'    => $result,
 	);
 }
 
@@ -506,12 +694,12 @@ function yotm_recommend_protected_sizes( $size_names ) {
 
 	foreach ( $size_names as $name ) {
 		if ( in_array( $name, $core, true ) ) {
-			$protected[ $name ] = __( 'Core', 'thumbnail-manager' );
+			$protected[ $name ] = 'core';
 			continue;
 		}
 
 		if ( in_array( $name, $woo, true ) || false !== strpos( $name, 'woocommerce' ) ) {
-			$protected[ $name ] = __( 'WooCommerce', 'thumbnail-manager' );
+			$protected[ $name ] = 'woocommerce';
 		}
 	}
 
