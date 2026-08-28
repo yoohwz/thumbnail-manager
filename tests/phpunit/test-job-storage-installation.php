@@ -45,6 +45,21 @@ class YOTM_Job_Storage_Installation_Test extends WP_UnitTestCase {
 		$this->assertSame( 10, $activation_bound );
 	}
 
+	public function test_compatibility_entrypoint_loads_each_storage_layer_once() {
+		$storage = new ReflectionFunction( 'yotm_job_table_names' );
+		$engine  = new ReflectionFunction( 'yotm_job_create' );
+		$cancel  = new ReflectionFunction( 'yotm_job_cancel' );
+		$cleanup = new ReflectionFunction( 'yotm_cleanup_expired_jobs' );
+		$items   = new ReflectionFunction( 'yotm_job_add_item' );
+
+		$this->assertStringEndsWith( '/inc/jobs/storage.php', wp_normalize_path( $storage->getFileName() ) );
+		$this->assertStringEndsWith( '/inc/jobs/engine.php', wp_normalize_path( $engine->getFileName() ) );
+		$this->assertStringEndsWith( '/inc/jobs/engine.php', wp_normalize_path( $cancel->getFileName() ) );
+		$this->assertStringEndsWith( '/inc/jobs/engine.php', wp_normalize_path( $cleanup->getFileName() ) );
+		$this->assertStringEndsWith( '/inc/job-storage.php', wp_normalize_path( $items->getFileName() ) );
+		$this->assertSame( 10, has_action( 'yotm_cleanup_jobs', 'yotm_cleanup_expired_jobs' ) );
+	}
+
 	public function test_reactivation_restores_cleanup_schedule_without_ddl() {
 		wp_clear_scheduled_hook( 'yotm_cleanup_jobs' );
 		$this->reset_request_state();
