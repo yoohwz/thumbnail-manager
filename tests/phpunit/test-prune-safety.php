@@ -64,6 +64,21 @@ class YOTM_Prune_Safety_Test extends WP_UnitTestCase {
 		parent::tearDown();
 	}
 
+	public function test_path_safety_functions_are_owned_by_media_paths_module() {
+		$expected  = wp_normalize_path( dirname( __DIR__, 2 ) . '/inc/media/paths.php' );
+		$functions = array(
+			'yotm_normalize_filesystem_path',
+			'yotm_is_path_inside_dir',
+			'yotm_resolve_upload_scan_bases',
+			'yotm_media_source_canonical_path',
+		);
+
+		foreach ( $functions as $function ) {
+			$reflection = new ReflectionFunction( $function );
+			$this->assertSame( $expected, wp_normalize_path( $reflection->getFileName() ), $function );
+		}
+	}
+
 	public function test_path_outside_uploads_cannot_be_deleted() {
 		$outside       = trailingslashit( sys_get_temp_dir() ) . 'yotm-outside-' . wp_generate_uuid4() . '.jpg';
 		$this->files[] = $outside;
