@@ -89,6 +89,27 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 		parent::tearDown();
 	}
 
+	public function test_attachment_and_registered_size_functions_have_media_owners() {
+		$root               = dirname( __DIR__, 2 );
+		$attachment_module  = wp_normalize_path( $root . '/inc/media/attachments.php' );
+		$registered_module  = wp_normalize_path( $root . '/inc/media/registered-sizes.php' );
+		$attachment_helpers = array(
+			'yotm_normalize_attached_file_relative_path',
+			'yotm_get_attached_file_selector_rows_after',
+			'yotm_media_reference_raw_postmeta_rows',
+			'yotm_media_reference_is_image_attachment',
+			'yotm_authorize_attached_file_selector_scope',
+		);
+
+		foreach ( $attachment_helpers as $function ) {
+			$reflection = new ReflectionFunction( $function );
+			$this->assertSame( $attachment_module, wp_normalize_path( $reflection->getFileName() ), $function );
+		}
+
+		$reflection = new ReflectionFunction( 'yotm_get_registered_sizes' );
+		$this->assertSame( $registered_module, wp_normalize_path( $reflection->getFileName() ) );
+	}
+
 	public function test_only_exact_metadata_file_becomes_a_candidate() {
 		$fixture = $this->create_attachment_with_thumbnail( 'exact.jpg', 'exact-150x150.webp', 'image/webp' );
 		$sidecar = $fixture['thumbnail'] . '.avif';

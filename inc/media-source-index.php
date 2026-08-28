@@ -9,6 +9,9 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
+require_once __DIR__ . '/media/paths.php';
+require_once __DIR__ . '/media/attachments.php';
+
 // Exact raw metadata fencing requires uncached row queries and generated placeholder lists.
 // phpcs:disable WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare,WordPress.DB.SlowDBQuery.slow_db_query_meta_key,WordPress.DB.SlowDBQuery.slow_db_query_meta_value,WordPress.WP.GetMetaSingle.Missing
 
@@ -62,147 +65,6 @@ add_action( 'deleted_post', 'yotm_media_source_delete_attachment_rows', 10, 2 );
  */
 function yotm_media_source_guard_enabled() {
 	return YOTM_JOB_DB_VERSION === get_option( 'yotm_job_db_version' );
-}
-
-/**
- * Read exact, unfiltered postmeta rows for an authoritative attachment key.
- *
- * The returned list preserves row cardinality and order. Values are decoded
- * exactly once with maybe_unserialize(), matching Core's stored-value shape
- * without invoking the short-circuitable metadata accessor layer.
- *
- * @param int    $attachment_id Attachment ID.
- * @param string $meta_key Authoritative meta key.
- * @return array<int,array{meta_id:int,raw_value:string,value:mixed}>|WP_Error
- */
-function yotm_media_reference_raw_postmeta_rows( $attachment_id, $meta_key ) {
-	global $wpdb;
-
-	$attachment_id = absint( $attachment_id );
-	$meta_key      = (string) $meta_key;
-	$allowed       = array( '_wp_attached_file', '_wp_attachment_metadata', '_wp_attachment_backup_sizes' );
-	if ( ! $attachment_id || ! in_array( $meta_key, $allowed, true ) ) {
-		return new WP_Error( 'yotm_media_raw_meta_invalid', __( 'Authoritative attachment metadata could not be identified.', 'thumbnail-manager' ) );
-	}
-
-	$wpdb->last_error = '';
-	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Core postmeta table is trusted; destructive decisions require exact uncached rows that cannot be short-circuited by metadata filters.
-	$stored = $wpdb->get_results(
-		$wpdb->prepare(
-			"SELECT meta_id,meta_value FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key = %s ORDER BY meta_id ASC",
-			$attachment_id,
-			$meta_key
-		),
-		ARRAY_A
-	);
-	if ( '' !== (string) $wpdb->last_error || ! is_array( $stored ) ) {
-		return yotm_job_storage_error( 'yotm_job_storage_unavailable', (string) $wpdb->last_error );
-	}
-
-	$rows = array();
-	foreach ( $stored as $row ) {
-		$raw_value = (string) ( $row['meta_value'] ?? '' );
-		$rows[]    = array(
-			'meta_id'   => absint( $row['meta_id'] ?? 0 ),
-			'raw_value' => $raw_value,
-			'value'     => maybe_unserialize( $raw_value ),
-		);
-	}
-
-	return $rows;
-}
-
-/**
- * Read exact authoritative postmeta rows for one bounded attachment batch.
- *
- * @param int[]    $attachment_ids Attachment IDs.
- * @param string[] $meta_keys Allowed authoritative keys.
- * @return array<int,array<string,array<int,array{meta_id:int,raw_value:string,value:mixed}>>>|WP_Error
- */
-function yotm_media_reference_raw_postmeta_rows_batch( $attachment_ids, $meta_keys ) {
-	global $wpdb;
-
-	$attachment_ids = array_values( array_unique( array_filter( array_map( 'absint', (array) $attachment_ids ) ) ) );
-	$allowed        = array( '_wp_attached_file', '_wp_attachment_metadata', '_wp_attachment_backup_sizes' );
-	$meta_keys      = array_values( array_unique( array_intersect( array_map( 'strval', (array) $meta_keys ), $allowed ) ) );
-	if ( empty( $attachment_ids ) || empty( $meta_keys ) || count( $attachment_ids ) > 500 ) {
-		return new WP_Error( 'yotm_media_raw_meta_batch_invalid', __( 'The authoritative attachment metadata batch is invalid.', 'thumbnail-manager' ) );
-	}
-
-	$id_placeholders  = implode( ',', array_fill( 0, count( $attachment_ids ), '%d' ) );
-	$key_placeholders = implode( ',', array_fill( 0, count( $meta_keys ), '%s' ) );
-	$args             = array_merge( $attachment_ids, $meta_keys );
-	$wpdb->last_error = '';
-	$query            = "SELECT post_id,meta_id,meta_key,meta_value FROM {$wpdb->postmeta} " .
-		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Placeholder lists are generated from validated bounded arrays.
-		"WHERE post_id IN ({$id_placeholders}) AND meta_key IN ({$key_placeholders}) " .
-		'ORDER BY post_id ASC,meta_key ASC,meta_id ASC';
-	// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Query contains only the trusted core table plus validated generated placeholders.
-	$prepared = $wpdb->prepare( $query, ...$args );
-	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Bounded exact raw rows are required and must bypass object caching; prepared above.
-	$stored = $wpdb->get_results(
-		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Prepared immediately above from the bounded validated query.
-		$prepared,
-		ARRAY_A
-	);
-	if ( '' !== (string) $wpdb->last_error || ! is_array( $stored ) ) {
-		return yotm_job_storage_error( 'yotm_job_storage_unavailable', (string) $wpdb->last_error );
-	}
-
-	$grouped = array();
-	foreach ( $attachment_ids as $attachment_id ) {
-		foreach ( $meta_keys as $meta_key ) {
-			$grouped[ $attachment_id ][ $meta_key ] = array();
-		}
-	}
-	foreach ( $stored as $row ) {
-		$attachment_id = absint( $row['post_id'] ?? 0 );
-		$meta_key      = (string) ( $row['meta_key'] ?? '' );
-		$raw_value     = (string) ( $row['meta_value'] ?? '' );
-		if ( ! isset( $grouped[ $attachment_id ][ $meta_key ] ) ) {
-			continue;
-		}
-		$grouped[ $attachment_id ][ $meta_key ][] = array(
-			'meta_id'   => absint( $row['meta_id'] ?? 0 ),
-			'raw_value' => $raw_value,
-			'value'     => maybe_unserialize( $raw_value ),
-		);
-	}
-
-	return $grouped;
-}
-
-/**
- * Classify an image attachment without filterable attachment accessors.
- *
- * Core historically permits imported image attachments whose MIME type is
- * `import`. Guard every import attachment conservatively because an
- * authoritative metadata mutation can itself introduce the image extension;
- * classifying only the pre-write attached-file value would be fail-open.
- *
- * @param int $attachment_id Attachment ID.
- * @return bool|WP_Error
- */
-function yotm_media_reference_is_image_attachment( $attachment_id ) {
-	global $wpdb;
-
-	$attachment_id    = absint( $attachment_id );
-	$wpdb->last_error = '';
-	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Guard applicability must use the exact unfiltered post row.
-	$post = $attachment_id ? $wpdb->get_row( $wpdb->prepare( "SELECT post_type,post_mime_type FROM {$wpdb->posts} WHERE ID = %d", $attachment_id ), ARRAY_A ) : null;
-	if ( '' !== (string) $wpdb->last_error ) {
-		return yotm_job_storage_error( 'yotm_job_storage_unavailable', (string) $wpdb->last_error );
-	}
-	if ( ! is_array( $post ) || 'attachment' !== (string) ( $post['post_type'] ?? '' ) ) {
-		return false;
-	}
-
-	$mime_type = strtolower( (string) ( $post['post_mime_type'] ?? '' ) );
-	if ( 0 === strpos( $mime_type, 'image/' ) ) {
-		return true;
-	}
-
-	return 'import' === $mime_type;
 }
 
 /**
@@ -425,48 +287,6 @@ function yotm_media_reference_require_complete_index() {
 	}
 
 	return yotm_media_source_require_clean_index();
-}
-
-/**
- * Resolve a path to a canonical, uploads-contained path.
- *
- * @param string $path Absolute or uploads-relative path.
- * @return string|WP_Error
- */
-function yotm_media_source_canonical_path( $path ) {
-	$uploads = wp_get_upload_dir();
-	$base    = realpath( (string) ( $uploads['basedir'] ?? '' ) );
-	$path    = str_replace( '\\', '/', (string) $path );
-
-	if ( false === $base || '' === $path || false !== strpos( $path, "\0" ) ) {
-		return new WP_Error( 'yotm_media_source_path_unresolved', __( 'An authoritative media path could not be resolved safely.', 'thumbnail-manager' ) );
-	}
-
-	$base = untrailingslashit( wp_normalize_path( $base ) );
-	if ( ! preg_match( '#^(?:[A-Za-z]:)?/#', $path ) ) {
-		$path = trailingslashit( $base ) . ltrim( $path, '/' );
-	}
-
-	$path = wp_normalize_path( $path );
-	if ( is_link( $path ) ) {
-		return new WP_Error( 'yotm_media_source_symlink', __( 'A symbolic-link media path cannot be used for destructive work.', 'thumbnail-manager' ) );
-	}
-
-	$real = realpath( $path );
-	if ( false === $real ) {
-		$parent = realpath( dirname( $path ) );
-		if ( false === $parent || basename( $path ) !== wp_basename( $path ) ) {
-			return new WP_Error( 'yotm_media_source_path_unresolved', __( 'An authoritative media path could not be resolved safely.', 'thumbnail-manager' ) );
-		}
-		$real = trailingslashit( wp_normalize_path( $parent ) ) . wp_basename( $path );
-	}
-
-	$real = untrailingslashit( wp_normalize_path( $real ) );
-	if ( $real === $base || 0 !== strpos( $real, trailingslashit( $base ) ) ) {
-		return new WP_Error( 'yotm_media_source_outside_uploads', __( 'An authoritative media path is outside uploads.', 'thumbnail-manager' ) );
-	}
-
-	return $real;
 }
 
 /**
