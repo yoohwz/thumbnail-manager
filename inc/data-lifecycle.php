@@ -1048,11 +1048,16 @@ function yotm_data_lifecycle_preflight_scope( $site_ids, $scope_hash, $limits, $
  * Persist all exact cleanup intents before any deletion.
  *
  * @param array[] $plans Site plans.
+ * @param array[] $locks Lock handles that authorize intent mutation.
  * @return array|WP_Error Previous intent state for rollback.
  */
-function yotm_data_lifecycle_prepare_intents( $plans ) {
+function yotm_data_lifecycle_prepare_intents( $plans, $locks ) {
 	$previous = array();
 	foreach ( $plans as $plan ) {
+		$valid = yotm_data_lifecycle_verify_scope_fences( $locks );
+		if ( is_wp_error( $valid ) ) {
+			return $valid;
+		}
 		$result = yotm_data_lifecycle_in_blog(
 			$plan['blog_id'],
 			static function () use ( $plan ) {
@@ -1074,6 +1079,10 @@ function yotm_data_lifecycle_prepare_intents( $plans ) {
 					'blog_id' => $plan['blog_id'],
 					'value'   => $result['before'],
 				);
+			}
+			$valid = yotm_data_lifecycle_verify_scope_fences( $locks );
+			if ( is_wp_error( $valid ) ) {
+				return $valid;
 			}
 			$restored = yotm_data_lifecycle_restore_intents( $previous );
 
@@ -1429,10 +1438,10 @@ function yotm_data_lifecycle_uninstall( $options = array() ) {
 			);
 		}
 
-		$previous = yotm_data_lifecycle_prepare_intents( $plans );
+		$previous = yotm_data_lifecycle_prepare_intents( $plans, $fences );
 		if ( is_wp_error( $previous ) ) {
 			return array(
-				'status' => 'retained',
+				'status' => 'yotm_uninstall_fence_lost' === $previous->get_error_code() ? 'partial' : 'retained',
 				'reason' => $previous->get_error_code(),
 			);
 		}
