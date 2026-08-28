@@ -569,6 +569,9 @@
       } else if (data.scan_phase === 'source_index') {
         label = t('indexingSources', 'Indexing authoritative media sources…');
         indeterminate = true;
+      } else if (data.scan_phase === 'selection' && data.total_known === false) {
+        label = String(t('scanningAttachmentRows', 'Scanning attachment rows… %s checked')).replace('%s', data.selection_scanned || 0);
+        indeterminate = true;
       } else if (data.scan_phase === 'manifest') {
         label = t('buildingManifest', 'Building immutable manifest…');
         indeterminate = true;
@@ -765,9 +768,10 @@
     $('#yotm_regen_scope, #yotm_regen_subpath, #yotm_regen_attachment_ids, input[name="yotm_regen_mode"]').prop('disabled', !!locked);
   }
 
-  function regenProgress(percent, label) {
+  function regenProgress(percent, label, indeterminate) {
     const value = Math.max(0, Math.min(100, parseFloat(percent) || 0));
-    $regenProg.show().attr('aria-valuenow', value.toFixed(0));
+    $regenProg.show().toggleClass('indeterminate', !!indeterminate).attr('aria-valuenow', value.toFixed(0));
+    $regenProg.attr('aria-busy', indeterminate ? 'true' : 'false');
     $regenBar.css('width', Math.max(1, value) + '%');
     $regenStat.show().text(label || value.toFixed(1) + '%');
   }
@@ -786,7 +790,7 @@
     }
     $regenRun.prop('disabled', !!opts.preserveJob);
     if (!opts.keepProgress) {
-      $regenProg.hide().attr('aria-valuenow', '0');
+      $regenProg.hide().removeClass('indeterminate').attr({'aria-valuenow': '0', 'aria-busy': 'false'});
       $regenBar.css('width', '0');
       $regenStat.hide().text('');
     }
@@ -796,7 +800,10 @@
   }
 
   function renderRegenState(data) {
-    $regenResults.html('<p><strong>' + escapeHtml(t('scope', 'Scope:')) + '</strong> ' + escapeHtml(data.scope_label || 'All media') + '</p><p><strong>' + escapeHtml(t('processed', 'Processed:')) + '</strong> ' + escapeHtml(data.processed) + ' / ' + escapeHtml(data.total) + '</p><p><strong>' + escapeHtml(t('regenerated', 'Regenerated:')) + '</strong> ' + escapeHtml(data.regenerated) + '</p><p><strong>' + escapeHtml(t('skipped', 'Skipped:')) + '</strong> ' + escapeHtml(data.skipped) + '</p><p><strong>' + escapeHtml(t('failed', 'Failed:')) + '</strong> ' + escapeHtml(data.failed) + '</p>');
+    const processed = data.total_known === false
+      ? escapeHtml(String(t('scanningAttachmentRows', 'Scanning attachment rows… %s checked')).replace('%s', data.selection_scanned || 0))
+      : escapeHtml(data.processed) + ' / ' + escapeHtml(data.total);
+    $regenResults.html('<p><strong>' + escapeHtml(t('scope', 'Scope:')) + '</strong> ' + escapeHtml(data.scope_label || 'All media') + '</p><p><strong>' + escapeHtml(t('processed', 'Processed:')) + '</strong> ' + processed + '</p><p><strong>' + escapeHtml(t('regenerated', 'Regenerated:')) + '</strong> ' + escapeHtml(data.regenerated) + '</p><p><strong>' + escapeHtml(t('skipped', 'Skipped:')) + '</strong> ' + escapeHtml(data.skipped) + '</p><p><strong>' + escapeHtml(t('failed', 'Failed:')) + '</strong> ' + escapeHtml(data.failed) + '</p>');
   }
 
   function regenerateBatch() {
@@ -820,13 +827,21 @@
         loadRecentJobs();
         return;
       }
-      regenProgress(data.percent || 0, t('processing', 'Processing…') + ' ' + data.processed + ' / ' + data.total);
+      const discovering = data.total_known === false;
+      const label = discovering
+        ? String(t('scanningAttachmentRows', 'Scanning attachment rows… %s checked')).replace('%s', data.selection_scanned || 0)
+        : t('processing', 'Processing…') + ' ' + data.processed + ' / ' + data.total;
+      regenProgress(data.percent || 0, label, discovering);
       renderRegenState(data);
       if (!data.done) {
         window.setTimeout(regenerateBatch, parseInt(data.retry_after_ms || 120, 10));
         return;
       }
-      $regenResults.prepend(htmlNotice(data.failed ? 'notice-warning' : 'notice-success', formatTemplate(t('doneRegenerated', 'Done. Regenerated %1$s attachments, skipped %2$s, failed %3$s.'), {'%1$s': data.regenerated, '%2$s': data.skipped, '%3$s': data.failed})) + errorDetails(data.errors));
+      if (data.total_known && !parseInt(data.total || 0, 10)) {
+        $regenResults.prepend(htmlNotice('notice-warning', t('noImageAttachments', 'No image attachments found.')));
+      } else {
+        $regenResults.prepend(htmlNotice(data.failed ? 'notice-warning' : 'notice-success', formatTemplate(t('doneRegenerated', 'Done. Regenerated %1$s attachments, skipped %2$s, failed %3$s.'), {'%1$s': data.regenerated, '%2$s': data.skipped, '%3$s': data.failed})) + errorDetails(data.errors));
+      }
       clearRegenJob({keepResults: true, keepProgress: true});
       $regenResults.trigger('focus');
       loadRecentJobs();
@@ -874,7 +889,7 @@
       }
       regenToken = response.data.token;
       rememberJob('regenerate', regenToken);
-      if (!response.data.total) {
+      if (response.data.total_known !== false && !response.data.total) {
         $regenResults.html(htmlNotice('notice-warning', t('noImageAttachments', 'No image attachments found.')));
         cancelJob(regenToken).always(function(){ clearRegenJob({keepResults: true}); loadRecentJobs(); });
         return;
@@ -902,6 +917,10 @@
     $regenResults.html(htmlNotice('notice-info', t('resumeAvailable', 'An unfinished job was found. Resuming it now…')));
     getJobStatus(token).done(function(response){
       if (response && response.success && response.data && response.data.status === 'running') {
+        const context = response.data.context || {};
+        if (response.data.total_known === false || (context.selector === 'attached_meta_v2' && !context.selection_done)) {
+          regenProgress(0, String(t('scanningAttachmentRows', 'Scanning attachment rows… %s checked')).replace('%s', context.selection_scanned || 0), true);
+        }
         regenerateBatch();
       } else {
         clearRegenJob({keepResults: true});

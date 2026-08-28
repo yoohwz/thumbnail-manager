@@ -113,6 +113,65 @@ function yotm_media_reference_raw_postmeta_rows( $attachment_id, $meta_key ) {
 }
 
 /**
+ * Read exact authoritative postmeta rows for one bounded attachment batch.
+ *
+ * @param int[]    $attachment_ids Attachment IDs.
+ * @param string[] $meta_keys Allowed authoritative keys.
+ * @return array<int,array<string,array<int,array{meta_id:int,raw_value:string,value:mixed}>>>|WP_Error
+ */
+function yotm_media_reference_raw_postmeta_rows_batch( $attachment_ids, $meta_keys ) {
+	global $wpdb;
+
+	$attachment_ids = array_values( array_unique( array_filter( array_map( 'absint', (array) $attachment_ids ) ) ) );
+	$allowed        = array( '_wp_attached_file', '_wp_attachment_metadata', '_wp_attachment_backup_sizes' );
+	$meta_keys      = array_values( array_unique( array_intersect( array_map( 'strval', (array) $meta_keys ), $allowed ) ) );
+	if ( empty( $attachment_ids ) || empty( $meta_keys ) || count( $attachment_ids ) > 500 ) {
+		return new WP_Error( 'yotm_media_raw_meta_batch_invalid', __( 'The authoritative attachment metadata batch is invalid.', 'thumbnail-manager' ) );
+	}
+
+	$id_placeholders  = implode( ',', array_fill( 0, count( $attachment_ids ), '%d' ) );
+	$key_placeholders = implode( ',', array_fill( 0, count( $meta_keys ), '%s' ) );
+	$args             = array_merge( $attachment_ids, $meta_keys );
+	$wpdb->last_error = '';
+	// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Bounded exact raw rows are required; placeholders are generated from validated arrays.
+	$stored = $wpdb->get_results(
+		$wpdb->prepare(
+			"SELECT post_id,meta_id,meta_key,meta_value FROM {$wpdb->postmeta}
+			WHERE post_id IN ({$id_placeholders}) AND meta_key IN ({$key_placeholders})
+			ORDER BY post_id ASC,meta_key ASC,meta_id ASC",
+			...$args
+		),
+		ARRAY_A
+	);
+	// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
+	if ( '' !== (string) $wpdb->last_error || ! is_array( $stored ) ) {
+		return yotm_job_storage_error( 'yotm_job_storage_unavailable', (string) $wpdb->last_error );
+	}
+
+	$grouped = array();
+	foreach ( $attachment_ids as $attachment_id ) {
+		foreach ( $meta_keys as $meta_key ) {
+			$grouped[ $attachment_id ][ $meta_key ] = array();
+		}
+	}
+	foreach ( $stored as $row ) {
+		$attachment_id = absint( $row['post_id'] ?? 0 );
+		$meta_key      = (string) ( $row['meta_key'] ?? '' );
+		$raw_value     = (string) ( $row['meta_value'] ?? '' );
+		if ( ! isset( $grouped[ $attachment_id ][ $meta_key ] ) ) {
+			continue;
+		}
+		$grouped[ $attachment_id ][ $meta_key ][] = array(
+			'meta_id'   => absint( $row['meta_id'] ?? 0 ),
+			'raw_value' => $raw_value,
+			'value'     => maybe_unserialize( $raw_value ),
+		);
+	}
+
+	return $grouped;
+}
+
+/**
  * Classify an image attachment without filterable attachment accessors.
  *
  * Core historically permits imported image attachments whose MIME type is

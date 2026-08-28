@@ -30,6 +30,7 @@ $smoke_files            = array();
 $uploads                = wp_get_upload_dir();
 $smoke_directory        = trailingslashit( $uploads['basedir'] ) . 'yotm-job-smoke-' . wp_generate_uuid4();
 $smoke_second_directory = $smoke_directory . '-second';
+$smoke_nested_directory = trailingslashit( $smoke_second_directory ) . 'nested';
 $admin_ids              = get_users(
 	array(
 		'role'   => 'administrator',
@@ -43,6 +44,7 @@ wp_set_current_user( absint( $admin_ids[0] ) );
 yotm_install_job_tables();
 wp_mkdir_p( $smoke_directory );
 wp_mkdir_p( $smoke_second_directory );
+wp_mkdir_p( $smoke_nested_directory );
 
 for ( $index = 1; $index <= 5; ++$index ) {
 	$file          = trailingslashit( $smoke_directory ) . 'image-' . $index . '-100x100.jpg';
@@ -54,12 +56,18 @@ for ( $index = 1; $index <= 3; ++$index ) {
 	$smoke_files[] = $file;
 	file_put_contents( $file, 'thumbnail' );
 }
+$nested_file   = trailingslashit( $smoke_nested_directory ) . 'nested-300x300.jpg';
+$smoke_files[] = $nested_file;
+file_put_contents( $nested_file, 'thumbnail' );
 
 try {
 	$job = yotm_job_create(
 		'prune',
 		array(
 			'base'                   => $uploads['basedir'],
+			'ownership_schema'       => 'generated_file_v1',
+			'source_index_complete'  => 1,
+			'reference_generation'   => YOTM_MEDIA_REFERENCE_GENERATION,
 			'scan_base'              => trailingslashit( $smoke_directory ),
 			'scan_bases'             => array( trailingslashit( $smoke_directory ), trailingslashit( $smoke_second_directory ) ),
 			'disk_queue'             => array(
@@ -74,6 +82,7 @@ try {
 					'offset' => 0,
 				),
 			),
+			'disk_cursor_version'    => 'dfs_v2',
 			'disk_entries_processed' => 0,
 			'orphan_summary'         => yotm_initial_orphan_summary(),
 		),
@@ -126,7 +135,7 @@ try {
 		$disk = yotm_prune_scan_disk_batch( $disk['job'], 3 );
 		++$loops;
 	} while ( ! $disk['done'] && $loops < 10 );
-	yotm_job_smoke_assert( $disk['done'] && 8 === $disk['job']['payload']['orphan_summary']['total_files'], 'Multi-root disk cursor did not resume through every selected file.' );
+	yotm_job_smoke_assert( $disk['done'] && 9 === $disk['job']['payload']['orphan_summary']['total_files'], 'Multi-root DFS cursor did not resume through every selected file.' );
 
 	yotm_job_update( $job['id'], array( 'phase' => 'manifest' ) );
 	yotm_job_smoke_assert( ! yotm_job_add_item( $job['id'], 'late', array( 'path' => '/tmp/yotm-late.jpg' ) ), 'The manifest queue must be immutable.' );
@@ -189,6 +198,9 @@ try {
 	}
 	if ( is_dir( $smoke_directory ) ) {
 		rmdir( $smoke_directory );
+	}
+	if ( is_dir( $smoke_nested_directory ) ) {
+		rmdir( $smoke_nested_directory );
 	}
 	if ( is_dir( $smoke_second_directory ) ) {
 		rmdir( $smoke_second_directory );

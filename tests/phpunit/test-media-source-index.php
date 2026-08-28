@@ -107,6 +107,42 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 		$this->assertArrayNotHasKey( yotm_normalize_filesystem_path( $backup ), $candidates );
 	}
 
+	public function test_raw_postmeta_batch_preserves_exact_rows_in_one_query() {
+		$first  = $this->create_attachment_with_thumbnail( 'raw-batch-first.jpg', 'raw-batch-first-150x150.jpg' );
+		$second = $this->create_attachment_with_thumbnail( 'raw-batch-second.jpg', 'raw-batch-second-150x150.jpg' );
+
+		global $wpdb;
+		$this->assertSame(
+			1,
+			$wpdb->insert(
+				$wpdb->postmeta,
+				array(
+					'post_id'    => $second['attachment_id'],
+					'meta_key'   => '_wp_attached_file',
+					'meta_value' => 'ambiguous/raw-batch-second.jpg',
+				),
+				array( '%d', '%s', '%s' )
+			)
+		);
+
+		$before = (int) $wpdb->num_queries;
+		$rows   = yotm_media_reference_raw_postmeta_rows_batch(
+			array( $first['attachment_id'], $second['attachment_id'] ),
+			array( '_wp_attached_file', '_wp_attachment_metadata' )
+		);
+
+		$this->assertNotWPError( $rows );
+		$this->assertSame( 1, (int) $wpdb->num_queries - $before );
+		$this->assertCount( 1, $rows[ $first['attachment_id'] ]['_wp_attached_file'] );
+		$this->assertCount( 1, $rows[ $first['attachment_id'] ]['_wp_attachment_metadata'] );
+		$this->assertCount( 2, $rows[ $second['attachment_id'] ]['_wp_attached_file'] );
+		$this->assertCount( 1, $rows[ $second['attachment_id'] ]['_wp_attachment_metadata'] );
+		$this->assertLessThan(
+			$rows[ $second['attachment_id'] ]['_wp_attached_file'][1]['meta_id'],
+			$rows[ $second['attachment_id'] ]['_wp_attached_file'][0]['meta_id']
+		);
+	}
+
 	public function test_exact_avif_metadata_output_remains_eligible() {
 		$fixture    = $this->create_attachment_with_thumbnail( 'exact-avif.jpg', 'exact-avif-150x150.avif', 'image/avif' );
 		$candidates = $this->collect_candidates( $fixture['attachment_id'] );

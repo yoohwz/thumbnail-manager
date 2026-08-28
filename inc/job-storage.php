@@ -722,6 +722,19 @@ function yotm_job_expire_if_inactive( $job ) {
 	}
 
 	try {
+		if ( yotm_job_has_recovery_journals( $job['id'] ) ) {
+			$payload                  = $job['payload'];
+			$payload['recovery_only'] = 1;
+			yotm_job_update(
+				$job['id'],
+				array(
+					'payload'    => $payload,
+					'expires_at' => gmdate( 'Y-m-d H:i:s', time() + YOTM_JOB_WORKER_LEASE_SECONDS ),
+				)
+			);
+			return yotm_job_get_by_id( $job['id'] );
+		}
+
 		$expired = yotm_job_transition(
 			$job['id'],
 			yotm_job_active_statuses(),
@@ -739,7 +752,7 @@ function yotm_job_expire_if_inactive( $job ) {
 		return $expired ? $expired : yotm_job_get_by_id( $job['id'] );
 	} finally {
 		yotm_job_release_named_lock( $lock_name );
-	}
+	}//end try
 }
 
 /**
@@ -1186,8 +1199,8 @@ function yotm_job_add_item( $job_id, $item_key, $payload, $status = 'queued', $b
 		(job_id,item_key,status,payload,error,bytes,created_at,updated_at)
 		SELECT %d,%s,%s,%s,'',%d,%s,%s FROM {$tables['jobs']}
 		WHERE id = %d
-		AND ((status = 'scanning' AND phase IN ('metadata','disk'))
-		OR (status = 'running' AND phase IN ('source_index','regenerate')))",
+		AND ((status = 'scanning' AND phase IN ('selection','metadata','disk'))
+		OR (status = 'running' AND phase IN ('source_index','selection','regenerate')))",
 		absint( $job_id ),
 		$item_key,
 		sanitize_key( $status ),
@@ -1220,7 +1233,7 @@ function yotm_job_merge_item_payload( $job_id, $item_key, $payload ) {
 			"SELECT items.id,items.payload FROM {$tables['items']} items
 			INNER JOIN {$tables['jobs']} jobs ON jobs.id = items.job_id
 			WHERE items.job_id = %d AND items.item_key = %s
-			AND jobs.status = 'scanning' AND jobs.phase IN ('metadata','disk') LIMIT 1",
+			AND jobs.status = 'scanning' AND jobs.phase IN ('selection','metadata','disk') LIMIT 1",
 			absint( $job_id ),
 			$item_key
 		)
@@ -1288,7 +1301,7 @@ function yotm_job_merge_item_payload( $job_id, $item_key, $payload ) {
 		"UPDATE {$tables['items']} items
 		INNER JOIN {$tables['jobs']} jobs ON jobs.id = items.job_id
 		SET items.payload = %s, items.updated_at = %s
-		WHERE items.id = %d AND jobs.status = 'scanning' AND jobs.phase IN ('metadata','disk')",
+		WHERE items.id = %d AND jobs.status = 'scanning' AND jobs.phase IN ('selection','metadata','disk')",
 		wp_json_encode( $current ),
 		gmdate( 'Y-m-d H:i:s' ),
 		(int) $row->id
@@ -1317,6 +1330,70 @@ function yotm_job_item_exists( $job_id, $item_key ) {
 }
 
 /**
+ * Return existing stable item keys from one bounded candidate set.
+ *
+ * @param int      $job_id Job ID.
+ * @param string[] $item_keys Candidate SHA-256 keys.
+ * @return array<string,bool>
+ */
+function yotm_job_existing_item_keys( $job_id, $item_keys ) {
+	global $wpdb;
+
+	$keys = array();
+	foreach ( (array) $item_keys as $item_key ) {
+		if ( preg_match( '/^[a-f0-9]{64}$/', (string) $item_key ) ) {
+			$keys[ (string) $item_key ] = (string) $item_key;
+		}
+	}
+	$keys = array_values( $keys );
+	if ( empty( $keys ) ) {
+		return array();
+	}
+	$keys = array_slice( $keys, 0, 1000 );
+
+	$tables       = yotm_job_table_names();
+	$placeholders = implode( ',', array_fill( 0, count( $keys ), '%s' ) );
+	$args         = array_merge( array( absint( $job_id ) ), $keys );
+	// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Bounded placeholder list is generated from validated hashes.
+	$found = $wpdb->get_col(
+		$wpdb->prepare(
+			"SELECT item_key FROM {$tables['items']} WHERE job_id = %d AND item_key IN ({$placeholders})",
+			...$args
+		)
+	);
+	// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
+
+	return array_fill_keys( array_map( 'strval', (array) $found ), true );
+}
+
+/**
+ * Normalize one raw job-item row returned by plugin-owned SQL.
+ *
+ * @param object|array $row Raw database row.
+ * @return array|false
+ */
+function yotm_job_normalize_item_row( $row ) {
+	$row = is_object( $row ) ? get_object_vars( $row ) : $row;
+	if ( ! is_array( $row ) || empty( $row['id'] ) || empty( $row['job_id'] ) ) {
+		return false;
+	}
+
+	return array(
+		'id'               => (int) $row['id'],
+		'job_id'           => (int) $row['job_id'],
+		'item_key'         => (string) ( $row['item_key'] ?? '' ),
+		'status'           => (string) ( $row['status'] ?? '' ),
+		'payload'          => yotm_job_decode_payload( $row['payload'] ?? '' ),
+		'error'            => (string) ( $row['error'] ?? '' ),
+		'bytes'            => (int) ( $row['bytes'] ?? 0 ),
+		'claim_token'      => (string) ( $row['claim_token'] ?? '' ),
+		'claim_generation' => (int) ( $row['claim_generation'] ?? 0 ),
+		'claim_expires_at' => null === ( $row['claim_expires_at'] ?? null ) ? '' : (string) $row['claim_expires_at'],
+		'attempts'         => (int) ( $row['attempts'] ?? 0 ),
+	);
+}
+
+/**
  * Fetch a job item by its stable key.
  *
  * @param int    $job_id Job ID.
@@ -1340,19 +1417,7 @@ function yotm_job_get_item_by_key( $job_id, $item_key ) {
 		return false;
 	}
 
-	return array(
-		'id'               => (int) $row->id,
-		'job_id'           => (int) $row->job_id,
-		'item_key'         => (string) $row->item_key,
-		'status'           => (string) $row->status,
-		'payload'          => yotm_job_decode_payload( $row->payload ),
-		'error'            => (string) $row->error,
-		'bytes'            => (int) $row->bytes,
-		'claim_token'      => (string) $row->claim_token,
-		'claim_generation' => (int) $row->claim_generation,
-		'claim_expires_at' => null === $row->claim_expires_at ? '' : (string) $row->claim_expires_at,
-		'attempts'         => (int) $row->attempts,
-	);
+	return yotm_job_normalize_item_row( $row );
 }
 
 /**
@@ -1380,19 +1445,10 @@ function yotm_job_get_items( $job_id, $statuses = array( 'queued' ), $limit = 10
 	$out          = array();
 
 	foreach ( $rows as $row ) {
-		$out[] = array(
-			'id'               => (int) $row->id,
-			'job_id'           => (int) $row->job_id,
-			'item_key'         => (string) $row->item_key,
-			'status'           => (string) $row->status,
-			'payload'          => yotm_job_decode_payload( $row->payload ),
-			'error'            => (string) $row->error,
-			'bytes'            => (int) $row->bytes,
-			'claim_token'      => (string) $row->claim_token,
-			'claim_generation' => (int) $row->claim_generation,
-			'claim_expires_at' => null === $row->claim_expires_at ? '' : (string) $row->claim_expires_at,
-			'attempts'         => (int) $row->attempts,
-		);
+		$item = yotm_job_normalize_item_row( $row );
+		if ( $item ) {
+			$out[] = $item;
+		}
 	}
 
 	return $out;
@@ -1475,7 +1531,7 @@ function yotm_job_claim_items( $worker, $limit = 100 ) {
 	$out  = array();
 
 	foreach ( $rows as $row ) {
-		$item = yotm_job_get_item_by_key( $row->job_id, $row->item_key );
+		$item = yotm_job_normalize_item_row( $row );
 		if ( $item ) {
 			$out[] = $item;
 		}
@@ -1626,6 +1682,127 @@ function yotm_job_finish_item( $item, $status, $error = '', $bytes = null ) {
 
 	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Claim-fenced result persistence must be uncached; prepared above.
 	return 1 === $wpdb->query( $sql );
+}
+
+/**
+ * Finalize an item and increment item-v3 job counters in one fenced statement.
+ *
+ * @param array    $item Claimed item.
+ * @param array    $worker Current worker ownership.
+ * @param string   $status Terminal status.
+ * @param string   $error Error or skip reason.
+ * @param int|null $bytes Actual bytes for a successful item.
+ * @return bool
+ */
+function yotm_job_finish_item_v3( $item, $worker, $status, $error = '', $bytes = null ) {
+	global $wpdb;
+
+	if ( ! in_array( $status, array( 'done', 'skipped', 'failed' ), true ) ) {
+		return false;
+	}
+
+	$statuses = array_values( array_filter( array_map( 'sanitize_key', (array) ( $worker['statuses'] ?? array() ) ) ) );
+	$phases   = array_values( array_filter( array_map( 'sanitize_key', (array) ( $worker['phases'] ?? array() ) ) ) );
+	if ( empty( $statuses ) ) {
+		return false;
+	}
+
+	$status_placeholders = implode( ',', array_fill( 0, count( $statuses ), '%s' ) );
+	$phase_sql           = '';
+	$args                = array(
+		sanitize_key( $status ),
+		sanitize_text_field( $error ),
+		absint( $bytes ),
+		gmdate( 'Y-m-d H:i:s' ),
+		'done' === $status ? 1 : 0,
+		'failed' === $status ? 1 : 0,
+		'done' === $status ? absint( $bytes ) : 0,
+		absint( $item['id'] ?? 0 ),
+		sanitize_text_field( $item['claim_token'] ?? '' ),
+		absint( $item['claim_generation'] ?? 0 ),
+		absint( $worker['job_id'] ?? 0 ),
+		sanitize_text_field( $worker['token'] ?? '' ),
+		absint( $worker['generation'] ?? 0 ),
+	);
+	$args                = array_merge( $args, $statuses );
+	if ( ! empty( $phases ) ) {
+		$phase_placeholders = implode( ',', array_fill( 0, count( $phases ), '%s' ) );
+		$phase_sql          = " AND jobs.phase IN ({$phase_placeholders})";
+		$args               = array_merge( $args, $phases );
+	}
+	$args[] = gmdate( 'Y-m-d H:i:s' );
+
+	$tables = yotm_job_table_names();
+	// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Tables and allowlisted predicates are plugin-owned; values are assembled above.
+	$sql = $wpdb->prepare(
+		"UPDATE {$tables['items']} items
+		INNER JOIN {$tables['jobs']} jobs ON jobs.id = items.job_id
+		SET items.status = %s,items.error = %s,items.bytes = %d,items.claim_token = '',
+		items.claim_expires_at = NULL,items.updated_at = %s,
+		jobs.processed = jobs.processed + 1,jobs.succeeded = jobs.succeeded + %d,
+		jobs.failed = jobs.failed + %d,jobs.bytes = jobs.bytes + %d,jobs.updated_at = items.updated_at
+		WHERE items.id = %d AND items.status = 'processing' AND items.claim_token = %s
+		AND items.claim_generation = %d AND jobs.id = %d AND jobs.counter_mode = 'item_v3'
+		AND jobs.worker_token = %s AND jobs.worker_generation = %d
+		AND jobs.status IN ({$status_placeholders}){$phase_sql} AND jobs.expires_at >= %s",
+		...$args
+	);
+	// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
+
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Exact item/job counter finalization must be one uncached prepared statement.
+	$updated = $wpdb->query( $sql );
+
+	return false !== $updated && $updated > 0;
+}
+
+/**
+ * Return whether a job still has queued or processing items.
+ *
+ * @param int $job_id Job ID.
+ * @return bool
+ */
+function yotm_job_has_remaining_items( $job_id ) {
+	global $wpdb;
+
+	$tables = yotm_job_table_names();
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Existing indexed job/status lookup; prepared below.
+	return (bool) $wpdb->get_var(
+		$wpdb->prepare(
+			"SELECT 1 FROM {$tables['items']} WHERE job_id = %d AND status IN ('queued','processing') LIMIT 1",
+			absint( $job_id )
+		)
+	);
+}
+
+/**
+ * Return whether an in-flight item has a recoverable media journal.
+ *
+ * The processing set is bounded by the maximum claim batch. Payloads are read
+ * only at cancel/expiry boundaries, never on a normal queue batch.
+ *
+ * @param int $job_id Job ID.
+ * @return bool
+ */
+function yotm_job_has_recovery_journals( $job_id ) {
+	global $wpdb;
+
+	$tables = yotm_job_table_names();
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Bounded recovery guard reads plugin-owned payload rows directly.
+	$payloads = $wpdb->get_col(
+		$wpdb->prepare(
+			"SELECT payload FROM {$tables['items']} WHERE job_id = %d AND status = 'processing' ORDER BY id ASC LIMIT 1000",
+			absint( $job_id )
+		)
+	);
+
+	foreach ( (array) $payloads as $payload_json ) {
+		$payload = yotm_job_decode_payload( $payload_json );
+		if ( ! empty( $payload['prune_operation_journal_v1'] ) || ! empty( $payload['regeneration_journal'] ) ) {
+			return true;
+		}
+	}
+
+	return false;
 }
 
 /**
@@ -2082,6 +2259,12 @@ function yotm_job_public_data( $job ) {
 		'scan_phase',
 		'estimated_bytes',
 		'disk_entries_processed',
+		'selection_done',
+		'selection_meta_after',
+		'selection_meta_max',
+		'selection_scanned',
+		'selection_matched',
+		'selector',
 		'cancelled_at',
 	);
 
@@ -2103,7 +2286,7 @@ function yotm_job_public_data( $job ) {
 		}
 	}
 
-	return array(
+	$public = array(
 		'token'         => $job['token'],
 		'type'          => $job['type'],
 		'status'        => $job['status'],
@@ -2120,6 +2303,12 @@ function yotm_job_public_data( $job ) {
 		'expires_at'    => $job['expires_at'],
 		'context'       => $context,
 	);
+
+	if ( 'regenerate' === ( $job['type'] ?? '' ) && 'attached_meta_v2' === ( $context['selector'] ?? '' ) ) {
+		$public['total_known'] = ! empty( $context['selection_done'] );
+	}
+
+	return $public;
 }
 
 /**
@@ -2193,6 +2382,10 @@ function yotm_job_cancel( $job ) {
 	}
 
 	try {
+		if ( yotm_job_has_recovery_journals( $job['id'] ) ) {
+			return new WP_Error( 'yotm_job_cancel_busy', __( 'The current attachment transaction still requires recovery. Resume the job, then retry stop.', 'thumbnail-manager' ) );
+		}
+
 		$payload                 = $job['payload'];
 		$payload['cancelled_at'] = gmdate( 'c' );
 		$cancelled               = yotm_job_transition(
@@ -2210,7 +2403,7 @@ function yotm_job_cancel( $job ) {
 		);
 	} finally {
 		yotm_job_release_named_lock( $lock_name );
-	}
+	}//end try
 
 	if ( $cancelled ) {
 		return $cancelled;

@@ -110,6 +110,12 @@ Persistent cursors/queues must allow page reloads or network interruption withou
 
 Batch retry must be idempotent or otherwise protected from repeating already-completed destructive work.
 
+Folder-scoped `attached_meta_v2` jobs freeze the maximum authoritative `_wp_attached_file.meta_id` at prepare time and scan that range by raw meta-ID keyset. A materialized regeneration item remains bound to the exact selected meta ID. A deleted/reinserted row, duplicate row, malformed value, database ambiguity, or raw path outside the literal selected subpath fails closed even if a filterable accessor reports an in-scope path. During selection the exact attachment total is unknown; API/UI state must distinguish that condition from a completed zero-result scan.
+
+`item_v3` is limited to media operations with persisted recovery evidence. Prune arms an exact file/hash/byte journal before unlink and reconciles an absent armed path idempotently. Force regeneration retains its transactional promotion journal. Their terminal item row and job counters advance together under the exact worker and claim generation. Normal and missing-only Core regeneration remain `item_v2` and retain their existing at-least-once retry contract.
+
+Cancellation or expiry must not make an armed journal look safely terminal. An ambiguous in-flight journal remains recovery-only/resumable; recovery may reconcile an already-achieved postcondition or roll back an existing Force transaction, but it must not use expiry recovery to authorize a new delete or promotion.
+
 ## 10. Recommendation boundary
 
 Recommendation scans are advisory and must not become implicit prune or delete authorization.
@@ -150,6 +156,8 @@ A Controlled change touching this contract must preserve or deliberately update 
 - manifest immutability and hash matching;
 - cancellation/audit retention;
 - resumable deletion and persisted cursors.
+- raw meta-ID folder snapshots, execution-time scope drift, and delete/reinsert replacement rejection;
+- prune/Force crash recovery between media side effects and item/job finalization;
 - recommendation decision tables, stale/legacy compatibility projection, and conservative Apply behavior.
 
 Use targeted runtime smoke evidence when the change affects actual filesystem/AJAX orchestration in a way PHPUnit does not adequately represent.
