@@ -353,10 +353,6 @@ class YOTM_Job_Storage_Test extends WP_UnitTestCase {
 		yotm_job_release_worker( $worker );
 
 		$this->assertTrue( yotm_job_has_recovery_journals( $job['id'] ) );
-		$cancelled = yotm_job_cancel( yotm_job_get_by_id( $job['id'] ) );
-		$this->assertWPError( $cancelled );
-		$this->assertSame( 'yotm_job_cancel_busy', $cancelled->get_error_code() );
-
 		$tables = yotm_job_table_names();
 		$wpdb->update(
 			$tables['jobs'],
@@ -366,6 +362,16 @@ class YOTM_Job_Storage_Test extends WP_UnitTestCase {
 		$recovering = yotm_job_expire_if_inactive( yotm_job_get_by_id( $job['id'] ) );
 		$this->assertSame( 'running', $recovering['status'] );
 		$this->assertSame( 1, $recovering['payload']['recovery_only'] );
+		$this->assertSame( 'expired', $recovering['payload']['recovery_terminal_status'] );
+
+		$cancelled = yotm_job_cancel( $recovering );
+		$this->assertWPError( $cancelled );
+		$this->assertSame( 'yotm_job_cancel_busy', $cancelled->get_error_code() );
+		$recovering = yotm_job_get_by_id( $job['id'] );
+		$this->assertSame( 1, $recovering['payload']['recovery_only'] );
+		$this->assertSame( 'cancelled', $recovering['payload']['recovery_terminal_status'] );
+		$this->assertNotEmpty( $recovering['payload']['cancel_requested_at'] );
+		$this->assertSame( 'cancelled', yotm_job_recovery_terminal_status( $recovering ) );
 
 		$worker = yotm_job_acquire_worker( $job['id'], array( 'running' ), array( 'regenerate' ) );
 		$items  = yotm_job_claim_items( $worker, 1, true );

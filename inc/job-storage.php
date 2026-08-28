@@ -722,16 +722,32 @@ function yotm_job_expire_if_inactive( $job ) {
 	}
 
 	try {
+		$current = yotm_job_get_by_id( $job['id'] );
+		if ( ! is_array( $current ) ) {
+			return new WP_Error( 'yotm_job_missing', __( 'Job not found.', 'thumbnail-manager' ) );
+		}
+		if (
+			! in_array( $current['status'] ?? '', yotm_job_active_statuses(), true )
+			|| strtotime( ( $current['expires_at'] ?? '' ) . ' UTC' ) >= time()
+		) {
+			return $current;
+		}
+		$job = $current;
+
 		if ( yotm_job_has_recovery_journals( $job['id'] ) ) {
-			$payload                  = $job['payload'];
-			$payload['recovery_only'] = 1;
-			yotm_job_update(
+			$payload                             = $job['payload'];
+			$payload['recovery_only']            = 1;
+			$payload['recovery_terminal_status'] = 'cancelled' === ( $payload['recovery_terminal_status'] ?? '' ) ? 'cancelled' : 'expired';
+			$updated                             = yotm_job_update(
 				$job['id'],
 				array(
 					'payload'    => $payload,
 					'expires_at' => gmdate( 'Y-m-d H:i:s', time() + YOTM_JOB_WORKER_LEASE_SECONDS ),
 				)
 			);
+			if ( ! $updated ) {
+				return new WP_Error( 'yotm_job_recovery_intent_failed', __( 'Could not persist the expired recovery-only state.', 'thumbnail-manager' ) );
+			}
 			return yotm_job_get_by_id( $job['id'] );
 		}
 
@@ -2393,7 +2409,30 @@ function yotm_job_cancel( $job ) {
 	}
 
 	try {
+		$current = yotm_job_get_by_id( $job['id'] );
+		if ( ! is_array( $current ) ) {
+			return new WP_Error( 'yotm_job_missing', __( 'Job not found.', 'thumbnail-manager' ) );
+		}
+		if ( in_array( $current['status'], array( 'completed', 'cancelled', 'expired' ), true ) ) {
+			return $current;
+		}
+		$job = $current;
+
 		if ( yotm_job_has_recovery_journals( $job['id'] ) ) {
+			$payload                             = $job['payload'];
+			$payload['recovery_only']            = 1;
+			$payload['recovery_terminal_status'] = 'cancelled';
+			$payload['cancel_requested_at']      = gmdate( 'c' );
+			$updated                             = yotm_job_update(
+				$job['id'],
+				array(
+					'payload'    => $payload,
+					'expires_at' => gmdate( 'Y-m-d H:i:s', time() + YOTM_JOB_WORKER_LEASE_SECONDS ),
+				)
+			);
+			if ( ! $updated ) {
+				return new WP_Error( 'yotm_job_recovery_intent_failed', __( 'Could not persist the cancellation recovery-only state.', 'thumbnail-manager' ) );
+			}
 			return new WP_Error( 'yotm_job_cancel_busy', __( 'The current attachment transaction still requires recovery. Resume the job, then retry stop.', 'thumbnail-manager' ) );
 		}
 
@@ -2423,6 +2462,18 @@ function yotm_job_cancel( $job ) {
 	$current = yotm_job_get_by_id( $job['id'] );
 
 	return is_array( $current ) && in_array( $current['status'], array( 'completed', 'cancelled', 'expired' ), true ) ? $current : false;
+}
+
+/**
+ * Return the terminal state requested after recovery-only processing.
+ *
+ * @param array $job Job row.
+ * @return string
+ */
+function yotm_job_recovery_terminal_status( $job ) {
+	$status = sanitize_key( $job['payload']['recovery_terminal_status'] ?? '' );
+
+	return 'cancelled' === $status ? 'cancelled' : 'expired';
 }
 
 /**

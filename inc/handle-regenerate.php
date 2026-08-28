@@ -421,11 +421,12 @@ function yotm_regenerate_item_batch( $job, $worker, $batch ) {
 
 	$job = $item_v3 ? yotm_job_get_by_id( $job['id'] ) : yotm_job_sync_item_counters( $job['id'] );
 	if ( $item_v3 && ! empty( $job['payload']['recovery_only'] ) && ! yotm_job_has_recovery_journals( $job['id'] ) ) {
+		$terminal = yotm_job_recovery_terminal_status( $job );
 		yotm_job_worker_update(
 			$worker,
 			array(
-				'status'     => 'expired',
-				'phase'      => 'expired',
+				'status'     => $terminal,
+				'phase'      => $terminal,
 				'expires_at' => gmdate( 'Y-m-d H:i:s', time() + YOTM_JOB_AUDIT_RETENTION_SECONDS ),
 			)
 		);

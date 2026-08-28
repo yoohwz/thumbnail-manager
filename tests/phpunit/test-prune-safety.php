@@ -19,6 +19,9 @@ class YOTM_Prune_Safety_Test extends WP_UnitTestCase {
 	/** @var int */
 	private $attachment_id = 0;
 
+	/** @var int[] */
+	private $job_ids = array();
+
 	public function setUp(): void {
 		parent::setUp();
 		unset( $GLOBALS['yotm_job_storage_readiness'] );
@@ -36,6 +39,10 @@ class YOTM_Prune_Safety_Test extends WP_UnitTestCase {
 	}
 
 	public function tearDown(): void {
+		foreach ( $this->job_ids as $job_id ) {
+			yotm_job_delete( $job_id );
+		}
+
 		if ( $this->attachment_id ) {
 			wp_delete_post( $this->attachment_id, true );
 		}
@@ -178,6 +185,97 @@ class YOTM_Prune_Safety_Test extends WP_UnitTestCase {
 		$this->assertArrayNotHasKey( 'thumbnail', $metadata['sizes'] );
 	}
 
+	public function test_recovery_only_preserves_intact_armed_file() {
+		$fixture = $this->create_armed_prune_claim( 'recovery-only' );
+		$result  = yotm_delete_prune_item_recoverable( $fixture['item'], $fixture['payload'], $this->uploads_base, true );
+
+		$this->assertIsArray( $result );
+		$this->assertFalse( $result['deleted'] );
+		$this->assertFalse( $result['skipped'] );
+		$this->assertFileExists( $fixture['path'] );
+		$this->assertArrayHasKey( 'thumbnail', wp_get_attachment_metadata( $this->attachment_id )['sizes'] );
+		$this->assertSame( '', $fixture['item']['payload']['prune_operation_journal_v1']['outcome'] );
+		$this->assertTrue( yotm_job_finish_item_v3( $fixture['item'], $fixture['worker'], 'failed', $result['error'] ) );
+		$this->assertSame( 'failed', yotm_job_get_item_by_key( $fixture['job']['id'], $fixture['item_key'] )['status'] );
+		yotm_job_release_worker( $fixture['worker'] );
+	}
+
+	public function test_armed_path_true_absence_reconciles_post_unlink_outcome() {
+		$fixture = $this->create_armed_prune_claim( 'absent' );
+		$this->assertTrue( unlink( $fixture['path'] ) );
+
+		$result = yotm_delete_prune_item_recoverable( $fixture['item'], $fixture['payload'], $this->uploads_base, true );
+
+		$this->assertIsArray( $result );
+		$this->assertTrue( $result['deleted'] );
+		$this->assertSame( 'delete_reconciled', $fixture['item']['payload']['prune_operation_journal_v1']['outcome'] );
+		$this->assertArrayNotHasKey( 'thumbnail', wp_get_attachment_metadata( $this->attachment_id )['sizes'] );
+		yotm_job_release_item_claim( $fixture['item'] );
+		yotm_job_release_worker( $fixture['worker'] );
+	}
+
+	public function test_armed_path_directory_replacement_fails_closed() {
+		$fixture = $this->create_armed_prune_claim( 'directory' );
+		$this->assertTrue( unlink( $fixture['path'] ) );
+		$this->assertTrue( mkdir( $fixture['path'] ) );
+		$this->directories[] = $fixture['path'];
+
+		$result = yotm_delete_prune_item_recoverable( $fixture['item'], $fixture['payload'], $this->uploads_base, true );
+
+		$this->assertIsArray( $result );
+		$this->assertFalse( $result['deleted'] );
+		$this->assertTrue( is_dir( $fixture['path'] ) );
+		$this->assertArrayHasKey( 'thumbnail', wp_get_attachment_metadata( $this->attachment_id )['sizes'] );
+		$this->assertSame( '', $fixture['item']['payload']['prune_operation_journal_v1']['outcome'] );
+		yotm_job_release_item_claim( $fixture['item'] );
+		yotm_job_release_worker( $fixture['worker'] );
+	}
+
+	public function test_armed_path_symlink_and_broken_symlink_replacements_fail_closed() {
+		if ( ! function_exists( 'symlink' ) ) {
+			$this->markTestSkipped( 'Symlinks are unavailable.' );
+		}
+
+		$fixture       = $this->create_armed_prune_claim( 'symlink' );
+		$target        = trailingslashit( $this->test_dir ) . 'replacement-target.jpg';
+		$this->files[] = $target;
+		file_put_contents( $target, 'replacement' );
+		$this->assertTrue( unlink( $fixture['path'] ) );
+		$this->assertTrue( symlink( $target, $fixture['path'] ) );
+
+		$result = yotm_delete_prune_item_recoverable( $fixture['item'], $fixture['payload'], $this->uploads_base, true );
+		$this->assertIsArray( $result );
+		$this->assertFalse( $result['deleted'] );
+		$this->assertTrue( is_link( $fixture['path'] ) );
+		$this->assertArrayHasKey( 'thumbnail', wp_get_attachment_metadata( $this->attachment_id )['sizes'] );
+
+		$this->assertTrue( unlink( $fixture['path'] ) );
+		$this->assertTrue( unlink( $target ) );
+		$this->assertTrue( symlink( $target, $fixture['path'] ) );
+		$result = yotm_delete_prune_item_recoverable( $fixture['item'], $fixture['payload'], $this->uploads_base, true );
+		$this->assertIsArray( $result );
+		$this->assertFalse( $result['deleted'] );
+		$this->assertTrue( is_link( $fixture['path'] ) );
+		$this->assertArrayHasKey( 'thumbnail', wp_get_attachment_metadata( $this->attachment_id )['sizes'] );
+		yotm_job_release_item_claim( $fixture['item'] );
+		yotm_job_release_worker( $fixture['worker'] );
+	}
+
+	public function test_armed_path_changed_regular_file_fails_closed() {
+		$fixture = $this->create_armed_prune_claim( 'changed-file' );
+		file_put_contents( $fixture['path'], 'changed replacement data' );
+
+		$result = yotm_delete_prune_item_recoverable( $fixture['item'], $fixture['payload'], $this->uploads_base, true );
+
+		$this->assertIsArray( $result );
+		$this->assertFalse( $result['deleted'] );
+		$this->assertFileExists( $fixture['path'] );
+		$this->assertArrayHasKey( 'thumbnail', wp_get_attachment_metadata( $this->attachment_id )['sizes'] );
+		$this->assertSame( '', $fixture['item']['payload']['prune_operation_journal_v1']['outcome'] );
+		yotm_job_release_item_claim( $fixture['item'] );
+		yotm_job_release_worker( $fixture['worker'] );
+	}
+
 	public function test_force_regenerate_cleanup_removes_only_obsolete_generated_files() {
 		$original      = trailingslashit( $this->test_dir ) . 'force-image.jpg';
 		$stale         = trailingslashit( $this->test_dir ) . 'force-image-100x100.jpg';
@@ -205,5 +303,106 @@ class YOTM_Prune_Safety_Test extends WP_UnitTestCase {
 		$this->assertFileDoesNotExist( $stale );
 		$this->assertFileExists( $current );
 		$this->assertFileExists( $original );
+	}
+
+	/**
+	 * Create one claimed item with an armed pre-delete journal.
+	 *
+	 * @param string $suffix Fixture suffix.
+	 * @return array
+	 */
+	private function create_armed_prune_claim( $suffix ) {
+		$original      = trailingslashit( $this->test_dir ) . $suffix . '-source.jpg';
+		$candidate     = trailingslashit( $this->test_dir ) . $suffix . '-source-150x150.jpg';
+		$data          = 'reviewed prune bytes';
+		$this->files[] = $original;
+		$this->files[] = $candidate;
+		file_put_contents( $original, 'source' );
+		file_put_contents( $candidate, $data );
+
+		$this->attachment_id = wp_insert_attachment(
+			array(
+				'post_mime_type' => 'image/jpeg',
+				'post_title'     => 'YOTM recovery journal fixture',
+				'post_status'    => 'inherit',
+			),
+			$original
+		);
+		$relative            = ltrim( str_replace( $this->uploads_base, '', $original ), '/' );
+		update_attached_file( $this->attachment_id, $relative );
+		wp_update_attachment_metadata(
+			$this->attachment_id,
+			array(
+				'file'  => $relative,
+				'sizes' => array(
+					'thumbnail' => array(
+						'file'      => wp_basename( $candidate ),
+						'width'     => 150,
+						'height'    => 150,
+						'mime-type' => 'image/jpeg',
+					),
+				),
+			)
+		);
+
+		$payload         = array(
+			'path'          => $candidate,
+			'metadata_refs' => array(
+				array(
+					'attachment_id' => $this->attachment_id,
+					'size'          => 'thumbnail',
+					'filename'      => wp_basename( $candidate ),
+				),
+			),
+		);
+		$job             = yotm_job_create(
+			'prune',
+			array( 'base' => $this->uploads_base ),
+			array(
+				'status'       => 'scanning',
+				'phase'        => 'metadata',
+				'counter_mode' => 'item_v3',
+			)
+		);
+		$this->job_ids[] = $job['id'];
+		$item_key        = hash( 'sha256', $candidate );
+		$this->assertTrue( yotm_job_add_item( $job['id'], $item_key, $payload ) );
+		$this->assertTrue(
+			yotm_job_update_where(
+				$job['id'],
+				array(
+					'status' => 'deleting',
+					'phase'  => 'delete',
+					'total'  => 1,
+				),
+				array(
+					'status'        => array( 'scanning' ),
+					'phase'         => array( 'metadata' ),
+					'require_match' => true,
+				)
+			)
+		);
+		$job                  = yotm_job_get_by_id( $job['id'] );
+		$worker               = yotm_job_acquire_worker( $job['id'], array( 'deleting' ), array( 'delete' ) );
+		$item                 = yotm_job_claim_items( $worker, 1 )[0];
+		$payload_with_journal = $item['payload'];
+		$payload_with_journal['prune_operation_journal_v1'] = array(
+			'version'   => 1,
+			'path'      => yotm_normalize_filesystem_path( $candidate ),
+			'file_hash' => hash( 'sha256', $data ),
+			'bytes'     => strlen( $data ),
+			'outcome'   => '',
+		);
+		$this->assertTrue( yotm_job_update_claimed_item_payload( $item, $payload_with_journal ) );
+		$item['payload'] = $payload_with_journal;
+
+		return array(
+			'job'      => $job,
+			'item_key' => $item_key,
+			'worker'   => $worker,
+			'item'     => $item,
+			'payload'  => $payload,
+			'path'     => $candidate,
+		);
 	}
 }
