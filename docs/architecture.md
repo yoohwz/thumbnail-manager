@@ -77,7 +77,7 @@ Application owns the orchestration and policy for:
 - **Prune:** prepare scope, discover candidates, build/finalize the manifest, review/approval progression, and bounded delete processing;
 - **Regenerate:** prepare selection, choose normal/missing/Force flow, coordinate source indexing, queueing, bounded work, and terminal results;
 - **Recommendations:** scan phases, conservative classification/evidence, result compatibility, and Apply rules;
-- **Size Management:** validate and persist enabled/disabled size choices and coordinate any explicit follow-on regeneration request.
+- **Size Management:** validate enabled/disabled size choices, decide when the validated setting change must be persisted, and coordinate any explicit follow-on regeneration request. Concrete WordPress option storage belongs to the narrow outbound WordPress/options seam when that seam is extracted.
 
 Application coordinates Jobs and Media through their owned capabilities. It defines use-case-valid sequences but does not bypass Jobs transitions or reimplement Media safety checks. It returns transport-neutral results/errors; it does not read `$_POST`, call `wp_send_json_*()`, render HTML, or manipulate the browser.
 
@@ -89,7 +89,7 @@ Adapters own:
 
 - WordPress hook and AJAX action registration;
 - capability and nonce checks, request parsing/sanitization, input/output status mapping, and JSON transport;
-- admin asset/localization setup, page rendering, form handling, notices, and accessibility markup;
+- admin asset/localization setup, page rendering, authenticated form request mapping, notices, and accessibility markup;
 - browser HTTP calls, DOM rendering, progress display, focus/live-region behavior, local token hints, and retry/resume presentation;
 - legacy compatibility facades that preserve current public procedural entry points.
 
@@ -198,7 +198,7 @@ Bounded objective: centralize media invariants and separate existing use-case se
 Bounded objective: make transport and presentation thin after stable server capabilities exist.
 
 - Reduce AJAX callbacks to authorization, request mapping, one Application/Jobs call, and response mapping.
-- Separate admin rendering/settings transport from Size Management policy only where the server contract already exists.
+- Route authenticated/mapped settings requests from the inbound admin adapter to Size Management Application; when extracted, keep concrete `get_option()`/`update_option()` calls in the narrow outbound WordPress/options seam rather than the inbound adapter.
 - Split JavaScript by current workflow/resume/rendering responsibilities only when it reduces the present monolith; retain the jQuery/WordPress admin delivery model unless a separate product task changes it.
 - Preserve server authority, AJAX/localized/storage contracts, reload/network resume behavior, manifest review/approval, cancellation, and accessibility.
 
@@ -225,7 +225,7 @@ These examples test the boundaries; they do not authorize the features.
 | A read-only, resumable media inventory/export | Application defines the inventory/export use case; Jobs provides bounded progress/resume; Media provides attachment/source evidence; adapters expose admin/AJAX/download transport. |
 | A new protected attachment companion | Media adds and tests the authoritative source/protection rule; existing Application flows consume the result without adding handler-specific checks. |
 | Exporting recent job audit data | Jobs provides a bounded application-facing query/projection; an Application formatter is added only if product-specific output is needed; adapters authorize and stream it. |
-| Importing a named image-size preset | Size Management Application validates the decision; a WordPress settings adapter persists it; Jobs is used only if an explicitly requested follow-on operation is bounded/asynchronous. |
+| Importing a named image-size preset | Size Management Application validates the decision and decides that it is persisted; the inbound admin adapter authenticates/maps the request; the narrow WordPress/options infrastructure seam performs concrete storage when extracted. Jobs is used only if an explicitly requested follow-on operation is bounded/asynchronous. |
 | Previewing regeneration impact without mutation | Regenerate Application coordinates a read-only Media analysis; adapters render it. The preview cannot create delete/promotion authority. |
 
 For any future feature, place policy in Application, persistent execution in Jobs, attachment/filesystem truth in Media, and transport/presentation at the edges. If that division adds more coordination than the feature contains, keep the implementation local until a real shared boundary appears.
