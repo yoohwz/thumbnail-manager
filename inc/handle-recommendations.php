@@ -284,12 +284,12 @@ function yotm_recommend_load_content_map( $post_ids ) {
 	}
 
 	$placeholders = implode( ',', array_fill( 0, count( $post_ids ), '%d' ) );
-	// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Placeholder list is generated from the bounded ID array.
+	// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- Placeholder list is generated from the bounded ID array.
 	$sql = $wpdb->prepare(
 		"SELECT ID, post_content FROM {$wpdb->posts} WHERE ID IN ({$placeholders})",
 		...$post_ids
 	);
-	// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
+	// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare
 	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared -- Cursor-selected raw content must be read in one bounded query; prepared above.
 	$rows = $wpdb->get_results( $sql, ARRAY_A );
 

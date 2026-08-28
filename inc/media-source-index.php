@@ -133,7 +133,7 @@ function yotm_media_reference_raw_postmeta_rows_batch( $attachment_ids, $meta_ke
 	$key_placeholders = implode( ',', array_fill( 0, count( $meta_keys ), '%s' ) );
 	$args             = array_merge( $attachment_ids, $meta_keys );
 	$wpdb->last_error = '';
-	// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Bounded exact raw rows are required; placeholders are generated from validated arrays.
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Bounded exact raw rows are required; placeholders are generated from validated arrays.
 	$stored = $wpdb->get_results(
 		$wpdb->prepare(
 			"SELECT post_id,meta_id,meta_key,meta_value FROM {$wpdb->postmeta}
@@ -143,7 +143,6 @@ function yotm_media_reference_raw_postmeta_rows_batch( $attachment_ids, $meta_ke
 		),
 		ARRAY_A
 	);
-	// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
 	if ( '' !== (string) $wpdb->last_error || ! is_array( $stored ) ) {
 		return yotm_job_storage_error( 'yotm_job_storage_unavailable', (string) $wpdb->last_error );
 	}
