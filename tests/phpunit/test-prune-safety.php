@@ -244,8 +244,8 @@ class YOTM_Prune_Safety_Test extends WP_UnitTestCase {
 		$this->assertTrue( symlink( $target, $fixture['path'] ) );
 
 		$result = yotm_delete_prune_item_recoverable( $fixture['item'], $fixture['payload'], $this->uploads_base, true );
-		$this->assertIsArray( $result );
-		$this->assertFalse( $result['deleted'] );
+		$this->assertWPError( $result );
+		$this->assertSame( 'yotm_prune_journal_invalid', $result->get_error_code() );
 		$this->assertTrue( is_link( $fixture['path'] ) );
 		$this->assertArrayHasKey( 'thumbnail', wp_get_attachment_metadata( $this->attachment_id )['sizes'] );
 
