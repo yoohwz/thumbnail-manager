@@ -44,6 +44,8 @@ When a task ID or PR/issue reference is supplied, do not ask the Human to repeat
 
 - `Continue <TASK-ID>` means recover the latest durable task state and continue the next action owned by the receiving agent. For Codex this includes correcting a rejected plan, implementing an approved plan, correcting technical-review findings, or continuing other repository work already authorized by the current workflow state.
 - `Review <TASK-ID>` means ChatGPT recovers and reviews the newest applicable durable handoff rather than asking the Human which review stage applies.
+- For pull-request state recovery, inspect both top-level PR conversation comments and PR review submissions. Order applicable records by creation/submission time and exact-head applicability; a newer exact-head review carrying a workflow status must not be hidden by an older top-level handoff.
+- If a detailed review submission and a mirrored top-level handoff represent the same decision, the top-level PR comment is the canonical actionable handoff and the review submission is the detailed review artifact.
 - If durable state is missing, contradictory, stale, or genuinely ambiguous, stop and report the specific missing/ambiguous state instead of guessing.
 
 ### Mandatory `Next:` hint
@@ -195,7 +197,10 @@ Do not add more statuses unless a future workflow demonstrates a real need.
 - Before any technical-review handoff, Codex completes proportional repo-local technical/adversarial verification and records the relevant tests/runtime evidence in the PR. When fresh independent Codex review is required, the PR evidence must identify that exact-head review as completed and summarize any findings/corrections.
 - After implementation and local verification, Codex updates the PR body and posts `STATUS: TECHNICAL_REVIEW_REQUIRED` with the current head SHA.
 - A commit pushed after that handoff invalidates the review target; Codex must post a new handoff for the new head.
-- ChatGPT's technical review is the single external boundary/acceptance review. It focuses on approved-plan/diff alignment, architecture/invariants, safety, scope, compatibility, acceptance criteria, and evidence sufficiency, and posts either `STATUS: TECHNICAL_CHANGES_REQUIRED` or `STATUS: READY_FOR_HUMAN_MERGE` to the same PR conversation.
+- ChatGPT's technical review is the single external boundary/acceptance review. It focuses on approved-plan/diff alignment, architecture/invariants, safety, scope, compatibility, acceptance criteria, and evidence sufficiency, and results in either `STATUS: TECHNICAL_CHANGES_REQUIRED` or `STATUS: READY_FOR_HUMAN_MERGE`.
+- ChatGPT may use a PR review submission for detailed findings, but **every technical-review outcome must also be mirrored as a canonical top-level PR conversation comment**. The top-level handoff must identify the task, reviewed exact head, resulting workflow status, the source review ID when available, and the same `Next:` routing as the user-visible response.
+- The canonical top-level PR comment is the actionable cross-agent handoff; a PR review submission is supporting detail and must not be the only place where a workflow state changes.
+- `Continue` state recovery must inspect both top-level PR conversation comments and PR review submissions. If a newer applicable review submission carries a workflow status that has not yet been mirrored, treat that review as the newest state rather than allowing an older top-level handoff to mask it. If records are genuinely contradictory for the same/newer exact head, report the ambiguity instead of claiming there is no action.
 - `Review` means recover the newest applicable durable handoff and route to plan review, technical review, correction re-review, or Human decision as appropriate.
 
 For re-review after corrections, inspect the delta from the previously reviewed SHA first, verify the original blockers and affected invariants, then spot-check the final PR state. Do not repeat a full review from zero unless the change surface materially expanded.
