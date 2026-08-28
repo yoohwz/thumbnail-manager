@@ -42,6 +42,25 @@ def load_module(name: str, path: Path):
     return module
 
 
+def expected_payload_paths(root: Path) -> set[str]:
+    paths: set[str] = set()
+    manifest = root / "release/payload-manifest.txt"
+    for raw in manifest.read_text(encoding="utf-8").splitlines():
+        entry = raw.strip()
+        if not entry or entry.startswith("#"):
+            continue
+        if entry.endswith("/**"):
+            base = root / entry[:-3]
+            paths.update(
+                candidate.relative_to(root).as_posix()
+                for candidate in base.rglob("*")
+                if candidate.is_file() and not candidate.is_symlink()
+            )
+        else:
+            paths.add(entry)
+    return paths
+
+
 class ReleasePackageTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory(prefix="tm-release-tests-")
@@ -74,7 +93,6 @@ class ReleasePackageTests(unittest.TestCase):
         self.assertEqual(first_manifest.read_bytes(), second_manifest.read_bytes())
 
         manifest = json.loads(first_manifest.read_text(encoding="utf-8"))
-        self.assertEqual(19, manifest["file_count"])
         self.assertRegex(manifest["release_control"]["bundle_sha256"], r"^[0-9a-f]{64}$")
         component_paths = {item["path"] for item in manifest["release_control"]["components"]}
         self.assertEqual(
@@ -89,7 +107,12 @@ class ReleasePackageTests(unittest.TestCase):
             component_paths,
         )
         paths = {item["path"] for item in manifest["files"]}
+        expected_paths = expected_payload_paths(ROOT)
+        self.assertEqual(expected_paths, paths)
+        self.assertEqual(len(expected_paths), manifest["file_count"])
         self.assertIn("thumbnail-manager.php", paths)
+        self.assertIn("uninstall.php", paths)
+        self.assertIn("inc/data-lifecycle.php", paths)
         self.assertIn("inc/job-storage.php", paths)
         self.assertIn("inc/media-source-index.php", paths)
         self.assertNotIn("AGENTS.md", paths)
@@ -237,8 +260,7 @@ class ReleasePackageTests(unittest.TestCase):
         shutil.copytree(ROOT, source, ignore=shutil.ignore_patterns(".git", "vendor", "__pycache__"))
         replacements = {
             "thumbnail-manager.php": [("1.4.0", "1.5.0"), ("1.4.0", "1.5.0")],
-            "readme.txt": [("Stable tag: 1.4.0", "Stable tag: 1.5.0"), ("= 1.4.0 =", "= 1.5.0 ="), ("= 1.4 (", "= 1.5 (")],
-            "changelog.txt": [("= 1.4 (", "= 1.5 (")],
+            "readme.txt": [("Stable tag: 1.4.0", "Stable tag: 1.5.0"), ("= 1.4.0 =", "= 1.5.0 =")],
             "languages/thumbnail-manager.pot": [("Thumbnail Manager 1.4.0", "Thumbnail Manager 1.5.0")],
         }
         for relative, changes in replacements.items():
@@ -262,7 +284,7 @@ class ReleasePackageTests(unittest.TestCase):
         )
         for relative in ("readme.txt", "changelog.txt"):
             target = source / relative
-            target.write_text(target.read_text(encoding="utf-8").replace("= 1.5 (", "= 1.5.0 (", 1), encoding="utf-8")
+            target.write_text(target.read_text(encoding="utf-8").replace("= 1.4.0 (", "= 1.5.0 (", 1), encoding="utf-8")
         run(
             "bash",
             "bin/build-release.sh",

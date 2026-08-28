@@ -93,9 +93,13 @@ The plugin recognizes WooCommerce-related sizes in Recommendations, but storefro
 
 No. It changes which registered sizes WordPress generates for future uploads. The original registration remains in place.
 
+= What happens to data when I deactivate or uninstall the plugin? =
+
+Deactivation keeps Thumbnail Manager settings, jobs, audit/recovery records, and media while removing its scheduled cleanup task. Uninstall removes only the plugin's database tables, settings, transient, and scheduled task when the complete site or network scope is safely quiescent. If active work, unresolved recovery evidence, ambiguous storage, or a bounded large-network limit prevents a safe purge, the database state is retained for reinstall and inspection. Uninstall never deletes attachment records, upload files, generated thumbnails, or private regeneration recovery files.
+
 == Changelog ==
 
-= 1.4 (Jul 17, 2026) =
+= 1.4.0 (Jul 17, 2026) =
 
 * Added persistent job and job-item database storage with ownership, expiry, cancellation, cleanup, locking, resume, and per-item errors
 * Split Prune Files into scan, immutable hashed manifest review, explicit approval, and resumable deletion
@@ -119,3 +123,5 @@ Adds persistent resumable jobs, explicit manifest approval, folder-limited scans
 == Privacy ==
 
 Thumbnail Manager does not collect, store, or transmit personal data to external services. Thumbnail analysis, regeneration, recommendations, and cleanup run locally on the WordPress site.
+
+Persistent job records can include site/user ownership, media paths, errors, and recovery evidence. Browser-local job tokens support resume. Deactivation retains this state. A provably safe uninstall removes plugin-owned database state; an unsafe or ambiguous uninstall retains it so a later reinstall can recover or inspect the job. Media files and attachment metadata are not uninstall cleanup targets.

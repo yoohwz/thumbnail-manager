@@ -10,6 +10,7 @@
 	<config name="ignore_warnings_on_exit" value="1"/>
 
 	<file>thumbnail-manager.php</file>
+	<file>uninstall.php</file>
 	<file>inc</file>
 	<file>tests</file>
 
@@ -35,6 +36,8 @@
 	<rule ref="WordPress.DB.DirectDatabaseQuery">
 		<!-- Persistent job tables are authoritative state and deliberately bypass the object cache. -->
 		<exclude-pattern>inc/job-storage.php</exclude-pattern>
+		<!-- Lifecycle tests create/drop isolated exact fixtures and assert uncached physical state. -->
+		<exclude-pattern>tests/phpunit/test-data-lifecycle.php</exclude-pattern>
 	</rule>
 
 	<rule ref="WordPress.DB.PreparedSQL.InterpolatedNotPrepared">
@@ -44,6 +47,7 @@
 		<exclude-pattern>tests/phpunit/test-job-storage-installation.php</exclude-pattern>
 		<exclude-pattern>tests/phpunit/test-job-storage.php</exclude-pattern>
 		<exclude-pattern>tests/phpunit/test-media-source-index.php</exclude-pattern>
+		<exclude-pattern>tests/phpunit/test-data-lifecycle.php</exclude-pattern>
 	</rule>
 
 	<rule ref="WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber">

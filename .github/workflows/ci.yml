@@ -54,13 +54,13 @@ jobs:
 
           while IFS= read -r path; do
             case "$path" in
-              thumbnail-manager.php|inc/*|tests/*|bin/*|release/*|composer.json|composer.lock|phpunit.xml.dist|phpcs.xml.dist|.github/workflows/ci.yml|.github/workflows/release-prepare.yml|.github/workflows/publish-wordpress-org.yml)
+              thumbnail-manager.php|uninstall.php|inc/*|tests/*|bin/*|release/*|composer.json|composer.lock|phpunit.xml.dist|phpcs.xml.dist|.github/workflows/ci.yml|.github/workflows/release-prepare.yml|.github/workflows/publish-wordpress-org.yml)
                 integration=true
                 ;;
             esac
 
             case "$path" in
-              thumbnail-manager.php|inc/*|css/*|js/*|languages/*|readme.txt|changelog.txt|license.txt|bin/build-release.sh|bin/validate-release.py|bin/validate-plugin-check.py|release/*|.github/workflows/ci.yml|.github/workflows/release-prepare.yml|.github/workflows/publish-wordpress-org.yml)
+              thumbnail-manager.php|uninstall.php|inc/*|css/*|js/*|languages/*|readme.txt|changelog.txt|license.txt|bin/build-release.sh|bin/validate-release.py|bin/validate-plugin-check.py|release/*|.github/workflows/ci.yml|.github/workflows/release-prepare.yml|.github/workflows/publish-wordpress-org.yml)
                 plugin_check=true
                 ;;
             esac
@@ -241,9 +241,9 @@ jobs:
         env:
           WP_TESTS_DIR: /tmp/wordpress-tests-lib
 
-      - name: PHPUnit multisite storage isolation
+      - name: PHPUnit multisite storage and lifecycle isolation
         if: ${{ matrix.label == 'tested-modern' }}
-        run: composer test -- --filter test_multisite_storage_state_is_isolated_between_sites
+        run: composer test -- --filter test_multisite_
         env:
           WP_TESTS_DIR: /tmp/wordpress-tests-lib
           WP_MULTISITE: 1

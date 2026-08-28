@@ -30,21 +30,15 @@ def match(pattern: str, text: str, label: str) -> str:
     return found.group(1).strip()
 
 
-def normalized_release(version: str) -> tuple[int, int, int]:
-    parts = version.split(".")
-    if not all(part.isdigit() for part in parts) or not 2 <= len(parts) <= 3:
-        fail(f"unsupported release version format: {version}")
-    values = [int(part) for part in parts]
-    if len(values) == 2:
-        values.append(0)
-    return tuple(values)  # type: ignore[return-value]
-
-
 plugin = read("thumbnail-manager.php")
+uninstall_php = read("uninstall.php")
+job_storage = read("inc/job-storage.php")
+lifecycle_php = read("inc/data-lifecycle.php")
 readme = read("readme.txt")
 changelog = read("changelog.txt")
 agents = read("AGENTS.md")
 safety = read("docs/media-safety-contract.md")
+lifecycle_doc = read("docs/data-lifecycle.md")
 pr_template = read(".github/pull_request_template.md")
 ci_workflow = read(".github/workflows/ci.yml")
 prepare_workflow = read(".github/workflows/release-prepare.yml")
@@ -102,9 +96,9 @@ if not re.fullmatch(r"\d+\.\d+(?:\.\d+)?", tested_up_to):
     fail(f"invalid Tested up to version: {tested_up_to}")
 
 changelog_version = match(r"^=\s*([0-9]+(?:\.[0-9]+){1,2})\s*\(", changelog, "latest changelog version")
-if normalized_release(changelog_version) != normalized_release(plugin_version):
+if changelog_version != plugin_version:
     fail(
-        "latest changelog release does not match plugin version: "
+        "latest changelog release must exactly match plugin version: "
         f"changelog={changelog_version}, plugin={plugin_version}"
     )
 
@@ -122,6 +116,8 @@ for needle, label in (
     ("Review-first prune lifecycle", "review-first lifecycle"),
     ("Filesystem containment", "filesystem containment"),
     ("Destructive-operation concurrency", "destructive concurrency"),
+    ("Uninstall boundary", "uninstall no-media boundary"),
+    ("plugin-owned", "regeneration staging ownership classification"),
 ):
     if needle not in safety:
         fail(f"media safety contract is missing {label}")
@@ -136,6 +132,7 @@ expected_payload_entries = {
     "js/**",
     "languages/**",
     "thumbnail-manager.php",
+    "uninstall.php",
     "readme.txt",
     "changelog.txt",
     "license.txt",
@@ -151,11 +148,82 @@ if actual_payload_entries != expected_payload_entries:
         f"expected={sorted(expected_payload_entries)}, actual={sorted(actual_payload_entries)}"
     )
 
-for required_scope in ("<file>thumbnail-manager.php</file>", "<file>inc</file>"):
+for required_scope in ("<file>thumbnail-manager.php</file>", "<file>uninstall.php</file>", "<file>inc</file>"):
     if required_scope not in phpcs_config:
         fail(f"PHPCS production coverage is missing {required_scope}")
 if re.search(r'<exclude\s+name="WordPress\.DB\.', phpcs_config):
     fail("PHPCS must use file-specific or inline DB exceptions, not global DB-sniff exclusions")
+
+job_schema_version = match(
+    r"define\(\s*'YOTM_JOB_DB_VERSION'\s*,\s*'([^']+)'\s*\)", job_storage, "job schema version"
+)
+lifecycle_schema_version = match(
+    r"define\(\s*'YOTM_DATA_LIFECYCLE_SCHEMA_VERSION'\s*,\s*'([^']+)'\s*\)",
+    lifecycle_php,
+    "standalone lifecycle schema version",
+)
+if lifecycle_schema_version != job_schema_version:
+    fail(
+        "standalone uninstall schema version differs from runtime: "
+        f"lifecycle={lifecycle_schema_version}, runtime={job_schema_version}"
+    )
+
+for needle, label in (
+    ("defined( 'WP_UNINSTALL_PLUGIN' )", "WordPress uninstall guard"),
+    ("'/inc/data-lifecycle.php'", "standalone lifecycle helper load"),
+    ("yotm_data_lifecycle_uninstall();", "uninstall coordinator call"),
+):
+    if needle not in uninstall_php:
+        fail(f"uninstall entrypoint is missing {label}")
+for forbidden in ("thumbnail-manager.php", "wp_die(", "wp_delete_file", "wp_delete_attachment", "delete_post_meta"):
+    if forbidden in uninstall_php:
+        fail(f"standalone uninstall entrypoint must not contain {forbidden}")
+
+for artifact in (
+    "yotm_jobs",
+    "yotm_job_items",
+    "yotm_media_sources",
+    "yotm_disabled_sizes",
+    "yotm_job_db_version",
+    "yotm_media_source_index_dirty",
+    "yotm_media_reference_index_state",
+    "yotm_job_db_migration_failure",
+    "yotm_cleanup_jobs",
+    "yotm_uninstall_cleanup_intent",
+):
+    if artifact not in lifecycle_php:
+        fail(f"lifecycle cleanup contract is missing exact artifact {artifact}")
+for invariant in (
+    "scanning",
+    "awaiting_approval",
+    "processing",
+    "delete_reconciled",
+    "cleanup_complete",
+    "max_sites",
+    "max_items",
+    "max_seconds",
+    "before_commit_recheck",
+):
+    if invariant not in lifecycle_php:
+        fail(f"lifecycle safety implementation is missing {invariant}")
+for forbidden in ("wp_delete_file", "wp_delete_attachment", "delete_post_meta", "unlink(", "rmdir("):
+    if forbidden in lifecycle_php:
+        fail(f"database lifecycle module must not contain media/filesystem mutation {forbidden}")
+if "include_once plugin_dir_path( __FILE__ ) . 'inc/data-lifecycle.php'" not in plugin:
+    fail("normal plugin bootstrap is missing lifecycle helper")
+if "function yotm_deactivate_job_cleanup( $network_deactivating = false )" not in lifecycle_php:
+    fail("deactivation lifecycle must accept the network-deactivation boundary")
+
+for needle, label in (
+    ("conditional safe purge", "A2 policy"),
+    ("retain-all", "unsafe retention"),
+    ("100 sites", "site bound"),
+    ("10,000 item rows", "item bound"),
+    (".yotm-regenerate-*", "retained plugin-owned recovery files"),
+    ("never uninstall cleanup targets", "no-media uninstall boundary"),
+):
+    if needle not in lifecycle_doc:
+        fail(f"data lifecycle contract is missing {label}")
 
 js_i18n_keys = set(re.findall(r"\bt\(\s*'([^']+)'", admin_js))
 php_i18n_keys = set(
@@ -299,11 +367,15 @@ for component in (
 ):
     if f'"{component}"' not in release_validator:
         fail(f"release-control bundle is missing {component}")
-for historical_field in ("changelog_version", "readme_changelog_version"):
-    if f'("1.4.0", "{historical_field}", "1.4")' not in release_validator:
-        fail(f"release metadata contract is missing the known 1.4.0 compatibility for {historical_field}")
+if "historical_compatibility" in release_validator:
+    fail("release metadata validator must not retain a shortened-version compatibility escape hatch")
 if "must exactly equal active release version" not in release_validator:
     fail("future release metadata must use exact active version strings")
+
+if "thumbnail-manager.php|uninstall.php|inc/*" not in ci_workflow:
+    fail("CI classification must include the shipped uninstall entrypoint")
+if "composer test -- --filter test_multisite_" not in ci_workflow:
+    fail("CI must execute all multisite storage/lifecycle regressions")
 
 for needle, label in (
     ("bash bin/build-release.sh", "shared deterministic builder"),

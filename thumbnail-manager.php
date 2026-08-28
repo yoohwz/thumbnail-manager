@@ -40,6 +40,7 @@ class Yo_Thumbnail_Manager {
 	 * Include the plugin modules in dependency order.
 	 */
 	private function include_files() {
+		include_once plugin_dir_path( __FILE__ ) . 'inc/data-lifecycle.php';
 		include_once plugin_dir_path( __FILE__ ) . 'inc/job-storage.php';
 		include_once plugin_dir_path( __FILE__ ) . 'inc/helper.php';
 		include_once plugin_dir_path( __FILE__ ) . 'inc/sizes-patterns.php';

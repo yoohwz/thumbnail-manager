@@ -5,6 +5,7 @@ inc/**
 js/**
 languages/**
 thumbnail-manager.php
+uninstall.php
 readme.txt
 changelog.txt
 license.txt

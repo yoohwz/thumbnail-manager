@@ -168,15 +168,6 @@ def require_match(pattern: str, text: str, label: str) -> str:
     return found.group(1).strip()
 
 
-def normalized_release(version: str) -> tuple[int, int, int]:
-    if not VERSION_PATTERN.fullmatch(version):
-        fail(f"unsupported release version format: {version}")
-    values = [int(part) for part in version.split(".")]
-    if len(values) == 2:
-        values.append(0)
-    return tuple(values)  # type: ignore[return-value]
-
-
 def metadata_from_texts(plugin: str, readme: str, changelog: str, pot: str) -> dict[str, str]:
     metadata = {
         "version": require_match(r"^\s*\*\s*Version:\s*(\S+)", plugin, "plugin header Version"),
@@ -218,14 +209,8 @@ def metadata_from_texts(plugin: str, readme: str, changelog: str, pot: str) -> d
         fail("PHP minimum differs between plugin header and readme")
     if not VERSION_PATTERN.fullmatch(metadata["tested_up_to"]):
         fail(f"invalid Tested up to version: {metadata['tested_up_to']}")
-    historical_compatibility = {
-        ("1.4.0", "changelog_version", "1.4"),
-        ("1.4.0", "readme_changelog_version", "1.4"),
-    }
     for field in ("changelog_version", "readme_changelog_version", "upgrade_notice_version", "pot_version"):
         if metadata[field] == metadata["version"]:
-            continue
-        if (metadata["version"], field, metadata[field]) in historical_compatibility:
             continue
         fail(f"{field} must exactly equal active release version {metadata['version']}; got {metadata[field]}")
     return metadata

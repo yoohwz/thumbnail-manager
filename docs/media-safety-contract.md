@@ -141,6 +141,12 @@ Safety-sensitive ambiguity fails closed. Examples include:
 
 Partial failures should be recorded per item when possible and must not erase the audit state of successful/failed/skipped items.
 
+## 12. Uninstall boundary
+
+Plugin uninstall never authorizes deletion or mutation of attachment rows/postmeta, originals, generated thumbnails, uploads, or recovery filesystem state. `.yotm-regenerate-*` directories and files are plugin-owned, Thumbnail Manager-created transactional staging/recovery artifacts, but they are intentionally retained during uninstall because database lifecycle cleanup cannot prove that filesystem recovery evidence is disposable.
+
+The uninstall decision relies only on exact persisted schema, job quiescence, item state, and recovery journal evidence. It must not inspect or delete `.yotm-regenerate-*` content to turn an ambiguous journal into a purge-safe decision. Unsafe or bounded-out state retains all plugin database data for reinstall/recovery inspection while allowing WordPress to continue plugin-file deletion.
+
 ## Required regression evidence
 
 A Controlled change touching this contract must preserve or deliberately update automated coverage for the affected invariants. Existing high-value regression areas include:

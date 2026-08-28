@@ -336,13 +336,6 @@ function yotm_maybe_install_job_tables() {
 }
 
 /**
- * Remove the scheduled cleanup event when deactivating the plugin.
- */
-function yotm_deactivate_job_cleanup() {
-	wp_clear_scheduled_hook( 'yotm_cleanup_jobs' );
-}
-
-/**
  * Return statuses that still own a concurrency lock.
  *
  * @return string[]
