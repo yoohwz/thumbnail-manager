@@ -71,13 +71,15 @@ class YOTM_Job_Storage_Test extends WP_UnitTestCase {
 		$this->assertSame( 'yotm_job_missing', $result->get_error_code() );
 	}
 
-	public function test_pre_extraction_persisted_job_remains_resumable_and_cancellable() {
+	public function test_pre_extraction_persisted_job_and_item_remain_resumable_and_cancellable() {
 		global $wpdb;
 
-		$tables  = yotm_job_table_names();
-		$token   = wp_generate_uuid4();
-		$now     = gmdate( 'Y-m-d H:i:s' );
-		$payload = array(
+		$tables       = yotm_job_table_names();
+		$token        = wp_generate_uuid4();
+		$now          = gmdate( 'Y-m-d H:i:s' );
+		$item_key     = hash( 'sha256', 'pre-extraction-item' );
+		$item_payload = array( 'record_id' => 'persisted-A' );
+		$payload      = array(
 			'fixture' => 'pre-extraction-job',
 			'cursor'  => 'opaque-17',
 		);
@@ -96,11 +98,11 @@ class YOTM_Job_Storage_Test extends WP_UnitTestCase {
 					'counter_mode'            => 'item_v2',
 					'manifest_hash'           => '',
 					'payload'                 => wp_json_encode( $payload ),
-					'total'                   => 3,
-					'processed'               => 1,
-					'succeeded'               => 1,
+					'total'                   => 1,
+					'processed'               => 0,
+					'succeeded'               => 0,
 					'failed'                  => 0,
-					'bytes'                   => 11,
+					'bytes'                   => 0,
 					'cursor_id'               => 17,
 					'max_id'                  => 30,
 					'worker_token'            => '',
@@ -112,15 +114,58 @@ class YOTM_Job_Storage_Test extends WP_UnitTestCase {
 				)
 			)
 		);
+		$job_id = (int) $wpdb->insert_id;
+		$this->assertNotFalse(
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery -- Exact persisted compatibility fixture.
+			$wpdb->insert(
+				$tables['items'],
+				array(
+					'job_id'           => $job_id,
+					'item_key'         => $item_key,
+					'status'           => 'queued',
+					'payload'          => wp_json_encode( $item_payload ),
+					'error'            => '',
+					'bytes'            => 13,
+					'claim_token'      => '',
+					'claim_generation' => 4,
+					'claim_expires_at' => null,
+					'attempts'         => 1,
+					'created_at'       => $now,
+					'updated_at'       => $now,
+				)
+			)
+		);
 
 		$persisted = yotm_job_get( $token );
 		$this->assertIsArray( $persisted );
+		$this->assertSame( $job_id, $persisted['id'] );
 		$this->assertSame( 'bounded_export', $persisted['type'] );
 		$this->assertSame( $payload, $persisted['payload'] );
 		$this->assertSame( 17, $persisted['cursor'] );
+		$persisted_item = yotm_job_get_item_by_key( $persisted['id'], $item_key );
+		$this->assertIsArray( $persisted_item );
+		$this->assertSame( $item_payload, $persisted_item['payload'] );
+		$this->assertSame( 4, $persisted_item['claim_generation'] );
+		$this->assertSame( 1, $persisted_item['attempts'] );
 
 		$worker = yotm_job_acquire_worker( $persisted['id'], array( 'scanning' ), array( 'metadata' ) );
 		$this->assertIsArray( $worker );
+		$items = yotm_job_claim_items( $worker, 1 );
+		$this->assertCount( 1, $items );
+		$this->assertSame( $item_payload, $items[0]['payload'] );
+		$this->assertSame( 5, $items[0]['claim_generation'] );
+		$this->assertSame( 2, $items[0]['attempts'] );
+		$stale_item                     = $items[0];
+		$stale_item['claim_generation'] = 4;
+		$this->assertFalse( yotm_job_finish_item( $stale_item, 'done', '', 13 ) );
+		$this->assertTrue( yotm_job_finish_item( $items[0], 'done', '', 13 ) );
+		$this->assertFalse( yotm_job_finish_item( $items[0], 'done', '', 13 ) );
+		$synced = yotm_job_sync_item_counters( $persisted['id'] );
+		$this->assertIsArray( $synced );
+		$this->assertSame( 1, $synced['processed'] );
+		$this->assertSame( 1, $synced['succeeded'] );
+		$this->assertSame( 0, $synced['failed'] );
+		$this->assertSame( 13, $synced['bytes'] );
 		$this->assertTrue( yotm_job_worker_update( $worker, array( 'cursor' => 18 ) ) );
 		yotm_job_release_worker( $worker );
 

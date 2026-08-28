@@ -45,19 +45,49 @@ class YOTM_Job_Storage_Installation_Test extends WP_UnitTestCase {
 		$this->assertSame( 10, $activation_bound );
 	}
 
-	public function test_compatibility_entrypoint_loads_each_storage_layer_once() {
-		$storage = new ReflectionFunction( 'yotm_job_table_names' );
-		$engine  = new ReflectionFunction( 'yotm_job_create' );
-		$cancel  = new ReflectionFunction( 'yotm_job_cancel' );
-		$cleanup = new ReflectionFunction( 'yotm_cleanup_expired_jobs' );
-		$items   = new ReflectionFunction( 'yotm_job_add_item' );
+	public function test_compatibility_entrypoint_loads_each_job_layer_once() {
+		$storage  = new ReflectionFunction( 'yotm_job_table_names' );
+		$engine   = new ReflectionFunction( 'yotm_job_create' );
+		$cancel   = new ReflectionFunction( 'yotm_job_cancel' );
+		$cleanup  = new ReflectionFunction( 'yotm_cleanup_expired_jobs' );
+		$items    = new ReflectionFunction( 'yotm_job_add_item' );
+		$claims   = new ReflectionFunction( 'yotm_job_claim_items' );
+		$merge    = new ReflectionFunction( 'yotm_job_merge_item_payload' );
+		$page     = new ReflectionFunction( 'yotm_job_get_items_page' );
+		$errors   = new ReflectionFunction( 'yotm_job_get_error_sample' );
+		$manifest = new ReflectionFunction( 'yotm_job_build_manifest_batch' );
 
 		$this->assertStringEndsWith( '/inc/jobs/storage.php', wp_normalize_path( $storage->getFileName() ) );
 		$this->assertStringEndsWith( '/inc/jobs/engine.php', wp_normalize_path( $engine->getFileName() ) );
 		$this->assertStringEndsWith( '/inc/jobs/engine.php', wp_normalize_path( $cancel->getFileName() ) );
 		$this->assertStringEndsWith( '/inc/jobs/engine.php', wp_normalize_path( $cleanup->getFileName() ) );
-		$this->assertStringEndsWith( '/inc/job-storage.php', wp_normalize_path( $items->getFileName() ) );
+		$this->assertStringEndsWith( '/inc/jobs/items.php', wp_normalize_path( $items->getFileName() ) );
+		$this->assertStringEndsWith( '/inc/jobs/items.php', wp_normalize_path( $claims->getFileName() ) );
+		$this->assertStringEndsWith( '/inc/job-storage.php', wp_normalize_path( $merge->getFileName() ) );
+		$this->assertStringEndsWith( '/inc/job-storage.php', wp_normalize_path( $page->getFileName() ) );
+		$this->assertStringEndsWith( '/inc/job-storage.php', wp_normalize_path( $errors->getFileName() ) );
+		$this->assertStringEndsWith( '/inc/job-storage.php', wp_normalize_path( $manifest->getFileName() ) );
 		$this->assertSame( 10, has_action( 'yotm_cleanup_jobs', 'yotm_cleanup_expired_jobs' ) );
+	}
+
+	public function test_extracted_job_layers_do_not_depend_on_transport_or_feature_projection() {
+		$job_directory = dirname( __DIR__, 2 ) . '/inc/jobs/';
+
+		foreach ( array( 'storage.php', 'engine.php', 'items.php' ) as $file ) {
+			$source = file_get_contents( $job_directory . $file );
+			$this->assertIsString( $source );
+			$this->assertStringNotContainsString( '$_POST', $source, $file );
+			$this->assertStringNotContainsString( 'wp_send_json', $source, $file );
+			$this->assertDoesNotMatchRegularExpression( '/\byotm_job_public_|\byotm_recommendation_result_for_response\b/', $source, $file );
+		}
+
+		$item_source = file_get_contents( $job_directory . 'items.php' );
+		$this->assertIsString( $item_source );
+		$this->assertDoesNotMatchRegularExpression(
+			'/\b(?:metadata_refs|ownership_evidence|ownership_schema|remove_metadata|attachment_id|estimated_bytes)\b/',
+			$item_source,
+			'items.php must remain opaque to Prune/Media payload fields.'
+		);
 	}
 
 	public function test_reactivation_restores_cleanup_schedule_without_ddl() {
