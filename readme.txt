@@ -4,7 +4,7 @@ Tags: thumbnails, regenerate thumbnails, media library, image sizes, cleanup
 Requires at least: 6.3
 Tested up to: 7.0
 Requires PHP: 7.4
-Stable tag: 1.4.0
+Stable tag: 1.5.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -16,13 +16,13 @@ Regenerate WordPress thumbnails, control image sizes, and safely clean generated
 
 Thumbnail Manager helps regenerate WordPress image sizes, prevent future thumbnail bloat, and review generated files before cleanup. Use it after changing themes or WooCommerce image settings, migrating a site, or finding obsolete sizes in a long-running Media Library.
 
-Large operations run as persistent, cursor-based jobs. They continue in bounded batches, survive a page reload or network interruption, and can be limited to selected upload years or months.
+Large operations run as persistent, bounded jobs. They continue in batches, survive a page reload or network interruption, and use scoped processing where the workflow supports it.
 
 = Thumbnail control and regeneration =
 
 * Review every registered image size and decide which sizes WordPress should generate for future uploads.
 * Generate only missing sizes or force-regenerate selected image attachments.
-* Process all images, selected attachments, the current year, or selected upload folders.
+* Regenerate all media, current-year images, one uploads folder, or specific image attachments.
 * Review conservative keep recommendations with explicit evidence and confidence based on protected size policies, attachment metadata, and common content references.
 * Resume or cancel persistent jobs and review recent job results and per-item errors.
 
@@ -61,6 +61,8 @@ Recommendations are an informed starting point, not proof that a size is used or
 
 Yes. **Only Missing** creates absent sub-sizes. **Force Regenerate** rebuilds the selected attachments more comprehensively from an available original image source.
 
+Regenerate can process all media, current-year images, one uploads folder, or specific image attachments. Choose the narrowest useful scope before starting a large job.
+
 = Can it clean unused generated thumbnails? =
 
 Yes. Prune Files first builds a manifest for review. Nothing is deleted until the scan finishes and an administrator explicitly approves that manifest.
@@ -71,7 +73,7 @@ No. Original full-size uploads are protected. Cleanup candidates must also pass 
 
 = Can I scan several upload folders? =
 
-Yes. Search for and select multiple years or months. Selecting an entire year automatically covers its month folders.
+Yes, in **Prune Files**. Search for and select multiple years or months. Selecting an entire year automatically covers its month folders.
 
 = Is it suitable for a large Media Library? =
 
@@ -99,6 +101,16 @@ Deactivation clears Thumbnail Manager's scheduled cleanup task but retains setti
 
 == Changelog ==
 
+= 1.5.0 (Aug 29, 2026) =
+
+* Improved regeneration reliability, including safer Force Regenerate recovery and original-source handling
+* Strengthened Prune safety with stricter ownership, source protection, path validation, and reviewed-manifest enforcement
+* Improved Recommendations with evidence-based confidence and conservative fail-safe handling
+* Improved large Media Library performance with persistent, bounded jobs and resumable processing
+* Hardened job locking, ownership, cancellation, expiry, and interrupted-work recovery
+* Added a clearer radio-card Scope picker for Regenerate while preserving targeted folder and attachment selection
+* Improved admin accessibility, compatibility checks, workflow feedback, and automated safety coverage
+
 = 1.4.0 (Jul 17, 2026) =
 
 * Added persistent job and job-item database storage with ownership, expiry, cancellation, cleanup, locking, resume, and per-item errors
@@ -115,6 +127,10 @@ Deactivation clears Thumbnail Manager's scheduled cleanup task but retains setti
 See `changelog.txt` for the complete release history.
 
 == Upgrade Notice ==
+
+= 1.5.0 =
+
+Improves regeneration reliability, cleanup safety, recommendations, large-library performance, and Regenerate scope selection.
 
 = 1.4.0 =
 
