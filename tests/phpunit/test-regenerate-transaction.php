@@ -181,9 +181,7 @@ class YOTM_Regenerate_Transaction_Test extends WP_UnitTestCase {
 	 * @dataProvider converted_output_formats
 	 */
 	public function test_force_format_conversion_replaces_only_exact_old_generated_file( $target_mime, $extension ) {
-		if ( ! wp_image_editor_supports( array( 'mime_type' => $target_mime ) ) ) {
-			$this->markTestSkipped( 'The active WordPress image editor cannot encode ' . $target_mime . '.' );
-		}
+		$this->require_decodable_output_format( $target_mime, $extension );
 
 		add_filter( 'intermediate_image_sizes_advanced', array( $this, 'only_thumbnail' ), PHP_INT_MAX );
 		$full                = $this->test_dir . '/format-source.jpg';
@@ -440,6 +438,25 @@ class YOTM_Regenerate_Transaction_Test extends WP_UnitTestCase {
 	public function convert_jpeg_output( $formats ) {
 		$formats['image/jpeg'] = $this->target_output_mime;
 		return $formats;
+	}
+
+	private function require_decodable_output_format( $target_mime, $extension ) {
+		if ( ! wp_image_editor_supports( array( 'mime_type' => $target_mime ) ) ) {
+			$this->markTestSkipped( 'The active WordPress image editor does not report encoding support for ' . $target_mime . '.' );
+		}
+		$editor = wp_get_image_editor( DIR_TESTDATA . '/images/2004-07-22-DSC_0007.jpg' );
+		if ( is_wp_error( $editor ) ) {
+			$this->markTestSkipped( 'The active WordPress image editor could not open the JPEG conversion fixture for ' . $target_mime . '.' );
+		}
+		$probe_path = trailingslashit( $this->test_dir ) . 'format-probe.' . $extension;
+		$probe      = $editor->save( $probe_path, $target_mime );
+		$decoded    = ! is_wp_error( $probe ) && is_file( $probe_path ) ? @getimagesize( $probe_path ) : false;
+		if ( is_file( $probe_path ) ) {
+			wp_delete_file( $probe_path );
+		}
+		if ( is_wp_error( $probe ) || ! is_array( $decoded ) || sanitize_mime_type( $decoded['mime'] ?? '' ) !== $target_mime ) {
+			$this->markTestSkipped( 'The active WordPress image editor cannot produce a decodable ' . $target_mime . ' fixture.' );
+		}
 	}
 
 	public function count_update_filter( $metadata ) {
