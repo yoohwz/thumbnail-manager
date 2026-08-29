@@ -112,12 +112,30 @@ class YOTM_Prune_Safety_Test extends WP_UnitTestCase {
 		$this->assertDoesNotMatchRegularExpression( '/\byotm_job_/', $source );
 		$this->assertDoesNotMatchRegularExpression( '/\$_POST|\bwp_send_json_/', $source );
 
+		$application_module = wp_normalize_path( $root . '/inc/application/prune.php' );
+		$index_module       = wp_normalize_path( $root . '/inc/application/media-source-indexing.php' );
 		$delete_coordinator = new ReflectionFunction( 'yotm_delete_prune_item_recoverable' );
-		$scan_coordinator   = new ReflectionFunction( 'yotm_prune_source_index_batch' );
+		$scan_coordinator   = new ReflectionFunction( 'yotm_application_media_source_index_batch' );
+		$legacy_scan        = new ReflectionFunction( 'yotm_prune_source_index_batch' );
 		$legacy_validator   = new ReflectionFunction( 'yotm_prune_validate_delete_meta' );
-		$this->assertStringEndsWith( '/inc/handle-delete.php', wp_normalize_path( $delete_coordinator->getFileName() ) );
-		$this->assertStringEndsWith( '/inc/handle-prune.php', wp_normalize_path( $scan_coordinator->getFileName() ) );
-		$this->assertStringEndsWith( '/inc/handle-delete.php', wp_normalize_path( $legacy_validator->getFileName() ) );
+		foreach (
+			array(
+				'yotm_prune_prepare_application',
+				'yotm_prune_scan_application',
+				'yotm_prune_approve_application',
+				'yotm_prune_delete_application',
+				'yotm_prune_merge_item_payload',
+				'yotm_prune_get_items_page',
+				'yotm_prune_build_manifest_batch',
+			) as $function
+		) {
+			$reflection = new ReflectionFunction( $function );
+			$this->assertSame( $application_module, wp_normalize_path( $reflection->getFileName() ), $function );
+		}
+		$this->assertSame( $application_module, wp_normalize_path( $delete_coordinator->getFileName() ) );
+		$this->assertSame( $index_module, wp_normalize_path( $scan_coordinator->getFileName() ) );
+		$this->assertSame( $index_module, wp_normalize_path( $legacy_scan->getFileName() ) );
+		$this->assertSame( $application_module, wp_normalize_path( $legacy_validator->getFileName() ) );
 	}
 
 	public function test_path_outside_uploads_cannot_be_deleted() {

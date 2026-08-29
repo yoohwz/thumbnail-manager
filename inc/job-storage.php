@@ -22,93 +22,7 @@ require_once __DIR__ . '/jobs/items.php';
  * @return bool
  */
 function yotm_job_merge_item_payload( $job_id, $item_key, $payload ) {
-	global $wpdb;
-
-	$tables   = yotm_job_table_names();
-	$item_key = preg_match( '/^[a-f0-9]{64}$/', (string) $item_key ) ? (string) $item_key : hash( 'sha256', (string) $item_key );
-	$row      = $wpdb->get_row(
-		$wpdb->prepare(
-			"SELECT items.id,items.payload FROM {$tables['items']} items
-			INNER JOIN {$tables['jobs']} jobs ON jobs.id = items.job_id
-			WHERE items.job_id = %d AND items.item_key = %s
-			AND jobs.status = 'scanning' AND jobs.phase IN ('selection','metadata','disk') LIMIT 1",
-			absint( $job_id ),
-			$item_key
-		)
-	);
-
-	if ( ! $row ) {
-		return false;
-	}
-
-	$current  = yotm_job_decode_payload( $row->payload );
-	$refs     = array();
-	$evidence = array();
-
-	foreach ( array_merge( (array) ( $current['metadata_refs'] ?? array() ), (array) ( $payload['metadata_refs'] ?? array() ) ) as $ref ) {
-		if ( ! is_array( $ref ) ) {
-			continue;
-		}
-
-		$key          = absint( $ref['attachment_id'] ?? 0 ) . ':' . sanitize_key( $ref['size'] ?? '' ) . ':' . sanitize_file_name( $ref['filename'] ?? '' );
-		$refs[ $key ] = array(
-			'attachment_id'     => absint( $ref['attachment_id'] ?? 0 ),
-			'size'              => sanitize_key( $ref['size'] ?? '' ),
-			'filename'          => sanitize_file_name( $ref['filename'] ?? '' ),
-			'selection_meta_id' => absint( $ref['selection_meta_id'] ?? 0 ),
-		);
-	}
-
-	$current['metadata_refs'] = array_values( $refs );
-
-	foreach ( array_merge( (array) ( $current['ownership_evidence'] ?? array() ), (array) ( $payload['ownership_evidence'] ?? array() ) ) as $proof ) {
-		if ( ! is_array( $proof ) ) {
-			continue;
-		}
-
-		$attachment_id = absint( $proof['attachment_id'] ?? 0 );
-		$size          = sanitize_key( $proof['size'] ?? '' );
-		$filename      = sanitize_file_name( $proof['filename'] ?? '' );
-		$selection     = sanitize_key( $proof['selection'] ?? '' );
-		$key           = $attachment_id . ':' . $size . ':' . $filename . ':' . $selection;
-
-		if ( ! $attachment_id || '' === $size || '' === $filename || '' === $selection ) {
-			continue;
-		}
-
-		$evidence[ $key ] = array(
-			'attachment_id'     => $attachment_id,
-			'size'              => $size,
-			'filename'          => $filename,
-			'mime'              => sanitize_mime_type( $proof['mime'] ?? '' ),
-			'selection'         => $selection,
-			'selection_meta_id' => absint( $proof['selection_meta_id'] ?? 0 ),
-		);
-	}//end foreach
-
-	ksort( $refs );
-	ksort( $evidence );
-	$current['metadata_refs']      = array_values( $refs );
-	$current['ownership_evidence'] = array_values( $evidence );
-	$current['ownership_schema']   = sanitize_key( $payload['ownership_schema'] ?? ( $current['ownership_schema'] ?? '' ) );
-	$current['ownership']          = sanitize_key( $payload['ownership'] ?? ( $current['ownership'] ?? '' ) );
-
-	if ( empty( $current['remove_metadata'] ) && ! empty( $payload['remove_metadata'] ) ) {
-		$current['remove_metadata'] = 1;
-	}
-
-	$sql = $wpdb->prepare(
-		"UPDATE {$tables['items']} items
-		INNER JOIN {$tables['jobs']} jobs ON jobs.id = items.job_id
-		SET items.payload = %s, items.updated_at = %s
-		WHERE items.id = %d AND jobs.status = 'scanning' AND jobs.phase IN ('selection','metadata','disk')",
-		wp_json_encode( $current ),
-		gmdate( 'Y-m-d H:i:s' ),
-		(int) $row->id
-	);
-
-	// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- Prepared above; table names are plugin-owned.
-	return 1 === $wpdb->query( $sql );
+	return yotm_prune_merge_item_payload( $job_id, $item_key, $payload );
 }
 
 /**
@@ -121,57 +35,7 @@ function yotm_job_merge_item_payload( $job_id, $item_key, $payload ) {
  * @return array{items:array,total:int,pages:int,page:int}
  */
 function yotm_job_get_items_page( $job_id, $page = 1, $per_page = 25, $search = '' ) {
-	global $wpdb;
-
-	$tables   = yotm_job_table_names();
-	$page     = max( 1, absint( $page ) );
-	$per_page = max( 10, min( 100, absint( $per_page ) ) );
-	$where    = 'job_id = %d';
-	$args     = array( absint( $job_id ) );
-	$search   = sanitize_text_field( $search );
-
-	if ( '' !== $search ) {
-		$where .= ' AND payload LIKE %s';
-		$args[] = '%' . $wpdb->esc_like( $search ) . '%';
-	}
-
-	// phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- The dynamic WHERE clause always contains the job ID placeholder and may include the search placeholder.
-	$count_sql = $wpdb->prepare( "SELECT COUNT(*) FROM {$tables['items']} WHERE {$where}", ...$args );
-	// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- Prepared above; table name is plugin-owned.
-	$total      = (int) $wpdb->get_var( $count_sql );
-	$pages      = max( 1, (int) ceil( $total / $per_page ) );
-	$page       = min( $page, $pages );
-	$offset     = ( $page - 1 ) * $per_page;
-	$query_args = array_merge( $args, array( $per_page, $offset ) );
-	$list_sql   = $wpdb->prepare( "SELECT * FROM {$tables['items']} WHERE {$where} ORDER BY id ASC LIMIT %d OFFSET %d", ...$query_args );
-	// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- Prepared above; table name is plugin-owned.
-	$rows  = $wpdb->get_results( $list_sql );
-	$items = array();
-
-	foreach ( $rows as $row ) {
-		$payload = yotm_job_decode_payload( $row->payload );
-		$items[] = array(
-			'id'                 => (int) $row->id,
-			'path'               => (string) ( $payload['path'] ?? '' ),
-			'attachment_id'      => absint( $payload['attachment_id'] ?? 0 ),
-			'size'               => (string) ( $payload['size'] ?? '' ),
-			'source'             => (string) ( $payload['source'] ?? '' ),
-			'ownership'          => (string) ( $payload['ownership'] ?? '' ),
-			'ownership_schema'   => (string) ( $payload['ownership_schema'] ?? '' ),
-			'ownership_evidence' => is_array( $payload['ownership_evidence'] ?? null ) ? $payload['ownership_evidence'] : array(),
-			'status'             => (string) $row->status,
-			'error'              => (string) $row->error,
-			'estimated_bytes'    => absint( $payload['estimated_bytes'] ?? $row->bytes ),
-			'bytes'              => (int) $row->bytes,
-		);
-	}
-
-	return array(
-		'items' => $items,
-		'total' => $total,
-		'pages' => $pages,
-		'page'  => $page,
-	);
+	return yotm_prune_get_items_page( $job_id, $page, $per_page, $search );
 }
 
 /**
@@ -182,28 +46,16 @@ function yotm_job_get_items_page( $job_id, $page = 1, $per_page = 25, $search = 
  * @return array
  */
 function yotm_job_get_error_sample( $job_id, $limit = 20 ) {
-	global $wpdb;
-
-	$tables = yotm_job_table_names();
-	$rows   = $wpdb->get_results(
-		$wpdb->prepare(
-			"SELECT item_key,payload,error FROM {$tables['items']} WHERE job_id = %d AND status = 'failed' ORDER BY id DESC LIMIT %d",
-			absint( $job_id ),
-			max( 1, min( 100, absint( $limit ) ) )
-		)
-	);
-	$out    = array();
-
-	foreach ( $rows as $row ) {
-		$payload = yotm_job_decode_payload( $row->payload );
+	$out = array();
+	foreach ( yotm_job_get_failed_item_rows( $job_id, $limit ) as $row ) {
+		$payload = $row['payload'];
 		$out[]   = array(
-			'item_key' => (string) $row->item_key,
+			'item_key' => (string) $row['item_key'],
 			'path'     => (string) ( $payload['path'] ?? '' ),
 			'id'       => absint( $payload['attachment_id'] ?? 0 ),
-			'error'    => (string) $row->error,
+			'error'    => (string) $row['error'],
 		);
 	}
-
 	return $out;
 }
 
@@ -216,85 +68,7 @@ function yotm_job_get_error_sample( $job_id, $limit = 20 ) {
  * @return array{done:bool,job:array}
  */
 function yotm_job_build_manifest_batch( $job, $limit = 1000, $worker = null ) {
-	global $wpdb;
-
-	$payload = $job['payload'];
-	$after   = isset( $payload['manifest_after'] ) ? (string) $payload['manifest_after'] : '';
-	$digest  = isset( $payload['manifest_digest'] ) ? (string) $payload['manifest_digest'] : hash( 'sha256', 'yotm-manifest-v1' );
-	$tables  = yotm_job_table_names();
-	$limit   = max( 10, min( 5000, absint( $limit ) ) );
-	$rows    = $wpdb->get_results(
-		$wpdb->prepare(
-			"SELECT item_key,payload FROM {$tables['items']} WHERE job_id = %d AND item_key > %s ORDER BY item_key ASC LIMIT %d",
-			$job['id'],
-			$after,
-			$limit
-		)
-	);
-
-	foreach ( $rows as $row ) {
-		$item_payload = yotm_job_decode_payload( $row->payload );
-		if (
-			'prune' === ( $job['type'] ?? '' )
-			&& 'generated_file_v1' === ( $item_payload['ownership_schema'] ?? '' )
-			&& function_exists( 'yotm_prune_validate_live_reference_evidence' )
-		) {
-			$source_fence = yotm_media_source_fence_acquire();
-			if ( is_wp_error( $source_fence ) ) {
-				return array(
-					'done' => false,
-					'job'  => yotm_job_get_by_id( $job['id'] ),
-				);
-			}
-			try {
-				$reference_check = yotm_prune_validate_live_reference_evidence( $item_payload, $item_payload['path'] ?? '' );
-			} finally {
-				yotm_media_source_fence_release( $source_fence );
-			}
-			if ( is_wp_error( $reference_check ) ) {
-				// Mutable scan item: unsafe ownership is removed before immutable hashing/review.
-				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Plugin-owned pre-manifest item.
-				$removed = $wpdb->delete(
-					$tables['items'],
-					array(
-						'job_id'   => (int) $job['id'],
-						'item_key' => (string) $row->item_key,
-					),
-					array( '%d', '%s' )
-				);
-				if ( 1 !== $removed ) {
-					return array(
-						'done' => false,
-						'job'  => yotm_job_get_by_id( $job['id'] ),
-					);
-				}
-				$after = (string) $row->item_key;
-				continue;
-			}
-		}//end if
-		$digest = hash( 'sha256', $digest . ':' . $row->item_key . ':' . hash( 'sha256', (string) $row->payload ) );
-		$after  = (string) $row->item_key;
-	}//end foreach
-
-	$payload['manifest_after']  = $after;
-	$payload['manifest_digest'] = $digest;
-	$done                       = count( $rows ) < $limit;
-	$fields                     = array( 'payload' => $payload );
-
-	if ( $done ) {
-		$fields['manifest_hash']         = $digest;
-		$payload['reference_generation'] = defined( 'YOTM_MEDIA_REFERENCE_GENERATION' ) ? YOTM_MEDIA_REFERENCE_GENERATION : 0;
-		$fields['payload']               = $payload;
-	}
-
-	$updated = is_array( $worker )
-		? yotm_job_worker_update( $worker, $fields )
-		: yotm_job_update( $job['id'], $fields );
-
-	return array(
-		'done' => $done && $updated,
-		'job'  => yotm_job_get_by_id( $job['id'] ),
-	);
+	return yotm_prune_build_manifest_batch( $job, $limit, $worker );
 }
 
 /**
@@ -490,7 +264,7 @@ function yotm_job_ajax_items() {
 	$page     = isset( $_POST['page'] ) ? absint( wp_unslash( $_POST['page'] ) ) : 1;
 	$per_page = isset( $_POST['per_page'] ) ? absint( wp_unslash( $_POST['per_page'] ) ) : 25;
 	$search   = sanitize_text_field( wp_unslash( $_POST['search'] ?? '' ) );
-	$data     = yotm_job_get_items_page( $job['id'], $page, $per_page, $search );
+	$data     = yotm_prune_get_items_page( $job['id'], $page, $per_page, $search );
 
 	wp_send_json_success( $data );
 }

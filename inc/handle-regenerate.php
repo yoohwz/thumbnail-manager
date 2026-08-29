@@ -200,7 +200,7 @@ function yotm_regenerate_batch() {
 
 	$job = yotm_job_get_by_id( $job['id'] );
 	if ( 'source_index' === $job['phase'] ) {
-		$indexed = yotm_prune_source_index_batch( $job, $batch, $worker );
+		$indexed = yotm_application_media_source_index_batch( $job, $batch, $worker );
 		if ( is_wp_error( $indexed ) ) {
 			wp_send_json_error( array( 'msg' => $indexed->get_error_message() ), 503 );
 		}

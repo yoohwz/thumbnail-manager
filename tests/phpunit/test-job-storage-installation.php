@@ -56,6 +56,10 @@ class YOTM_Job_Storage_Installation_Test extends WP_UnitTestCase {
 		$page     = new ReflectionFunction( 'yotm_job_get_items_page' );
 		$errors   = new ReflectionFunction( 'yotm_job_get_error_sample' );
 		$manifest = new ReflectionFunction( 'yotm_job_build_manifest_batch' );
+		$mutable  = new ReflectionFunction( 'yotm_job_get_mutable_item' );
+		$rows     = new ReflectionFunction( 'yotm_job_get_manifest_rows_after' );
+		$digest   = new ReflectionFunction( 'yotm_job_manifest_digest_advance' );
+		$prune    = new ReflectionFunction( 'yotm_prune_build_manifest_batch' );
 
 		$this->assertStringEndsWith( '/inc/jobs/storage.php', wp_normalize_path( $storage->getFileName() ) );
 		$this->assertStringEndsWith( '/inc/jobs/engine.php', wp_normalize_path( $engine->getFileName() ) );
@@ -67,6 +71,10 @@ class YOTM_Job_Storage_Installation_Test extends WP_UnitTestCase {
 		$this->assertStringEndsWith( '/inc/job-storage.php', wp_normalize_path( $page->getFileName() ) );
 		$this->assertStringEndsWith( '/inc/job-storage.php', wp_normalize_path( $errors->getFileName() ) );
 		$this->assertStringEndsWith( '/inc/job-storage.php', wp_normalize_path( $manifest->getFileName() ) );
+		$this->assertStringEndsWith( '/inc/jobs/items.php', wp_normalize_path( $mutable->getFileName() ) );
+		$this->assertStringEndsWith( '/inc/jobs/items.php', wp_normalize_path( $rows->getFileName() ) );
+		$this->assertStringEndsWith( '/inc/jobs/items.php', wp_normalize_path( $digest->getFileName() ) );
+		$this->assertStringEndsWith( '/inc/application/prune.php', wp_normalize_path( $prune->getFileName() ) );
 		$this->assertSame( 10, has_action( 'yotm_cleanup_jobs', 'yotm_cleanup_expired_jobs' ) );
 	}
 
@@ -109,6 +117,20 @@ class YOTM_Job_Storage_Installation_Test extends WP_UnitTestCase {
 			$item_source,
 			'items.php must remain opaque to Prune/Media payload fields.'
 		);
+
+		$application_source = file_get_contents( dirname( __DIR__, 2 ) . '/inc/application/prune.php' );
+		$this->assertIsString( $application_source );
+		$this->assertDoesNotMatchRegularExpression(
+			'/\$_POST|\bwp_send_json_|\bcurrent_user_can\b|\bcheck_ajax_referer\b/',
+			$application_source,
+			'Prune Application sequencing must remain transport-neutral.'
+		);
+
+		foreach ( array( 'handle-prune.php', 'handle-delete.php' ) as $file ) {
+			$source = file_get_contents( dirname( __DIR__, 2 ) . '/inc/' . $file );
+			$this->assertIsString( $source );
+			$this->assertDoesNotMatchRegularExpression( '/\byotm_(?:job|media)_/', $source, $file );
+		}
 	}
 
 	public function test_reactivation_restores_cleanup_schedule_without_ddl() {

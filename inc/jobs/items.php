@@ -157,6 +157,266 @@ function yotm_job_get_item_by_key( $job_id, $item_key ) {
 }
 
 /**
+ * Fetch one mutable item while its owning job remains in a scanning phase.
+ *
+ * Item payload remains opaque to Jobs; feature policy is applied by the caller.
+ *
+ * @param int    $job_id Job ID.
+ * @param string $item_key Stable item key.
+ * @return array|false
+ */
+function yotm_job_get_mutable_item( $job_id, $item_key ) {
+	global $wpdb;
+
+	$tables   = yotm_job_table_names();
+	$item_key = preg_match( '/^[a-f0-9]{64}$/', (string) $item_key ) ? (string) $item_key : hash( 'sha256', (string) $item_key );
+	// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Plugin-owned table names; values use placeholders.
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Mutable item lookup must be uncached and state-fenced.
+	$row = $wpdb->get_row(
+		$wpdb->prepare(
+			"SELECT items.* FROM {$tables['items']} items
+			INNER JOIN {$tables['jobs']} jobs ON jobs.id = items.job_id
+			WHERE items.job_id = %d AND items.item_key = %s
+			AND jobs.status = 'scanning' AND jobs.phase IN ('selection','metadata','disk') LIMIT 1",
+			absint( $job_id ),
+			$item_key
+		)
+	);
+	// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+
+	return $row ? yotm_job_normalize_item_row( $row ) : false;
+}
+
+/**
+ * Replace one mutable item's opaque payload behind its scanning-state fence.
+ *
+ * @param int   $item_id Item ID.
+ * @param array $payload Replacement opaque payload.
+ * @return bool
+ */
+function yotm_job_update_mutable_item_payload( $item_id, $payload ) {
+	global $wpdb;
+
+	$tables = yotm_job_table_names();
+	// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Plugin-owned table names; values use placeholders.
+	$sql = $wpdb->prepare(
+		"UPDATE {$tables['items']} items
+		INNER JOIN {$tables['jobs']} jobs ON jobs.id = items.job_id
+		SET items.payload = %s, items.updated_at = %s
+		WHERE items.id = %d AND jobs.status = 'scanning' AND jobs.phase IN ('selection','metadata','disk')",
+		wp_json_encode( is_array( $payload ) ? $payload : array() ),
+		gmdate( 'Y-m-d H:i:s' ),
+		absint( $item_id )
+	);
+	// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+
+	// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Mutable payload replacement is state-fenced and prepared above.
+	return 1 === $wpdb->query( $sql );
+}
+
+/**
+ * Return a filtered page of normalized job-item rows with opaque payloads.
+ *
+ * @param int    $job_id Job ID.
+ * @param int    $page Current page.
+ * @param int    $per_page Items per page.
+ * @param string $search Optional opaque payload search.
+ * @return array{items:array,total:int,pages:int,page:int}
+ */
+function yotm_job_get_item_rows_page( $job_id, $page = 1, $per_page = 25, $search = '' ) {
+	global $wpdb;
+
+	$tables   = yotm_job_table_names();
+	$page     = max( 1, absint( $page ) );
+	$per_page = max( 10, min( 100, absint( $per_page ) ) );
+	$where    = 'job_id = %d';
+	$args     = array( absint( $job_id ) );
+	$search   = sanitize_text_field( $search );
+
+	if ( '' !== $search ) {
+		$where .= ' AND payload LIKE %s';
+		$args[] = '%' . $wpdb->esc_like( $search ) . '%';
+	}
+
+	// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Plugin-owned table/WHERE fragments and their bounded arguments are assembled above.
+	// phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- Dynamic WHERE contains only the job ID and optional payload-search placeholders.
+	$count_sql = $wpdb->prepare( "SELECT COUNT(*) FROM {$tables['items']} WHERE {$where}", ...$args );
+	// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Prepared above; table name is plugin-owned.
+	$total      = (int) $wpdb->get_var( $count_sql );
+	$pages      = max( 1, (int) ceil( $total / $per_page ) );
+	$page       = min( $page, $pages );
+	$offset     = ( $page - 1 ) * $per_page;
+	$query_args = array_merge( $args, array( $per_page, $offset ) );
+	$list_sql   = $wpdb->prepare( "SELECT * FROM {$tables['items']} WHERE {$where} ORDER BY id ASC LIMIT %d OFFSET %d", ...$query_args );
+	// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
+	// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Prepared above; table name is plugin-owned.
+	$rows = $wpdb->get_results( $list_sql );
+	$out  = array();
+
+	foreach ( $rows as $row ) {
+		$item = yotm_job_normalize_item_row( $row );
+		if ( $item ) {
+			$out[] = $item;
+		}
+	}
+
+	return array(
+		'items' => $out,
+		'total' => $total,
+		'pages' => $pages,
+		'page'  => $page,
+	);
+}
+
+/**
+ * Return recent failed item rows with opaque payloads.
+ *
+ * @param int $job_id Job ID.
+ * @param int $limit Maximum rows.
+ * @return array[]
+ */
+function yotm_job_get_failed_item_rows( $job_id, $limit = 20 ) {
+	global $wpdb;
+
+	$tables = yotm_job_table_names();
+	// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Plugin-owned table name; values use placeholders.
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Failed item reporting must read current persistent rows uncached.
+	$rows = $wpdb->get_results(
+		$wpdb->prepare(
+			"SELECT * FROM {$tables['items']} WHERE job_id = %d AND status = 'failed' ORDER BY id DESC LIMIT %d",
+			absint( $job_id ),
+			max( 1, min( 100, absint( $limit ) ) )
+		)
+	);
+	// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+	$out = array();
+
+	foreach ( $rows as $row ) {
+		$item = yotm_job_normalize_item_row( $row );
+		if ( $item ) {
+			$out[] = $item;
+		}
+	}
+
+	return $out;
+}
+
+/**
+ * Return the next stable-key batch for caller-owned manifest validation.
+ *
+ * @param int    $job_id Job ID.
+ * @param string $after Exclusive stable-key cursor.
+ * @param int    $limit Maximum rows.
+ * @return array[]
+ */
+function yotm_job_get_manifest_rows_after( $job_id, $after, $limit ) {
+	global $wpdb;
+
+	$tables = yotm_job_table_names();
+	$limit  = max( 10, min( 5000, absint( $limit ) ) );
+	// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Plugin-owned table name; values use placeholders.
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Manifest construction must read exact persisted rows uncached.
+	$rows = $wpdb->get_results(
+		$wpdb->prepare(
+			"SELECT item_key,payload FROM {$tables['items']} WHERE job_id = %d AND item_key > %s ORDER BY item_key ASC LIMIT %d",
+			absint( $job_id ),
+			(string) $after,
+			$limit
+		)
+	);
+	// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+	$out = array();
+
+	foreach ( $rows as $row ) {
+		$out[] = array(
+			'item_key'     => (string) $row->item_key,
+			'payload'      => yotm_job_decode_payload( $row->payload ),
+			'payload_json' => (string) $row->payload,
+		);
+	}
+
+	return $out;
+}
+
+/**
+ * Delete one caller-rejected mutable item by exact job/key identity.
+ *
+ * @param int    $job_id Job ID.
+ * @param string $item_key Stable item key.
+ * @return bool
+ */
+function yotm_job_delete_item_by_key( $job_id, $item_key ) {
+	global $wpdb;
+
+	$tables = yotm_job_table_names();
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Application has validated this pre-manifest item; exact row identity remains bounded by job/key.
+	$removed = $wpdb->delete(
+		$tables['items'],
+		array(
+			'job_id'   => absint( $job_id ),
+			'item_key' => (string) $item_key,
+		),
+		array( '%d', '%s' )
+	);
+
+	return 1 === $removed;
+}
+
+/**
+ * Return the stable manifest digest seed.
+ *
+ * @return string
+ */
+function yotm_job_manifest_digest_seed() {
+	return hash( 'sha256', 'yotm-manifest-v1' );
+}
+
+/**
+ * Advance the stable manifest digest with one opaque persisted payload.
+ *
+ * @param string $digest Current digest.
+ * @param string $item_key Stable item key.
+ * @param string $payload_json Exact persisted JSON.
+ * @return string
+ */
+function yotm_job_manifest_digest_advance( $digest, $item_key, $payload_json ) {
+	return hash( 'sha256', $digest . ':' . $item_key . ':' . hash( 'sha256', $payload_json ) );
+}
+
+/**
+ * Persist one manifest cursor/digest checkpoint through the existing job fence.
+ *
+ * @param array      $job Job row.
+ * @param string     $after Stable item-key cursor.
+ * @param string     $digest Current digest.
+ * @param bool       $done Whether the bounded read reached the end.
+ * @param array|null $worker Optional worker ownership data.
+ * @param array      $completion_payload Opaque caller payload fields added on completion.
+ * @return array{done:bool,job:array}
+ */
+function yotm_job_update_manifest_checkpoint( $job, $after, $digest, $done, $worker = null, $completion_payload = array() ) {
+	$payload                    = $job['payload'];
+	$payload['manifest_after']  = (string) $after;
+	$payload['manifest_digest'] = (string) $digest;
+	$fields                     = array( 'payload' => $payload );
+
+	if ( $done ) {
+		$payload                 = array_merge( $payload, is_array( $completion_payload ) ? $completion_payload : array() );
+		$fields['manifest_hash'] = (string) $digest;
+		$fields['payload']       = $payload;
+	}
+
+	$updated = is_array( $worker )
+		? yotm_job_worker_update( $worker, $fields )
+		: yotm_job_update( $job['id'], $fields );
+
+	return array(
+		'done' => (bool) $done && $updated,
+		'job'  => yotm_job_get_by_id( $job['id'] ),
+	);
+}
+
+/**
  * Fetch job items by status.
  *
  * @param int      $job_id Job ID.
