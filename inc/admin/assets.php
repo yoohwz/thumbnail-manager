@@ -38,6 +38,13 @@ function yotm_admin_enqueue_assets( $hook ) {
 		true
 	);
 	wp_register_script(
+		'yotm-prune-admin-prune',
+		YOTM_PLUGIN_URL . 'js/admin-prune.js',
+		array( 'yotm-prune-admin' ),
+		file_exists( YOTM_PLUGIN_PATH . 'js/admin-prune.js' ) ? (string) filemtime( YOTM_PLUGIN_PATH . 'js/admin-prune.js' ) : YOTM_VERSION,
+		true
+	);
+	wp_register_script(
 		'yotm-prune-admin-recommendations',
 		YOTM_PLUGIN_URL . 'js/admin-recommendations.js',
 		array( 'yotm-prune-admin' ),
@@ -59,6 +66,7 @@ function yotm_admin_enqueue_assets( $hook ) {
 		true
 	);
 	wp_enqueue_script( 'yotm-prune-admin' );
+	wp_enqueue_script( 'yotm-prune-admin-prune' );
 	wp_enqueue_script( 'yotm-prune-admin-recommendations' );
 	wp_enqueue_script( 'yotm-prune-admin-regenerate' );
 	wp_enqueue_script( 'yotm-prune-admin-sizes' );
