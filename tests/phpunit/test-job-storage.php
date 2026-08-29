@@ -479,6 +479,39 @@ class YOTM_Job_Storage_Test extends WP_UnitTestCase {
 		yotm_job_release_worker( $worker );
 	}
 
+	public function test_regeneration_journal_checkpoint_is_exact_claim_fenced() {
+		$job = yotm_job_create(
+			'regenerate',
+			array( 'discovery_done' => 1 ),
+			array(
+				'status'       => 'running',
+				'phase'        => 'regenerate',
+				'counter_mode' => 'item_v3',
+				'total'        => 1,
+			)
+		);
+		$this->assertTrue( yotm_job_add_item( $job['id'], 'journal-fence', array( 'attachment_id' => 77 ) ) );
+		$worker  = yotm_job_acquire_worker( $job['id'], array( 'running' ), array( 'regenerate' ) );
+		$item    = yotm_job_claim_items( $worker, 1 )[0];
+		$journal = array(
+			'version'       => YOTM_REGENERATE_JOURNAL_VERSION,
+			'phase'         => 'prepared',
+			'attachment_id' => 77,
+		);
+
+		$this->assertTrue( yotm_regenerate_persist_journal( $item, $journal ) );
+		$current = yotm_job_get_item_by_key( $job['id'], 'journal-fence' );
+		$this->assertSame( $journal, $current['payload']['regeneration_journal'] );
+		$this->assertTrue( yotm_job_release_item_claim( $item ) );
+
+		$stale_journal          = $journal;
+		$stale_journal['phase'] = 'files_promoted';
+		$this->assertFalse( yotm_regenerate_persist_journal( $item, $stale_journal ) );
+		$current = yotm_job_get_item_by_key( $job['id'], 'journal-fence' );
+		$this->assertSame( $journal, $current['payload']['regeneration_journal'] );
+		yotm_job_release_worker( $worker );
+	}
+
 	public function test_requeued_journal_blocks_cancel_and_expiry_claims_only_recovery_item() {
 		global $wpdb;
 
