@@ -76,6 +76,14 @@ jobs:
           [[ "$PREPARATION_RUN_ID" =~ ^[0-9]+$ ]]
           [[ "$VERSION" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]]
 
+      - name: Ensure Subversion CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes subversion
+          svn --version --quiet
+
       - name: Checkout trusted publisher control plane
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
@@ -264,6 +272,14 @@ jobs:
           test "$GITHUB_REF" = "refs/heads/main"
           test -z "${WPORG_SVN_PASSWORD:-}"
 
+      - name: Ensure Subversion CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes subversion
+          svn --version --quiet
+
       - name: Checkout trusted publisher control plane
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
@@ -340,6 +356,14 @@ jobs:
           test "$GITHUB_REPOSITORY" = "yoohwz/thumbnail-manager"
           test "$GITHUB_REF" = "refs/heads/main"
           test "$GITHUB_WORKFLOW_REF" = "$EXPECTED_WORKFLOW_REF"
+
+      - name: Ensure Subversion CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes subversion
+          svn --version --quiet
 
       - name: Checkout trusted publisher control plane
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
@@ -581,6 +605,14 @@ jobs:
           test "$GITHUB_WORKFLOW_REF" = "$EXPECTED_WORKFLOW_REF"
           [[ "$ORIGINAL_PUBLISH_RUN_ID" =~ ^[0-9]+$ ]]
           test -z "${WPORG_SVN_PASSWORD:-}"
+
+      - name: Ensure Subversion CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes subversion
+          svn --version --quiet
 
       - name: Checkout trusted verification control plane
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
