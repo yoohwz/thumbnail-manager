@@ -31,7 +31,7 @@
   const $regenCancel = $('#yotm_regen_cancel');
 
   function toggleRegenScopeFields() {
-    const scope = $('#yotm_regen_scope').val();
+    const scope = $('input[name="yotm_regen_scope"]:checked').val();
     $('#yotm_regen_subpath_wrap').toggleClass('yo-hidden', scope !== 'subpath');
     $('#yotm_regen_ids_wrap').toggleClass('yo-hidden', scope !== 'ids');
   }
@@ -41,7 +41,7 @@
   }
 
   function lockRegenControls(locked) {
-    $('#yotm_regen_scope, #yotm_regen_subpath, #yotm_regen_attachment_ids, input[name="yotm_regen_mode"]').prop('disabled', !!locked);
+    $('input[name="yotm_regen_scope"], #yotm_regen_subpath, #yotm_regen_attachment_ids, input[name="yotm_regen_mode"]').prop('disabled', !!locked);
   }
 
   function regenProgress(percent, label, indeterminate) {
@@ -146,7 +146,7 @@
     regenProgress(1, t('preparingRegenerationQueue', 'Preparing regeneration queue…'));
     const mode = $('input[name="yotm_regen_mode"]:checked').val() || 'missing';
     request('yotm_regenerate_prepare', {
-      scope: $('#yotm_regen_scope').val() || 'all',
+      scope: $('input[name="yotm_regen_scope"]:checked').val() || 'all',
       subpath: $('#yotm_regen_subpath').val() || '',
       attachment_ids: $('#yotm_regen_attachment_ids').val() || '',
       only_missing: mode === 'missing' ? 1 : 0,
@@ -211,7 +211,7 @@
     });
   }
 
-  $('#yotm_regen_scope').on('change', toggleRegenScopeFields);
+  $('input[name="yotm_regen_scope"]').on('change', toggleRegenScopeFields);
   $('input[name="yotm_regen_mode"]').on('change', toggleRegenModeNote);
   $regenRun.on('click', function(){ prepareRegenerate(); });
   $regenCancel.on('click', function(){
