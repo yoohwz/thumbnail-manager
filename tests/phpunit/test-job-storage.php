@@ -1040,6 +1040,13 @@ class YOTM_Job_Storage_Test extends WP_UnitTestCase {
 
 	public function test_public_projection_is_recommendation_only_and_fails_closed_without_callable() {
 		$this->assertNull( yotm_job_public_recommendation_result( array( 'recommended_keep' => array( 'thumbnail' ) ), 'yotm_missing_projector' ) );
+		$projector = static function ( $value ) {
+			return array( 'projected' => $value );
+		};
+		$this->assertSame(
+			yotm_recommendation_public_result_application( 'persisted-result', $projector ),
+			yotm_job_public_recommendation_result( 'persisted-result', $projector )
+		);
 
 		$result = array( 'recommended_keep' => array( 'legacy-only' ) );
 		$job    = yotm_job_create(

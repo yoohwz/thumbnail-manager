@@ -79,21 +79,11 @@ function yotm_job_build_manifest_batch( $job, $limit = 1000, $worker = null ) {
  * @return array|null
  */
 function yotm_job_public_recommendation_result( $result, $projector = null ) {
-	if ( null === $projector ) {
-		if ( ! function_exists( 'yotm_recommendation_result_for_response' ) ) {
-			return null;
-		}
-
-		$projector = 'yotm_recommendation_result_for_response';
-	}
-
-	if ( ! is_callable( $projector ) ) {
+	if ( ! function_exists( 'yotm_recommendation_public_result_application' ) ) {
 		return null;
 	}
 
-	$projected = call_user_func( $projector, $result );
-
-	return is_array( $projected ) ? $projected : null;
+	return yotm_recommendation_public_result_application( $result, $projector );
 }
 
 /**
