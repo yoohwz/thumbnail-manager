@@ -321,31 +321,33 @@ test('save-and-regenerate schedules one prepare call only when no stored destruc
   assert.equal(actionCalls(blocked, 'yotm_regenerate_prepare').length, 0);
 });
 
-test('a late server-discovered job suppresses the delayed save-and-regenerate prepare', () => {
-  const harness = createHarness({runAfterSave: true});
-  loadAdmin(harness);
+test('late server-discovered destructive jobs suppress delayed save-and-regenerate prepare', () => {
+  for (const type of ['prune', 'regenerate']) {
+    const harness = createHarness({runAfterSave: true});
+    loadAdmin(harness);
 
-  const recent = actionCalls(harness, 'yotm_jobs_recent')[0];
-  recent.deferred.resolve({
-    success: true,
-    data: {
-      jobs: [{
-        type: 'regenerate',
-        token: 'server-token',
-        status: 'running',
-        processed: 2,
-        total: 10,
-        updated_at: '2026-08-29 00:00:00'
-      }]
-    }
-  });
+    const recent = actionCalls(harness, 'yotm_jobs_recent')[0];
+    recent.deferred.resolve({
+      success: true,
+      data: {
+        jobs: [{
+          type,
+          token: 'server-' + type,
+          status: type === 'prune' ? 'scanning' : 'running',
+          processed: 2,
+          total: 10,
+          updated_at: '2026-08-29 00:00:00'
+        }]
+      }
+    });
 
-  assert.deepEqual(
-    actionCalls(harness, 'yotm_job_status').map((call) => call.payload.token),
-    ['server-token']
-  );
-  harness.timers[0].callback();
-  assert.equal(actionCalls(harness, 'yotm_regenerate_prepare').length, 0);
+    assert.deepEqual(
+      actionCalls(harness, 'yotm_job_status').map((call) => call.payload.token),
+      ['server-' + type]
+    );
+    harness.timers[0].callback();
+    assert.equal(actionCalls(harness, 'yotm_regenerate_prepare').length, 0, type);
+  }
 });
 
 test('sizes module registers moved handlers against the shared core', () => {

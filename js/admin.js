@@ -1230,10 +1230,13 @@
     if (window.YOTM_RUN_REGENERATE_AFTER_SAVE && !storedPrune && !storedRegen) {
       activateTab('regenerate');
       window.setTimeout(function(){
-        const workflow = workflows.regenerate;
-        if (workflow && typeof workflow.prepare === 'function' &&
-          !(typeof workflow.isActive === 'function' && workflow.isActive())) {
-          workflow.prepare();
+        const regenerateWorkflow = workflows.regenerate;
+        const destructiveActive = ['prune', 'regenerate'].some(function(type){
+          const workflow = workflows[type];
+          return workflow && typeof workflow.isActive === 'function' && workflow.isActive();
+        });
+        if (regenerateWorkflow && typeof regenerateWorkflow.prepare === 'function' && !destructiveActive) {
+          regenerateWorkflow.prepare();
         }
       }, 250);
     }
