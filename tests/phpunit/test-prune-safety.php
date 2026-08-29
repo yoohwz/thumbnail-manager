@@ -90,7 +90,6 @@ class YOTM_Prune_Safety_Test extends WP_UnitTestCase {
 			'yotm_dimension_from_size_data',
 			'yotm_dimension_matches_keep',
 			'yotm_get_thumbnail_file_variants',
-			'yotm_prune_validate_delete_meta',
 			'yotm_delete_file_and_count',
 			'yotm_prune_journal_lexical_path',
 			'yotm_prune_journal_node_fingerprint',
@@ -115,8 +114,10 @@ class YOTM_Prune_Safety_Test extends WP_UnitTestCase {
 
 		$delete_coordinator = new ReflectionFunction( 'yotm_delete_prune_item_recoverable' );
 		$scan_coordinator   = new ReflectionFunction( 'yotm_prune_source_index_batch' );
+		$legacy_validator   = new ReflectionFunction( 'yotm_prune_validate_delete_meta' );
 		$this->assertStringEndsWith( '/inc/handle-delete.php', wp_normalize_path( $delete_coordinator->getFileName() ) );
 		$this->assertStringEndsWith( '/inc/handle-prune.php', wp_normalize_path( $scan_coordinator->getFileName() ) );
+		$this->assertStringEndsWith( '/inc/handle-delete.php', wp_normalize_path( $legacy_validator->getFileName() ) );
 	}
 
 	public function test_path_outside_uploads_cannot_be_deleted() {

@@ -325,24 +325,6 @@ function yotm_get_thumbnail_file_variants( $thumb_path ) {
 }
 
 /**
- * Backward-compatible validation helper retained for older integrations.
- *
- * @param array $meta Legacy metadata.
- * @return true|WP_Error
- */
-function yotm_prune_validate_delete_meta( $meta ) {
-	if ( ! is_array( $meta ) || ( $meta['mode'] ?? '' ) !== 'delete' ) {
-		return new WP_Error( 'yotm_not_delete_mode', __( 'This token was not prepared for deletion.', 'thumbnail-manager' ) );
-	}
-
-	if ( empty( $meta['scan_done'] ) ) {
-		return new WP_Error( 'yotm_scan_not_done', __( 'Scan is still running.', 'thumbnail-manager' ) );
-	}
-
-	return true;
-}
-
-/**
  * Delete a file via the WordPress API and return bytes freed.
  *
  * @param string $path File path.

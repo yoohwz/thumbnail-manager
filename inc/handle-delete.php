@@ -318,6 +318,24 @@ function yotm_prune_validate_delete_job( $job, $manifest_hash ) {
 }
 
 /**
+ * Backward-compatible validation helper retained for older integrations.
+ *
+ * @param array $meta Legacy metadata.
+ * @return true|WP_Error
+ */
+function yotm_prune_validate_delete_meta( $meta ) {
+	if ( ! is_array( $meta ) || ( $meta['mode'] ?? '' ) !== 'delete' ) {
+		return new WP_Error( 'yotm_not_delete_mode', __( 'This token was not prepared for deletion.', 'thumbnail-manager' ) );
+	}
+
+	if ( empty( $meta['scan_done'] ) ) {
+		return new WP_Error( 'yotm_scan_not_done', __( 'Scan is still running.', 'thumbnail-manager' ) );
+	}
+
+	return true;
+}
+
+/**
  * Execute one claimed prune deletion behind worker and item ownership fences.
  *
  * The optional barrier is used by the cross-process smoke test to pause at the
