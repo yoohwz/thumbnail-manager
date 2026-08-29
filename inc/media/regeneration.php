@@ -491,6 +491,115 @@ function yotm_regenerate_rollback( $journal ) {
 }
 
 /**
+ * Promote one exact staged destination and record observed promotion state.
+ *
+ * @param array $entry Journal destination entry, updated by reference.
+ * @return bool
+ */
+function yotm_regenerate_promote_destination( &$entry ) {
+	if ( ! @rename( $entry['source'], $entry['destination'] ) || ! yotm_regenerate_file_hash_matches( $entry['destination'], $entry['promoted_hash'] ) ) {
+		$entry['promoted'] = yotm_regenerate_file_hash_matches( $entry['destination'], $entry['promoted_hash'] );
+		return false;
+	}
+
+	$entry['promoted'] = true;
+	return true;
+}
+
+/**
+ * Classify exact raw metadata against the two journaled transaction states.
+ *
+ * @param array $journal Exact regeneration journal.
+ * @return string|WP_Error Either final or old.
+ */
+function yotm_regenerate_recovery_metadata_state( $journal ) {
+	$raw_rows = yotm_media_reference_raw_postmeta_rows( absint( $journal['attachment_id'] ), '_wp_attachment_metadata' );
+	if ( is_wp_error( $raw_rows ) ) {
+		return $raw_rows;
+	}
+	$raw = array_column( $raw_rows, 'value' );
+	if ( 1 !== count( $raw ) || ! is_array( $raw[0] ) ) {
+		return new WP_Error( 'yotm_regenerate_recovery_metadata_state', __( 'Current metadata does not match either journaled transaction state.', 'thumbnail-manager' ) );
+	}
+	if ( $raw[0] === $journal['final_metadata'] && hash_equals( (string) $journal['new_metadata_hash'], yotm_regenerate_metadata_hash( $raw[0] ) ) ) {
+		return 'final';
+	}
+	if ( $raw[0] === $journal['old_metadata'] && hash_equals( (string) $journal['old_metadata_hash'], yotm_regenerate_metadata_hash( $raw[0] ) ) ) {
+		return 'old';
+	}
+
+	return new WP_Error( 'yotm_regenerate_recovery_metadata_state', __( 'Current metadata does not match either journaled transaction state.', 'thumbnail-manager' ) );
+}
+
+/**
+ * Restore every destination from an interrupted promotion journal.
+ *
+ * The caller must hold the deterministic destination locks.
+ *
+ * @param array $journal Exact regeneration journal.
+ * @return true|WP_Error
+ */
+function yotm_regenerate_recover_destinations( $journal ) {
+	foreach ( $journal['destinations'] as $slug => $entry ) {
+		$owners = yotm_media_reference_path_owners( $entry['destination'] ?? '' );
+		if ( is_wp_error( $owners ) || ! empty( $owners['protected'] ) ) {
+			return is_wp_error( $owners ) ? $owners : new WP_Error( 'yotm_regenerate_recovery_protected', __( 'Recovery found a newly protected destination.', 'thumbnail-manager' ) );
+		}
+		$actual = array();
+		foreach ( $owners['generated'] as $owner ) {
+			$actual[] = absint( $owner['attachment_id'] ?? 0 ) . ':' . sanitize_key( $owner['size'] ?? '' ) . ':' . (string) ( $owner['filename'] ?? '' );
+		}
+		sort( $actual );
+		$expected = array_values( (array) ( $entry['owners'] ?? array() ) );
+		sort( $expected );
+		if ( $actual !== $expected ) {
+			return new WP_Error( 'yotm_regenerate_recovery_ownership', __( 'Destination ownership changed after the interrupted regeneration.', 'thumbnail-manager' ) );
+		}
+		$promoted = ! empty( $entry['promoted'] ) || (string) ( $journal['promotion_slug'] ?? '' ) === (string) $slug;
+		$path     = (string) ( $entry['destination'] ?? '' );
+		if ( $promoted ) {
+			if ( ! yotm_regenerate_file_hash_matches( $path, (string) ( $entry['promoted_hash'] ?? '' ) ) ) {
+				return new WP_Error( 'yotm_regenerate_recovery_promoted_changed', __( 'A promoted artifact changed after the interrupted regeneration.', 'thumbnail-manager' ) );
+			}
+			if ( ! empty( $entry['old_absent'] ) ) {
+				if ( ! @unlink( $path ) ) {
+					return new WP_Error( 'yotm_regenerate_recovery_remove_failed', __( 'Could not remove an exact interrupted promoted artifact.', 'thumbnail-manager' ) );
+				}
+			} elseif ( empty( $entry['backup'] ) || ! yotm_regenerate_file_hash_matches( $entry['backup'], (string) $entry['old_hash'] ) || ! @rename( $entry['backup'], $path ) ) {
+				return new WP_Error( 'yotm_regenerate_recovery_restore_failed', __( 'Could not restore an exact interrupted generated-file backup.', 'thumbnail-manager' ) );
+			}
+		} elseif ( ! empty( $entry['old_absent'] ) ? false !== @lstat( $path ) : ! yotm_regenerate_file_hash_matches( $path, (string) $entry['old_hash'] ) ) {
+			return new WP_Error( 'yotm_regenerate_recovery_destination_changed', __( 'A non-promoted destination changed after the interrupted regeneration.', 'thumbnail-manager' ) );
+		}
+	}//end foreach
+
+	return true;
+}
+
+/**
+ * Commit exact attachment metadata and restore the old transaction state on failure.
+ *
+ * @param int   $attachment_id Attachment ID.
+ * @param array $journal Exact regeneration journal.
+ * @param array $old_metadata Exact old metadata.
+ * @return string Either committed, restored, or incomplete.
+ */
+function yotm_regenerate_commit_metadata( $attachment_id, $journal, $old_metadata ) {
+	$written  = update_post_meta( $attachment_id, '_wp_attachment_metadata', $journal['final_metadata'] );
+	$raw_rows = yotm_media_reference_raw_postmeta_rows( $attachment_id, '_wp_attachment_metadata' );
+	$raw      = is_wp_error( $raw_rows ) ? array() : array_column( $raw_rows, 'value' );
+	if ( ( false === $written && ( 1 !== count( $raw ) || $raw[0] !== $journal['final_metadata'] ) ) || 1 !== count( $raw ) || $raw[0] !== $journal['final_metadata'] ) {
+		update_post_meta( $attachment_id, '_wp_attachment_metadata', $old_metadata );
+		$restored_rows = yotm_media_reference_raw_postmeta_rows( $attachment_id, '_wp_attachment_metadata' );
+		$restored_raw  = is_wp_error( $restored_rows ) ? array() : array_column( $restored_rows, 'value' );
+		$rolled_back   = yotm_regenerate_rollback( $journal );
+		return $rolled_back && 1 === count( $restored_raw ) && $restored_raw[0] === $old_metadata ? 'restored' : 'incomplete';
+	}
+
+	return 'committed';
+}
+
+/**
  * Delete exact obsolete old generated files after metadata commit.
  *
  * @param array $snapshot Validated old snapshot.

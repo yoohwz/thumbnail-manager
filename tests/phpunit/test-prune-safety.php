@@ -149,6 +149,10 @@ class YOTM_Prune_Safety_Test extends WP_UnitTestCase {
 			'yotm_regenerate_finalize_metadata',
 			'yotm_regenerate_destination_prestate',
 			'yotm_regenerate_rollback',
+			'yotm_regenerate_promote_destination',
+			'yotm_regenerate_recovery_metadata_state',
+			'yotm_regenerate_recover_destinations',
+			'yotm_regenerate_commit_metadata',
 			'yotm_regenerate_cleanup_obsolete',
 			'yotm_regenerate_attachment',
 			'yotm_regenerate_metadata_file_map',
@@ -187,6 +191,7 @@ class YOTM_Prune_Safety_Test extends WP_UnitTestCase {
 		$this->assertDoesNotMatchRegularExpression( '/\byotm_job_/', $media_source );
 		$this->assertDoesNotMatchRegularExpression( '/\$_POST|\bwp_send_json_|\badd_action\s*\(/', $media_source );
 		$this->assertDoesNotMatchRegularExpression( '/\$_POST|\bwp_send_json_|\badd_action\s*\(/', $application_source );
+		$this->assertDoesNotMatchRegularExpression( '/\b(?:rename|unlink|lstat|update_post_meta|yotm_media_reference_raw_postmeta_rows|yotm_regenerate_file_hash_matches)\s*\(/', $application_source );
 	}
 
 	public function test_path_outside_uploads_cannot_be_deleted() {

@@ -673,16 +673,12 @@ function yotm_regenerate_recover_journal( &$item ) {
 		return yotm_regenerate_failure( $locks, true );
 	}
 	try {
-		$raw_rows = yotm_media_reference_raw_postmeta_rows( absint( $journal['attachment_id'] ), '_wp_attachment_metadata' );
-		if ( is_wp_error( $raw_rows ) ) {
-			return yotm_regenerate_failure( $raw_rows, true );
-		}
-		$raw = array_column( $raw_rows, 'value' );
-		if ( 1 !== count( $raw ) || ! is_array( $raw[0] ) ) {
-			return yotm_regenerate_failure( __( 'Current metadata does not match either journaled transaction state.', 'thumbnail-manager' ) );
+		$metadata_state = yotm_regenerate_recovery_metadata_state( $journal );
+		if ( is_wp_error( $metadata_state ) ) {
+			return yotm_regenerate_failure( $metadata_state, 'yotm_regenerate_recovery_metadata_state' !== $metadata_state->get_error_code() );
 		}
 
-		if ( $raw[0] === $journal['final_metadata'] && hash_equals( (string) $journal['new_metadata_hash'], yotm_regenerate_metadata_hash( $raw[0] ) ) ) {
+		if ( 'final' === $metadata_state ) {
 			$synced = yotm_media_source_sync_attachment( absint( $journal['attachment_id'] ), null, true );
 			if ( is_wp_error( $synced ) ) {
 				return yotm_regenerate_failure( $synced, true );
@@ -706,41 +702,10 @@ function yotm_regenerate_recover_journal( &$item ) {
 			);
 		}//end if
 
-		if ( $raw[0] !== $journal['old_metadata'] || ! hash_equals( (string) $journal['old_metadata_hash'], yotm_regenerate_metadata_hash( $raw[0] ) ) ) {
-			return yotm_regenerate_failure( __( 'Current metadata does not match either journaled transaction state.', 'thumbnail-manager' ) );
+		$recovered = yotm_regenerate_recover_destinations( $journal );
+		if ( is_wp_error( $recovered ) ) {
+			return yotm_regenerate_failure( $recovered );
 		}
-		foreach ( $journal['destinations'] as $slug => $entry ) {
-			$owners = yotm_media_reference_path_owners( $entry['destination'] ?? '' );
-			if ( is_wp_error( $owners ) || ! empty( $owners['protected'] ) ) {
-				return yotm_regenerate_failure( is_wp_error( $owners ) ? $owners : __( 'Recovery found a newly protected destination.', 'thumbnail-manager' ) );
-			}
-			$actual = array();
-			foreach ( $owners['generated'] as $owner ) {
-				$actual[] = absint( $owner['attachment_id'] ?? 0 ) . ':' . sanitize_key( $owner['size'] ?? '' ) . ':' . (string) ( $owner['filename'] ?? '' );
-			}
-			sort( $actual );
-			$expected = array_values( (array) ( $entry['owners'] ?? array() ) );
-			sort( $expected );
-			if ( $actual !== $expected ) {
-				return yotm_regenerate_failure( __( 'Destination ownership changed after the interrupted regeneration.', 'thumbnail-manager' ) );
-			}
-			$promoted = ! empty( $entry['promoted'] ) || (string) ( $journal['promotion_slug'] ?? '' ) === (string) $slug;
-			$path     = (string) ( $entry['destination'] ?? '' );
-			if ( $promoted ) {
-				if ( ! yotm_regenerate_file_hash_matches( $path, (string) ( $entry['promoted_hash'] ?? '' ) ) ) {
-					return yotm_regenerate_failure( __( 'A promoted artifact changed after the interrupted regeneration.', 'thumbnail-manager' ) );
-				}
-				if ( ! empty( $entry['old_absent'] ) ) {
-					if ( ! @unlink( $path ) ) {
-						return yotm_regenerate_failure( __( 'Could not remove an exact interrupted promoted artifact.', 'thumbnail-manager' ) );
-					}
-				} elseif ( empty( $entry['backup'] ) || ! yotm_regenerate_file_hash_matches( $entry['backup'], (string) $entry['old_hash'] ) || ! @rename( $entry['backup'], $path ) ) {
-					return yotm_regenerate_failure( __( 'Could not restore an exact interrupted generated-file backup.', 'thumbnail-manager' ) );
-				}
-			} elseif ( ! empty( $entry['old_absent'] ) ? false !== @lstat( $path ) : ! yotm_regenerate_file_hash_matches( $path, (string) $entry['old_hash'] ) ) {
-				return yotm_regenerate_failure( __( 'A non-promoted destination changed after the interrupted regeneration.', 'thumbnail-manager' ) );
-			}
-		}//end foreach
 
 		$payload = $item['payload'];
 		unset( $payload['regeneration_journal'] );
@@ -859,12 +824,10 @@ function yotm_regenerate_force_attachment( $attachment_id, $item, $worker ) {
 			if ( ! yotm_regenerate_persist_journal( $item, $journal ) ) {
 				return yotm_regenerate_failure( __( 'Could not persist the next promotion intent.', 'thumbnail-manager' ), true );
 			}
-			if ( ! @rename( $entry['source'], $entry['destination'] ) || ! yotm_regenerate_file_hash_matches( $entry['destination'], $entry['promoted_hash'] ) ) {
-				$entry['promoted'] = yotm_regenerate_file_hash_matches( $entry['destination'], $entry['promoted_hash'] );
+			if ( ! yotm_regenerate_promote_destination( $entry ) ) {
 				yotm_regenerate_rollback( $journal );
 				return yotm_regenerate_failure( __( 'Could not promote all staged generated files.', 'thumbnail-manager' ) );
 			}
-			$entry['promoted']         = true;
 			$journal['promotion_slug'] = '';
 			if ( ! yotm_regenerate_persist_journal( $item, $journal ) ) {
 				return yotm_regenerate_failure( __( 'Could not persist promoted-file evidence.', 'thumbnail-manager' ), true );
@@ -877,17 +840,11 @@ function yotm_regenerate_force_attachment( $attachment_id, $item, $worker ) {
 			return yotm_regenerate_failure( __( 'Could not persist the promoted-files journal.', 'thumbnail-manager' ) );
 		}
 
-		$written  = update_post_meta( $attachment_id, '_wp_attachment_metadata', $journal['final_metadata'] );
-		$raw_rows = yotm_media_reference_raw_postmeta_rows( $attachment_id, '_wp_attachment_metadata' );
-		$raw      = is_wp_error( $raw_rows ) ? array() : array_column( $raw_rows, 'value' );
-		if ( ( false === $written && ( 1 !== count( $raw ) || $raw[0] !== $journal['final_metadata'] ) ) || 1 !== count( $raw ) || $raw[0] !== $journal['final_metadata'] ) {
-			update_post_meta( $attachment_id, '_wp_attachment_metadata', $snapshot['metadata'] );
-			$restored_rows = yotm_media_reference_raw_postmeta_rows( $attachment_id, '_wp_attachment_metadata' );
-			$restored_raw  = is_wp_error( $restored_rows ) ? array() : array_column( $restored_rows, 'value' );
-			$rolled_back   = yotm_regenerate_rollback( $journal );
-			if ( ! $rolled_back || 1 !== count( $restored_raw ) || $restored_raw[0] !== $snapshot['metadata'] ) {
-				return yotm_regenerate_failure( __( 'Metadata commit and automatic rollback were incomplete; journal evidence was retained for manual recovery.', 'thumbnail-manager' ) );
-			}
+		$metadata_commit = yotm_regenerate_commit_metadata( $attachment_id, $journal, $snapshot['metadata'] );
+		if ( 'incomplete' === $metadata_commit ) {
+			return yotm_regenerate_failure( __( 'Metadata commit and automatic rollback were incomplete; journal evidence was retained for manual recovery.', 'thumbnail-manager' ) );
+		}
+		if ( 'restored' === $metadata_commit ) {
 			return yotm_regenerate_failure( __( 'Could not commit exact regenerated attachment metadata; the old state was restored.', 'thumbnail-manager' ) );
 		}
 		$journal['phase'] = 'metadata_committed';
