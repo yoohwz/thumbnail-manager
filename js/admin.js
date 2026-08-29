@@ -7,6 +7,8 @@
   const nonce   = config.nonce || '';
   const siteId  = config.siteId || 0;
   const activeStatuses = ['scanning', 'running', 'awaiting_approval', 'approved', 'deleting'];
+  const workflowTypes = new Set(['prune', 'regenerate', 'recommendation']);
+  const workflows = Object.create(null);
 
   function t(key, fallback) {
     return i18n[key] || fallback;
@@ -95,12 +97,36 @@
     }
   }
 
+  function request(action, data) {
+    return $.post(ajaxurl, Object.assign({}, data || {}, {action: action, nonce: nonce}));
+  }
+
   function cancelJob(token) {
-    return $.post(ajaxurl, {action: 'yotm_job_cancel', nonce: nonce, token: token});
+    return request('yotm_job_cancel', {token: token});
   }
 
   function getJobStatus(token) {
-    return $.post(ajaxurl, {action: 'yotm_job_status', nonce: nonce, token: token});
+    return request('yotm_job_status', {token: token});
+  }
+
+  function isMissingJobStatus(request) {
+    return !!request && parseInt(request.status || 0, 10) === 404;
+  }
+
+  function registerWorkflow(type, workflow) {
+    if (!workflowTypes.has(type) || !workflow || typeof workflow.resume !== 'function') {
+      return;
+    }
+    workflows[type] = workflow;
+  }
+
+  function resumeWorkflow(type, token) {
+    const workflow = workflows[type];
+    if (!token || !workflow || (typeof workflow.isActive === 'function' && workflow.isActive())) {
+      return false;
+    }
+    workflow.resume(token);
+    return true;
   }
 
   function activateTab(tab) {
@@ -133,28 +159,6 @@
     const $next = $tabs.eq(next);
     activateTab($next.data('tab'));
     $next.trigger('focus');
-  });
-
-  const coreSet = new Set(['thumbnail', 'medium', 'large', 'medium_large', '1536x1536', '2048x2048']);
-
-  $('#yotm_sizes_enable_core').on('click', function(){
-    $('input[name="yotm_enable_sizes[]"]').each(function(){ this.checked = coreSet.has(this.value); });
-  });
-  $('#yotm_sizes_enable_all').on('click', function(){ $('input[name="yotm_enable_sizes[]"]').prop('checked', true); });
-  $('#yotm_sizes_disable_all').on('click', function(){ $('input[name="yotm_enable_sizes[]"]').prop('checked', false); });
-
-  $('#yotm_sizes_prune_disabled').on('click', function(){
-    const enabled = new Set();
-    $('input[name="yotm_enable_sizes[]"]:checked').each(function(){ enabled.add(this.value); });
-    const allSizes = $('.yotm_keep').map(function(){ return this.value; }).get();
-    if (enabled.size === allSizes.length) {
-      window.alert(t('allSizesEnabled', 'All sizes are enabled — there are no disabled sizes to prune.'));
-      return;
-    }
-    activateTab('prune');
-    $('.yotm_keep').each(function(){ this.checked = enabled.has(this.value); });
-    $('#yotm_discover_orphans').prop('checked', false);
-    $('#yotm_run').trigger('click');
   });
 
   function jobTypeLabel(type) {
@@ -217,7 +221,7 @@
   }
 
   function loadRecentJobs() {
-    $.post(ajaxurl, {action: 'yotm_jobs_recent', nonce: nonce}).done(function(response){
+    request('yotm_jobs_recent').done(function(response){
       if (response && response.success && response.data) {
         renderRecentJobs(response.data.jobs || []);
         resumeDiscoveredJob(recentActiveJob);
@@ -694,6 +698,9 @@
     $pruneCancel.removeClass('yo-hidden');
     $pruneResults.html(htmlNotice('notice-info', t('resumeAvailable', 'An unfinished job was found. Resuming it now…')));
     getJobStatus(token).done(function(response){
+      if (pruneToken !== token) {
+        return;
+      }
       if (!response || !response.success || !response.data) {
         clearPruneJob({keepResults: true});
         setPruneStep('configure');
@@ -717,7 +724,17 @@
         clearPruneJob({keepResults: true});
         setPruneStep(data.status === 'completed' ? 'completed' : 'configure');
       }
-    }).fail(function(){ clearPruneJob({keepResults: true, preserveJob: true}); });
+    }).fail(function(request){
+      if (pruneToken !== token) {
+        return;
+      }
+      if (isMissingJobStatus(request)) {
+        clearPruneJob({keepResults: true});
+        setPruneStep('configure');
+        return;
+      }
+      clearPruneJob({keepResults: true, preserveJob: true});
+    });
   }
 
   $pruneRun.on('click', preparePrune);
@@ -732,12 +749,18 @@
     $pruneCancel.prop('disabled', true);
     $pruneStat.show().text(t('stopping', 'Stopping after the current batch…'));
     cancelJob(token).done(function(){
+      if (pruneToken !== token) {
+        return;
+      }
       $pruneResults.prepend(htmlNotice('notice-warning', t('jobStopped', 'Job stopped. Completed work was not rolled back, and the audit record was retained.')));
       clearPruneJob({keepResults: true});
       setPruneStep('configure');
       $pruneResults.trigger('focus');
       loadRecentJobs();
     }).fail(function(){
+      if (pruneToken !== token) {
+        return;
+      }
       pruneRunning = true;
       $pruneCancel.prop('disabled', false);
       $pruneResults.prepend(htmlNotice('notice-error', t('unknownError', 'Unknown error')));
@@ -916,6 +939,9 @@
     $regenCancel.removeClass('yo-hidden');
     $regenResults.html(htmlNotice('notice-info', t('resumeAvailable', 'An unfinished job was found. Resuming it now…')));
     getJobStatus(token).done(function(response){
+      if (regenToken !== token) {
+        return;
+      }
       if (response && response.success && response.data && response.data.status === 'running') {
         const context = response.data.context || {};
         if (response.data.total_known === false || (context.selector === 'attached_meta_v2' && !context.selection_done)) {
@@ -925,7 +951,12 @@
       } else {
         clearRegenJob({keepResults: true});
       }
-    }).fail(function(){ clearRegenJob({keepResults: true, preserveJob: true}); });
+    }).fail(function(request){
+      if (regenToken !== token) {
+        return;
+      }
+      clearRegenJob({keepResults: true, preserveJob: !isMissingJobStatus(request)});
+    });
   }
 
   $('#yotm_regen_scope').on('change', toggleRegenScopeFields);
@@ -941,23 +972,20 @@
     $regenCancel.prop('disabled', true);
     $regenStat.show().text(t('stopping', 'Stopping after the current batch…'));
     cancelJob(token).done(function(){
+      if (regenToken !== token) {
+        return;
+      }
       $regenResults.prepend(htmlNotice('notice-warning', t('jobStopped', 'Job stopped. Completed work was not rolled back, and the audit record was retained.')));
       clearRegenJob({keepResults: true});
       $regenResults.trigger('focus');
       loadRecentJobs();
-    }).fail(function(){ regenRunning = true; $regenCancel.prop('disabled', false); });
-  });
-
-  $(document).on('click', 'button[name="yotm_save_and_regenerate"]', function(){
-    const $form = $(this).closest('form');
-    if (!$form.length) {
-      return;
-    }
-    let $hidden = $form.find('input[type="hidden"][name="yotm_save_and_regenerate"]');
-    if (!$hidden.length) {
-      $hidden = $('<input>', {type: 'hidden', name: 'yotm_save_and_regenerate'}).appendTo($form);
-    }
-    $hidden.val('1');
+    }).fail(function(){
+      if (regenToken !== token) {
+        return;
+      }
+      regenRunning = true;
+      $regenCancel.prop('disabled', false);
+    });
   });
 
   // Batched recommendation jobs.
@@ -1145,6 +1173,9 @@
     $recommendRun.prop('disabled', true);
     $recommendCancel.removeClass('yo-hidden');
     getJobStatus(token).done(function(response){
+      if (recommendToken !== token) {
+        return;
+      }
       if (!response || !response.success || !response.data) {
         clearRecommendation();
       } else if (response.data.status === 'completed' && response.data.context && response.data.context.result) {
@@ -1155,7 +1186,12 @@
       } else {
         clearRecommendation();
       }
-    }).fail(function(){ clearRecommendation({preserveJob: true}); });
+    }).fail(function(request){
+      if (recommendToken !== token) {
+        return;
+      }
+      clearRecommendation({preserveJob: !isMissingJobStatus(request)});
+    });
   }
 
   $recommendRun.on('click', prepareRecommendation);
@@ -1169,11 +1205,20 @@
     $recommendCancel.prop('disabled', true);
     $recommendStat.show().text(t('stopping', 'Stopping after the current batch…'));
     cancelJob(token).done(function(){
+      if (recommendToken !== token) {
+        return;
+      }
       $recommendResults.prepend(htmlNotice('notice-warning', t('jobStopped', 'Job stopped. Completed work was not rolled back, and the audit record was retained.')));
       clearRecommendation();
       $recommendResults.trigger('focus');
       loadRecentJobs();
-    }).fail(function(){ recommendRunning = true; $recommendCancel.prop('disabled', false); });
+    }).fail(function(){
+      if (recommendToken !== token) {
+        return;
+      }
+      recommendRunning = true;
+      $recommendCancel.prop('disabled', false);
+    });
   });
 
   $('#yotm_apply_recommendations').on('click', function(){
@@ -1196,36 +1241,87 @@
 
   function resumeDiscoveredJob(job) {
     if (!job) {
+      return false;
+    }
+    return resumeWorkflow(job.type, job.token);
+  }
+
+  registerWorkflow('prune', {
+    isActive: function(){ return !!pruneToken; },
+    resume: resumePrune
+  });
+  registerWorkflow('regenerate', {
+    isActive: function(){ return !!regenToken; },
+    prepare: prepareRegenerate,
+    resume: resumeRegenerate
+  });
+  registerWorkflow('recommendation', {
+    isActive: function(){ return !!recommendToken; },
+    resume: resumeRecommendation
+  });
+
+  let started = false;
+
+  function start() {
+    if (started) {
       return;
     }
-    if (job.type === 'prune' && !pruneToken) {
-      resumePrune(job.token);
-    } else if (job.type === 'regenerate' && !regenToken) {
-      resumeRegenerate(job.token);
-    } else if (job.type === 'recommendation' && !recommendToken) {
-      resumeRecommendation(job.token);
+    started = true;
+
+    toggleRegenScopeFields();
+    toggleRegenModeNote();
+    toggleSubpathPicker();
+    filterSubpathOptions();
+
+    const storedPrune = recallJob('prune');
+    const storedRegen = recallJob('regenerate');
+    const storedRecommend = recallJob('recommendation');
+    if (storedPrune) {
+      resumeWorkflow('prune', storedPrune);
+    } else if (storedRegen) {
+      resumeWorkflow('regenerate', storedRegen);
     }
+    if (storedRecommend) {
+      resumeWorkflow('recommendation', storedRecommend);
+    }
+    if (window.YOTM_RUN_REGENERATE_AFTER_SAVE && !storedPrune && !storedRegen) {
+      activateTab('regenerate');
+      window.setTimeout(function(){
+        const regenerateWorkflow = workflows.regenerate;
+        const destructiveActive = ['prune', 'regenerate'].some(function(type){
+          const workflow = workflows[type];
+          return workflow && typeof workflow.isActive === 'function' && workflow.isActive();
+        });
+        if (regenerateWorkflow && typeof regenerateWorkflow.prepare === 'function' && !destructiveActive) {
+          regenerateWorkflow.prepare();
+        }
+      }, 250);
+    }
+    loadRecentJobs();
   }
 
-  toggleRegenScopeFields();
-  toggleRegenModeNote();
-	toggleSubpathPicker();
-	filterSubpathOptions();
+  // Internal module seam for bundled admin modules; not a public extension API.
+  window.YOTMAdmin = Object.freeze({
+    activateTab: activateTab,
+    cancelJob: cancelJob,
+    errorDetails: errorDetails,
+    escapeHtml: escapeHtml,
+    forgetJob: forgetJob,
+    formatBytes: formatBytes,
+    formatDate: formatDate,
+    formatTemplate: formatTemplate,
+    getJobStatus: getJobStatus,
+    htmlNotice: htmlNotice,
+    isMissingJobStatus: isMissingJobStatus,
+    jobProgress: jobProgress,
+    loadRecentJobs: loadRecentJobs,
+    recallJob: recallJob,
+    registerWorkflow: registerWorkflow,
+    rememberJob: rememberJob,
+    request: request,
+    responseError: responseError,
+    t: t
+  });
 
-  const storedPrune = recallJob('prune');
-  const storedRegen = recallJob('regenerate');
-  const storedRecommend = recallJob('recommendation');
-  if (storedPrune) {
-    resumePrune(storedPrune);
-  } else if (storedRegen) {
-    resumeRegenerate(storedRegen);
-  }
-  if (storedRecommend) {
-    resumeRecommendation(storedRecommend);
-  }
-  if (window.YOTM_RUN_REGENERATE_AFTER_SAVE && !storedPrune && !storedRegen) {
-    activateTab('regenerate');
-    window.setTimeout(function(){ prepareRegenerate(); }, 250);
-  }
-  loadRecentJobs();
+  start();
 })(jQuery);

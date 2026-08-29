@@ -190,6 +190,9 @@ jobs:
         shell: bash
         run: find js -name '*.js' -print0 | xargs -0 -r -n1 node --check
 
+      - name: Run JavaScript contracts
+        run: node --test tests/js/*.test.mjs
+
   phpunit:
     name: WordPress ${{ matrix.wordpress }} / PHP ${{ matrix.php }}
     needs:

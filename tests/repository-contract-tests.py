@@ -52,6 +52,7 @@ admin_php = "\n".join(
 admin_js = "\n".join(
     path.read_text(encoding="utf-8") for path in sorted((ROOT / "js").glob("admin*.js"))
 )
+admin_assets = read("inc/admin/assets.php")
 pot = read("languages/thumbnail-manager.pot")
 
 plugin_version = match(r"^\s*\*\s*Version:\s*(\S+)", plugin, "plugin header Version")
@@ -159,6 +160,18 @@ php_i18n_keys = set(
 missing_i18n_keys = sorted(js_i18n_keys - php_i18n_keys)
 if missing_i18n_keys:
     fail(f"JavaScript translation keys are missing from the PHP localization map: {missing_i18n_keys}")
+
+for path in ("js/admin.js", "js/admin-sizes.js", "tests/js/admin-contracts.test.mjs"):
+    read(path)
+for needle, label in (
+    ("'yotm-prune-admin-sizes'", "Size module script handle"),
+    ("array( 'yotm-prune-admin' )", "Size module dependency on the localized core"),
+    ("wp_localize_script(\n\t\t'yotm-prune-admin'", "localization attached to the stable core handle"),
+):
+    if needle not in admin_assets:
+        fail(f"admin asset registration is missing {label}")
+if "node --test tests/js/*.test.mjs" not in ci_workflow:
+    fail("CI must execute the dependency-free JavaScript contract tests")
 
 for msgid in ('msgid "%s (year)"', 'msgid "— %s"', 'msgid "Scanning attachment rows… %s checked"'):
     if msgid not in pot:
