@@ -7,6 +7,8 @@ import {dirname, join, resolve} from 'node:path';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const adminSource = readFileSync(join(root, 'js/admin.js'), 'utf8');
+const recommendationsSource = readFileSync(join(root, 'js/admin-recommendations.js'), 'utf8');
+const regenerateSource = readFileSync(join(root, 'js/admin-regenerate.js'), 'utf8');
 const sizesSource = readFileSync(join(root, 'js/admin-sizes.js'), 'utf8');
 const adminPhpSource = readFileSync(join(root, 'inc/admin/assets.php'), 'utf8');
 
@@ -217,6 +219,8 @@ function createHarness(options = {}) {
 
 function loadAdmin(harness) {
   vm.runInContext(adminSource, harness.context, {filename: 'js/admin.js'});
+  vm.runInContext(recommendationsSource, harness.context, {filename: 'js/admin-recommendations.js'});
+  vm.runInContext(regenerateSource, harness.context, {filename: 'js/admin-regenerate.js'});
 }
 
 function actionCalls(harness, action) {
@@ -251,6 +255,18 @@ test('core loads once, exposes a frozen bounded registry, and sends recent-job n
   assert.deepEqual(actionCalls(harness, 'yotm_job_cancel').at(-1).payload, {
     action: 'yotm_job_cancel', nonce: 'nonce-123', token: 'cancel-token'
   });
+});
+
+test('startup waits until Prune, Recommendations, and Regenerate are registered', () => {
+  const harness = createHarness();
+  vm.runInContext(adminSource, harness.context, {filename: 'js/admin.js'});
+  assert.equal(actionCalls(harness, 'yotm_jobs_recent').length, 0);
+
+  vm.runInContext(recommendationsSource, harness.context, {filename: 'js/admin-recommendations.js'});
+  assert.equal(actionCalls(harness, 'yotm_jobs_recent').length, 0);
+
+  vm.runInContext(regenerateSource, harness.context, {filename: 'js/admin-regenerate.js'});
+  assert.equal(actionCalls(harness, 'yotm_jobs_recent').length, 1);
 });
 
 test('startup preserves prune-before-regenerate precedence and resumes recommendations independently', () => {
@@ -444,6 +460,80 @@ test('late server-discovered destructive jobs suppress delayed save-and-regenera
   }
 });
 
+test('Regenerate module preserves prepare and bounded batch payloads', () => {
+  const harness = createHarness();
+  loadAdmin(harness);
+  invokeHandler(harness, '#yotm_regen_run');
+
+  const prepare = actionCalls(harness, 'yotm_regenerate_prepare')[0];
+  assert.deepEqual(prepare.payload, {
+    action: 'yotm_regenerate_prepare',
+    nonce: 'nonce-123',
+    scope: 'all',
+    subpath: '',
+    attachment_ids: '',
+    only_missing: 1,
+    force_all: 0
+  });
+  prepare.deferred.resolve({
+    success: true,
+    data: {
+      token: 'regen-module-token',
+      total_known: true,
+      total: 1,
+      processed: 0,
+      regenerated: 0,
+      skipped: 0,
+      failed: 0,
+      scope_label: 'All media'
+    }
+  });
+
+  assert.equal(harness.storage.get('yotm_job_42_regenerate'), 'regen-module-token');
+  assert.deepEqual(actionCalls(harness, 'yotm_regenerate_batch')[0].payload, {
+    action: 'yotm_regenerate_batch', nonce: 'nonce-123', token: 'regen-module-token', batch: 20
+  });
+});
+
+test('Recommendations module preserves prepare and bounded batch payloads', () => {
+  const harness = createHarness();
+  loadAdmin(harness);
+  invokeHandler(harness, '#yotm_recommend_scan');
+
+  const prepare = actionCalls(harness, 'yotm_recommend_prepare')[0];
+  assert.deepEqual(prepare.payload, {action: 'yotm_recommend_prepare', nonce: 'nonce-123'});
+  prepare.deferred.resolve({success: true, data: {token: 'recommend-module-token'}});
+
+  assert.equal(harness.storage.get('yotm_job_42_recommendation'), 'recommend-module-token');
+  assert.deepEqual(actionCalls(harness, 'yotm_recommend_batch')[0].payload, {
+    action: 'yotm_recommend_batch', nonce: 'nonce-123', token: 'recommend-module-token', batch: 100
+  });
+});
+
+test('workflow implementation lives only in the approved extracted modules', () => {
+  assert.doesNotMatch(adminSource, /function (?:prepare|resume)Regenerate\b|yotm_regenerate_(?:prepare|batch)/);
+  assert.doesNotMatch(adminSource, /function (?:prepare|resume)Recommendation\b|yotm_recommend_(?:prepare|batch)/);
+  assert.match(regenerateSource, /registerWorkflow\('regenerate'/);
+  assert.match(regenerateSource, /request\('yotm_regenerate_prepare'/);
+  assert.match(regenerateSource, /request\('yotm_regenerate_batch'/);
+  assert.match(recommendationsSource, /registerWorkflow\('recommendation'/);
+  assert.match(recommendationsSource, /request\('yotm_recommend_prepare'/);
+  assert.match(recommendationsSource, /request\('yotm_recommend_batch'/);
+});
+
+test('WordPress assets register and enqueue each workflow module after the localized core', () => {
+  for (const [handle, path] of [
+    ['yotm-prune-admin-recommendations', 'js/admin-recommendations.js'],
+    ['yotm-prune-admin-regenerate', 'js/admin-regenerate.js'],
+    ['yotm-prune-admin-sizes', 'js/admin-sizes.js']
+  ]) {
+    assert.match(adminPhpSource, new RegExp("'" + handle + "'[\\s\\S]+?" + path.replace('.', '\\.') + "'[\\s\\S]+?array\\( 'yotm-prune-admin' \\)"));
+    assert.match(adminPhpSource, new RegExp("wp_enqueue_script\\( '" + handle + "' \\)"));
+  }
+  assert.ok(adminPhpSource.indexOf("wp_enqueue_script( 'yotm-prune-admin-recommendations' )") < adminPhpSource.indexOf("wp_enqueue_script( 'yotm-prune-admin-regenerate' )"));
+  assert.ok(adminPhpSource.indexOf("wp_enqueue_script( 'yotm-prune-admin-regenerate' )") < adminPhpSource.indexOf("wp_enqueue_script( 'yotm-prune-admin-sizes' )"));
+});
+
 test('sizes module registers moved handlers against the shared core', () => {
   const harness = createHarness();
   const calls = [];
@@ -466,8 +556,9 @@ test('sizes module registers moved handlers against the shared core', () => {
 });
 
 test('all localized keys consumed by bundled admin modules are discovered in PHP', () => {
+  const combined = [adminSource, recommendationsSource, regenerateSource, sizesSource].join('\n');
   const jsKeys = new Set(
-    [...(adminSource + '\n' + sizesSource).matchAll(/\bt\(\s*'([^']+)'/g)].map((match) => match[1])
+    [...combined.matchAll(/\bt\(\s*'([^']+)'/g)].map((match) => match[1])
   );
   const phpKeys = new Set(
     [...adminPhpSource.matchAll(/'([A-Za-z][A-Za-z0-9]*)'\s*=>\s*(?:__|esc_html__|esc_attr__)\(/g)]
@@ -477,7 +568,7 @@ test('all localized keys consumed by bundled admin modules are discovered in PHP
 });
 
 test('admin modules retain the established AJAX action and storage contracts', () => {
-  const combined = adminSource + '\n' + sizesSource;
+  const combined = [adminSource, recommendationsSource, regenerateSource, sizesSource].join('\n');
   const actions = new Set([
     ...combined.matchAll(/action:\s*'(yotm_[^']+)'/g),
     ...combined.matchAll(/request\('(yotm_[^']+)'/g)
@@ -499,7 +590,7 @@ test('admin modules retain the established AJAX action and storage contracts', (
 
   for (const type of ['prune', 'regenerate', 'recommendation']) {
     assert.match(adminSource, new RegExp("recallJob\\('" + type + "'\\)"));
-    assert.match(adminSource, new RegExp("registerWorkflow\\('" + type + "'"));
+    assert.match(combined, new RegExp("registerWorkflow\\('" + type + "'"));
   }
   assert.match(adminSource, /'yotm_job_' \+ siteId \+ '_' \+ type/);
 });
