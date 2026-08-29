@@ -120,6 +120,156 @@ class YOTM_Regenerate_Transaction_Test extends WP_UnitTestCase {
 		yotm_job_release_worker( $worker );
 	}
 
+	public function test_normal_regeneration_preserves_existing_metadata_fields() {
+		add_filter( 'intermediate_image_sizes_advanced', array( $this, 'only_thumbnail' ), PHP_INT_MAX );
+		$full                = $this->test_dir . '/normal-source.jpg';
+		$this->attachment_id = $this->create_image_attachment( $full );
+		$metadata            = wp_generate_attachment_metadata( $this->attachment_id, $full );
+		$this->assertIsArray( $metadata );
+		$metadata['yotm_characterization'] = array( 'preserve' => true );
+		$this->assertNotFalse( wp_update_attachment_metadata( $this->attachment_id, $metadata ) );
+		$full_hash = hash_file( 'sha256', $full );
+
+		$result = yotm_regenerate_attachment( $this->attachment_id, false, false );
+
+		$this->assertSame( 'regenerated', $result['status'], $result['message'] );
+		$this->assertSame( $full_hash, hash_file( 'sha256', $full ) );
+		$stored = wp_get_attachment_metadata( $this->attachment_id );
+		$this->assertSame( array( 'preserve' => true ), $stored['yotm_characterization'] );
+		$this->assertArrayHasKey( 'thumbnail', $stored['sizes'] );
+	}
+
+	public function test_missing_only_regeneration_preserves_existing_size_while_creating_missing_sizes() {
+		if ( ! function_exists( 'wp_get_missing_image_subsizes' ) || ! function_exists( 'wp_update_image_subsizes' ) ) {
+			$this->markTestSkipped( 'WordPress missing-image subsize APIs are unavailable.' );
+		}
+
+		add_filter( 'intermediate_image_sizes_advanced', array( $this, 'only_thumbnail' ), PHP_INT_MAX );
+		$full                = $this->test_dir . '/missing-source.jpg';
+		$this->attachment_id = $this->create_image_attachment( $full );
+		$metadata            = wp_generate_attachment_metadata( $this->attachment_id, $full );
+		$this->assertIsArray( $metadata );
+		$this->assertArrayHasKey( 'thumbnail', $metadata['sizes'] );
+		$metadata['yotm_missing_characterization'] = true;
+		$this->assertNotFalse( wp_update_attachment_metadata( $this->attachment_id, $metadata ) );
+		$thumbnail = trailingslashit( dirname( $full ) ) . $metadata['sizes']['thumbnail']['file'];
+		$this->assertFileExists( $thumbnail );
+		$full_hash = hash_file( 'sha256', $full );
+
+		$result = yotm_regenerate_attachment( $this->attachment_id, true, false );
+
+		$this->assertSame( 'regenerated', $result['status'], $result['message'] );
+		$this->assertSame( $full_hash, hash_file( 'sha256', $full ) );
+		$this->assertFileExists( $thumbnail );
+		$this->assertGreaterThan( count( $metadata['sizes'] ), count( wp_get_attachment_metadata( $this->attachment_id )['sizes'] ) );
+	}
+
+	public function test_interrupted_promotion_recovery_rolls_back_exact_artifact_and_clears_journal() {
+		$full                = $this->test_dir . '/recovery-source.jpg';
+		$this->attachment_id = $this->create_image_attachment( $full );
+		$old_metadata        = wp_generate_attachment_metadata( $this->attachment_id, $full );
+		$this->assertIsArray( $old_metadata );
+		$old_metadata['yotm_recovery_fixture'] = 'old';
+		$this->assertNotFalse( wp_update_attachment_metadata( $this->attachment_id, $old_metadata ) );
+		$this->assertTrue( yotm_media_source_sync_attachment( $this->attachment_id, null, true ) );
+
+		$this->assertArrayHasKey( 'thumbnail', $old_metadata['sizes'] );
+		$destination = trailingslashit( dirname( $full ) ) . $old_metadata['sizes']['thumbnail']['file'];
+		$this->assertFileExists( $destination );
+		$old_hash = hash_file( 'sha256', $destination );
+		$owners   = yotm_media_reference_path_owners( $destination );
+		$this->assertIsArray( $owners );
+		$owner_keys = array();
+		foreach ( $owners['generated'] as $owner ) {
+			$owner_keys[] = absint( $owner['attachment_id'] ?? 0 ) . ':' . sanitize_key( $owner['size'] ?? '' ) . ':' . (string) ( $owner['filename'] ?? '' );
+		}
+		sort( $owner_keys );
+		$this->assertNotEmpty( $owner_keys );
+		$stage = $this->test_dir . '/.yotm-regenerate-' . wp_generate_uuid4();
+		wp_mkdir_p( $stage );
+		$backup = $stage . '/backup-' . hash( 'sha256', $destination );
+		$this->assertTrue( copy( $destination, $backup ) );
+		file_put_contents( $destination, 'exact-promoted-bytes' );
+		$final_metadata                         = $old_metadata;
+		$final_metadata['yotm_recovery_target'] = true;
+
+		$journal = array(
+			'version'           => YOTM_REGENERATE_JOURNAL_VERSION,
+			'attachment_id'     => $this->attachment_id,
+			'phase'             => 'files_promoted',
+			'full'              => yotm_media_source_canonical_path( $full ),
+			'stage'             => yotm_normalize_filesystem_path( $stage ),
+			'old_metadata'      => $old_metadata,
+			'old_metadata_hash' => yotm_regenerate_metadata_hash( $old_metadata ),
+			'final_metadata'    => $final_metadata,
+			'new_metadata_hash' => yotm_regenerate_metadata_hash( $final_metadata ),
+			'destinations'      => array(
+				'thumbnail' => array(
+					'destination'   => yotm_media_source_canonical_path( $destination ),
+					'owners'        => $owner_keys,
+					'old_absent'    => false,
+					'old_hash'      => $old_hash,
+					'promoted'      => true,
+					'promoted_hash' => hash_file( 'sha256', $destination ),
+					'backup'        => yotm_normalize_filesystem_path( $backup ),
+				),
+			),
+		);
+
+		$job = yotm_job_create(
+			'regenerate',
+			array( 'discovery_done' => 1 ),
+			array(
+				'status'       => 'running',
+				'phase'        => 'regenerate',
+				'counter_mode' => 'item_v3',
+				'total'        => 1,
+			)
+		);
+		$this->assertIsArray( $job );
+		$this->assertTrue(
+			yotm_job_add_item(
+				$job['id'],
+				'recovery:' . $this->attachment_id,
+				array(
+					'attachment_id'        => $this->attachment_id,
+					'regeneration_journal' => $journal,
+				)
+			)
+		);
+		$worker = yotm_job_acquire_worker( $job['id'], array( 'running' ), array( 'regenerate' ) );
+		$this->assertIsArray( $worker );
+		$item = yotm_job_claim_items( $worker, 1 )[0];
+		$this->assertSame( $journal, $item['payload']['regeneration_journal'] );
+		$this->assertSame(
+			$journal['full'],
+			yotm_media_source_canonical_path( $item['payload']['regeneration_journal']['full'] )
+		);
+		$this->assertSame(
+			0,
+			strpos(
+				trailingslashit( yotm_normalize_filesystem_path( $item['payload']['regeneration_journal']['stage'] ) ),
+				trailingslashit( dirname( $item['payload']['regeneration_journal']['full'] ) ) . '.yotm-regenerate-'
+			)
+		);
+		$this->assertSame( $backup, yotm_normalize_filesystem_path( $item['payload']['regeneration_journal']['destinations']['thumbnail']['backup'] ) );
+		$this->assertSame(
+			$journal['destinations']['thumbnail']['destination'],
+			yotm_media_source_canonical_path( $journal['destinations']['thumbnail']['destination'] )
+		);
+
+		$result = yotm_regenerate_recover_journal( $item );
+
+		$this->assertSame( 'retry', $result['status'], $result['message'] );
+		$this->assertSame( $old_hash, hash_file( 'sha256', $destination ) );
+		$this->assertDirectoryDoesNotExist( $stage );
+		$this->assertArrayNotHasKey( 'regeneration_journal', $item['payload'] );
+		$current = yotm_job_get_item_by_key( $job['id'], 'recovery:' . $this->attachment_id );
+		$this->assertArrayNotHasKey( 'regeneration_journal', $current['payload'] );
+		yotm_job_release_item_claim( $item );
+		yotm_job_release_worker( $worker );
+	}
+
 	public function test_existing_unreferenced_destination_is_never_replaceable() {
 		$destination = $this->test_dir . '/unmapped-150x150.jpg';
 		file_put_contents( $destination, 'unmapped-bytes' );

@@ -138,6 +138,57 @@ class YOTM_Prune_Safety_Test extends WP_UnitTestCase {
 		$this->assertSame( $application_module, wp_normalize_path( $legacy_validator->getFileName() ) );
 	}
 
+	public function test_regeneration_modules_enforce_media_application_and_transport_boundaries() {
+		$root               = dirname( __DIR__, 2 );
+		$media_module       = wp_normalize_path( $root . '/inc/media/regeneration.php' );
+		$application_module = wp_normalize_path( $root . '/inc/application/regenerate.php' );
+		$transport_module   = wp_normalize_path( $root . '/inc/handle-regenerate.php' );
+		$media_functions    = array(
+			'yotm_regenerate_preflight',
+			'yotm_regenerate_stage_outputs',
+			'yotm_regenerate_finalize_metadata',
+			'yotm_regenerate_destination_prestate',
+			'yotm_regenerate_rollback',
+			'yotm_regenerate_cleanup_obsolete',
+			'yotm_regenerate_attachment',
+			'yotm_regenerate_metadata_file_map',
+			'yotm_cleanup_obsolete_generated_files',
+		);
+
+		$application_functions = array(
+			'yotm_regenerate_prepare_application',
+			'yotm_regenerate_batch_application',
+			'yotm_regenerate_select_folder_batch',
+			'yotm_regenerate_item_batch',
+			'yotm_regenerate_legacy_batch',
+			'yotm_regenerate_persist_journal',
+			'yotm_regenerate_recover_journal',
+			'yotm_regenerate_force_attachment',
+			'yotm_build_regenerate_response',
+		);
+
+		foreach ( $media_functions as $function ) {
+			$reflection = new ReflectionFunction( $function );
+			$this->assertSame( $media_module, wp_normalize_path( $reflection->getFileName() ), $function );
+		}
+		foreach ( $application_functions as $function ) {
+			$reflection = new ReflectionFunction( $function );
+			$this->assertSame( $application_module, wp_normalize_path( $reflection->getFileName() ), $function );
+		}
+		foreach ( array( 'yotm_regenerate_prepare', 'yotm_regenerate_batch', 'yotm_regenerate_send_application_outcome' ) as $function ) {
+			$reflection = new ReflectionFunction( $function );
+			$this->assertSame( $transport_module, wp_normalize_path( $reflection->getFileName() ), $function );
+		}
+
+		$media_source       = file_get_contents( $media_module );
+		$application_source = file_get_contents( $application_module );
+		$this->assertIsString( $media_source );
+		$this->assertIsString( $application_source );
+		$this->assertDoesNotMatchRegularExpression( '/\byotm_job_/', $media_source );
+		$this->assertDoesNotMatchRegularExpression( '/\$_POST|\bwp_send_json_|\badd_action\s*\(/', $media_source );
+		$this->assertDoesNotMatchRegularExpression( '/\$_POST|\bwp_send_json_|\badd_action\s*\(/', $application_source );
+	}
+
 	public function test_path_outside_uploads_cannot_be_deleted() {
 		$outside       = trailingslashit( sys_get_temp_dir() ) . 'yotm-outside-' . wp_generate_uuid4() . '.jpg';
 		$this->files[] = $outside;
