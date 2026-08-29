@@ -192,8 +192,10 @@ function yotm_media_source_store_paths_rows( $path_hashes, $per_hash_limit = 100
 	$grouped        = array();
 	foreach ( array_chunk( $hashes, 200 ) as $chunk ) {
 		$placeholders = implode( ',', array_fill( 0, count( $chunk ), '%s' ) );
+		$row_limit    = count( $chunk ) * $per_hash_limit + 1;
+		$args         = array_merge( $chunk, array( $row_limit ) );
 		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Exact bounded hashes use placeholders; table is plugin-owned.
-		$rows = $wpdb->get_results( $wpdb->prepare( "SELECT attachment_id,source_kind,path_hash,path FROM {$table} WHERE path_hash IN ({$placeholders}) ORDER BY path_hash ASC,attachment_id ASC,source_kind ASC", $chunk ) );
+		$rows = $wpdb->get_results( $wpdb->prepare( "SELECT attachment_id,source_kind,path_hash,path FROM {$table} WHERE path_hash IN ({$placeholders}) ORDER BY path_hash ASC,attachment_id ASC,source_kind ASC LIMIT %d", $args ) );
 		if ( '' !== (string) $wpdb->last_error ) {
 			return yotm_media_source_storage_error( (string) $wpdb->last_error );
 		}

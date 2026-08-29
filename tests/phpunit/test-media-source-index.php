@@ -266,6 +266,7 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 		}
 
 		$this->assertWPError( yotm_media_source_store_paths_rows( array( $hash ), 1 ) );
+		$this->assertStringContainsString( 'LIMIT 2', $wpdb->last_query );
 		$too_many = array();
 		for ( $index = 0; $index < 4001; ++$index ) {
 			$too_many[] = hash( 'sha256', 'bounded-' . $index );
