@@ -4,6 +4,15 @@ This file contains the complete release history for Thumbnail Manager.
 
 == Changelog ==
 
+= 1.5.0 (Aug 29, 2026) =
+* Improved regeneration reliability, including safer Force Regenerate recovery and original-source handling
+* Strengthened Prune safety with stricter ownership, source protection, path validation, and reviewed-manifest enforcement
+* Added evidence-based, conservative Recommendations with clearer confidence and fail-safe handling
+* Improved large Media Library performance with persistent, bounded jobs and resumable processing
+* Hardened job locking, ownership, cancellation, expiry, and interrupted-work recovery
+* Added a clearer radio-card Scope picker for Regenerate while preserving targeted folder and attachment selection
+* Improved admin accessibility, compatibility checks, workflow feedback, and automated safety coverage
+
 = 1.4.0 (Jul 17, 2026) =
 * Added persistent job and job-item database storage with ownership, expiry, cancellation, cleanup, locking, resume, and per-item errors
 * Split Prune Files into scan, immutable hashed manifest review, explicit approval, and resumable deletion
