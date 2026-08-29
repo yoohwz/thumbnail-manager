@@ -358,9 +358,11 @@ function yotm_job_get_manifest_rows_after( $job_id, $after, $limit ) {
 function yotm_job_get_status_rows_after_id( $job_id, $status, $after_id, $limit ) {
 	global $wpdb;
 
-	$tables      = yotm_job_table_names();
-	$limit       = max( 1, min( 1000, absint( $limit ) ) );
-	$rows        = $wpdb->get_results(
+	$tables = yotm_job_table_names();
+	$limit  = max( 1, min( 1000, absint( $limit ) ) );
+	// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Plugin-owned table name; all values use placeholders.
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Exact persistent evidence state must be read uncached.
+	$rows = $wpdb->get_results(
 		$wpdb->prepare(
 			"SELECT * FROM {$tables['items']} WHERE job_id = %d AND status = %s AND id > %d ORDER BY id ASC LIMIT %d",
 			absint( $job_id ),
@@ -369,6 +371,7 @@ function yotm_job_get_status_rows_after_id( $job_id, $status, $after_id, $limit 
 			$limit
 		)
 	);
+	// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 	$query_error = yotm_job_last_database_error();
 	if ( is_wp_error( $query_error ) ) {
 		return $query_error;
@@ -434,7 +437,8 @@ function yotm_job_worker_add_item( $worker, $item_key, $payload, $status, $bytes
 	$tables   = yotm_job_table_names();
 	$now      = gmdate( 'Y-m-d H:i:s' );
 	$item_key = preg_match( '/^[a-f0-9]{64}$/', (string) $item_key ) ? (string) $item_key : hash( 'sha256', (string) $item_key );
-	$sql      = $wpdb->prepare(
+	// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Plugin-owned table names and an INSERT...SELECT statement; every value uses an exact placeholder.
+	$sql = $wpdb->prepare(
 		"INSERT IGNORE INTO {$tables['items']}
 		(job_id,item_key,status,payload,error,bytes,created_at,updated_at)
 		SELECT jobs.id,%s,%s,%s,'',%d,%s,%s FROM {$tables['jobs']} jobs
@@ -453,6 +457,7 @@ function yotm_job_worker_add_item( $worker, $item_key, $payload, $status, $bytes
 		absint( $worker['generation'] ?? 0 ),
 		$now
 	);
+	// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
 
 	// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Exact state-fenced insert prepared above.
 	return 1 === $wpdb->query( $sql );
