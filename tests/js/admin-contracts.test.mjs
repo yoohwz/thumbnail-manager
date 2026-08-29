@@ -230,6 +230,8 @@ test('core loads once, exposes a frozen bounded registry, and sends recent-job n
   assert.equal(Object.isFrozen(harness.window.YOTMAdmin), true);
   assert.equal(typeof harness.window.YOTMAdmin.registerWorkflow, 'function');
   assert.equal(typeof harness.window.YOTMAdmin.request, 'function');
+  assert.equal(harness.window.YOTMAdmin.isMissingJobStatus({status: 404}), true);
+  assert.equal(harness.window.YOTMAdmin.isMissingJobStatus({status: 503}), false);
   assert.deepEqual(actionCalls(harness, 'yotm_jobs_recent')[0], {
     url: '/wp-admin/admin-ajax.php',
     payload: {action: 'yotm_jobs_recent', nonce: 'nonce-123'}
@@ -278,28 +280,42 @@ test('startup resumes regenerate when no prune token exists', () => {
   assert.equal(actionCalls(harness, 'yotm_regenerate_batch').length, 0);
 });
 
-test('invalid persisted status is cleared without starting destructive work', () => {
-  const harness = createHarness({
-    storage: {yotm_job_42_prune: 'stale-token'},
-    responses: {
-      yotm_job_status: {kind: 'done', value: {success: false, data: {msg: 'Invalid token'}}}
-    }
-  });
-  loadAdmin(harness);
+test('404 status revalidation clears every stale token without starting work', () => {
+  const cases = [
+    {type: 'prune', forbiddenActions: ['yotm_prune_scan_batch', 'yotm_prune_delete_batch']},
+    {type: 'regenerate', forbiddenActions: ['yotm_regenerate_batch']},
+    {type: 'recommendation', forbiddenActions: ['yotm_recommend_batch']}
+  ];
 
-  assert.equal(harness.storage.has('yotm_job_42_prune'), false);
-  assert.equal(actionCalls(harness, 'yotm_prune_scan_batch').length, 0);
-  assert.equal(actionCalls(harness, 'yotm_prune_delete_batch').length, 0);
+  for (const item of cases) {
+    const key = 'yotm_job_42_' + item.type;
+    const harness = createHarness({
+      storage: {[key]: 'stale-token'},
+      responses: {
+        yotm_job_status: {kind: 'fail', value: {status: 404, responseJSON: {success: false}}}
+      }
+    });
+    loadAdmin(harness);
+
+    assert.equal(harness.storage.has(key), false, item.type + ' token should be cleared');
+    item.forbiddenActions.forEach((action) => {
+      assert.equal(actionCalls(harness, action).length, 0, item.type + ' must not start ' + action);
+    });
+  }
 });
 
-test('network failure preserves a persisted token for a later server revalidation', () => {
-  const harness = createHarness({
-    storage: {yotm_job_42_prune: 'retry-token'},
-    responses: {yotm_job_status: {kind: 'fail', value: new Error('offline')}}
-  });
-  loadAdmin(harness);
-  assert.equal(harness.storage.get('yotm_job_42_prune'), 'retry-token');
-  assert.equal(actionCalls(harness, 'yotm_prune_scan_batch').length, 0);
+test('network and server failures preserve every token for later revalidation', () => {
+  for (const status of [0, 503]) {
+    for (const type of ['prune', 'regenerate', 'recommendation']) {
+      const key = 'yotm_job_42_' + type;
+      const harness = createHarness({
+        storage: {[key]: 'retry-token'},
+        responses: {yotm_job_status: {kind: 'fail', value: {status}}}
+      });
+      loadAdmin(harness);
+      assert.equal(harness.storage.get(key), 'retry-token', type + ' token should survive status ' + status);
+    }
+  }
 });
 
 test('save-and-regenerate schedules one prepare call only when no stored destructive job exists', () => {

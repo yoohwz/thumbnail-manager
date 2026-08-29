@@ -109,6 +109,10 @@
     return request('yotm_job_status', {token: token});
   }
 
+  function isMissingJobStatus(request) {
+    return !!request && parseInt(request.status || 0, 10) === 404;
+  }
+
   function registerWorkflow(type, workflow) {
     if (!workflowTypes.has(type) || !workflow || typeof workflow.resume !== 'function') {
       return;
@@ -717,7 +721,14 @@
         clearPruneJob({keepResults: true});
         setPruneStep(data.status === 'completed' ? 'completed' : 'configure');
       }
-    }).fail(function(){ clearPruneJob({keepResults: true, preserveJob: true}); });
+    }).fail(function(request){
+      if (isMissingJobStatus(request)) {
+        clearPruneJob({keepResults: true});
+        setPruneStep('configure');
+        return;
+      }
+      clearPruneJob({keepResults: true, preserveJob: true});
+    });
   }
 
   $pruneRun.on('click', preparePrune);
@@ -925,7 +936,9 @@
       } else {
         clearRegenJob({keepResults: true});
       }
-    }).fail(function(){ clearRegenJob({keepResults: true, preserveJob: true}); });
+    }).fail(function(request){
+      clearRegenJob({keepResults: true, preserveJob: !isMissingJobStatus(request)});
+    });
   }
 
   $('#yotm_regen_scope').on('change', toggleRegenScopeFields);
@@ -1143,7 +1156,9 @@
       } else {
         clearRecommendation();
       }
-    }).fail(function(){ clearRecommendation({preserveJob: true}); });
+    }).fail(function(request){
+      clearRecommendation({preserveJob: !isMissingJobStatus(request)});
+    });
   }
 
   $recommendRun.on('click', prepareRecommendation);
@@ -1255,6 +1270,7 @@
     formatTemplate: formatTemplate,
     getJobStatus: getJobStatus,
     htmlNotice: htmlNotice,
+    isMissingJobStatus: isMissingJobStatus,
     jobProgress: jobProgress,
     loadRecentJobs: loadRecentJobs,
     recallJob: recallJob,
