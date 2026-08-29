@@ -7,6 +7,7 @@ import {dirname, join, resolve} from 'node:path';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const adminSource = readFileSync(join(root, 'js/admin.js'), 'utf8');
+const pruneSource = readFileSync(join(root, 'js/admin-prune.js'), 'utf8');
 const recommendationsSource = readFileSync(join(root, 'js/admin-recommendations.js'), 'utf8');
 const regenerateSource = readFileSync(join(root, 'js/admin-regenerate.js'), 'utf8');
 const sizesSource = readFileSync(join(root, 'js/admin-sizes.js'), 'utf8');
@@ -144,7 +145,8 @@ function createHarness(options = {}) {
       },
       trigger() { return collection; },
       filter() { return collection; },
-      is() { return false; },
+      is(query) { return query === ':checked' ? !!(elements[0] && elements[0].checked) : false; },
+      hasClass() { return false; },
       closest() { return elements[0] && elements[0].form ? elements[0].form : makeCollection('empty', []); },
       find(query) {
         if (elements[0] && elements[0].finds && elements[0].finds[query]) {
@@ -228,6 +230,7 @@ function createHarness(options = {}) {
 
 function loadAdmin(harness) {
   vm.runInContext(adminSource, harness.context, {filename: 'js/admin.js'});
+  vm.runInContext(pruneSource, harness.context, {filename: 'js/admin-prune.js'});
   vm.runInContext(recommendationsSource, harness.context, {filename: 'js/admin-recommendations.js'});
   vm.runInContext(regenerateSource, harness.context, {filename: 'js/admin-regenerate.js'});
 }
@@ -269,6 +272,9 @@ test('core loads once, exposes a frozen bounded registry, and sends recent-job n
 test('startup waits until Prune, Recommendations, and Regenerate are registered', () => {
   const harness = createHarness();
   vm.runInContext(adminSource, harness.context, {filename: 'js/admin.js'});
+  assert.equal(actionCalls(harness, 'yotm_jobs_recent').length, 0);
+
+  vm.runInContext(pruneSource, harness.context, {filename: 'js/admin-prune.js'});
   assert.equal(actionCalls(harness, 'yotm_jobs_recent').length, 0);
 
   vm.runInContext(recommendationsSource, harness.context, {filename: 'js/admin-recommendations.js'});
@@ -469,6 +475,159 @@ test('late server-discovered destructive jobs suppress delayed save-and-regenera
   }
 });
 
+test('Prune module preserves prepare, manifest review, approval, and delete payloads', () => {
+  const harness = createHarness();
+  loadAdmin(harness);
+  harness.$('input[name="yotm_prune_scope"]:checked').val('all');
+  harness.$('.yotm_keep:checked').elements[0].value = '150x150';
+
+  invokeHandler(harness, '#yotm_run');
+  const prepare = actionCalls(harness, 'yotm_prune_prepare')[0];
+  assert.deepEqual(JSON.parse(JSON.stringify(prepare.payload)), {
+    action: 'yotm_prune_prepare',
+    nonce: 'nonce-123',
+    keep: ['150x150'],
+    limit_subpaths: [],
+    discover_orphans: 0
+  });
+  prepare.deferred.resolve({success: true, data: {token: 'prune-module-token'}});
+
+  assert.equal(harness.storage.get('yotm_job_42_prune'), 'prune-module-token');
+  const scan = actionCalls(harness, 'yotm_prune_scan_batch')[0];
+  assert.deepEqual(scan.payload, {
+    action: 'yotm_prune_scan_batch', nonce: 'nonce-123', token: 'prune-module-token', batch: 100
+  });
+  scan.deferred.resolve({success: true, data: {
+    scan_done: true,
+    scan_percent: 100,
+    scan_processed: 1,
+    scan_total_attachments: 1,
+    total: 1,
+    manifest_hash: 'reviewed-manifest-hash',
+    estimated_bytes: 1024,
+    estimated_bytes_human: '1 KB',
+    scan_base: 'uploads/2026/08',
+    expires_at: '2026-08-29 10:00:00'
+  }});
+
+  assert.deepEqual(actionCalls(harness, 'yotm_job_items')[0].payload, {
+    action: 'yotm_job_items',
+    nonce: 'nonce-123',
+    token: 'prune-module-token',
+    page: 1,
+    per_page: 25,
+    search: ''
+  });
+
+  invokeHandler(harness, '#yotm_approve_delete');
+  assert.equal(actionCalls(harness, 'yotm_prune_approve').length, 0, 'approval requires explicit confirmation');
+  harness.$('#yotm_review_confirm').elements[0].checked = true;
+  invokeHandler(harness, '#yotm_approve_delete');
+  const approve = actionCalls(harness, 'yotm_prune_approve')[0];
+  assert.deepEqual(approve.payload, {
+    action: 'yotm_prune_approve',
+    nonce: 'nonce-123',
+    token: 'prune-module-token',
+    manifest_hash: 'reviewed-manifest-hash',
+    confirmed: 1
+  });
+  approve.deferred.resolve({success: true, data: {status: 'approved'}});
+
+  const deletion = actionCalls(harness, 'yotm_prune_delete_batch')[0];
+  assert.deepEqual(deletion.payload, {
+    action: 'yotm_prune_delete_batch',
+    nonce: 'nonce-123',
+    token: 'prune-module-token',
+    manifest_hash: 'reviewed-manifest-hash',
+    batch: 100
+  });
+  deletion.deferred.resolve({success: true, data: {
+    done: true, processed: 1, percent: 100, deleted: 1, failed: 0, bytes_human: '1 KB', errors: []
+  }});
+  assert.equal(harness.storage.has('yotm_job_42_prune'), false);
+  assert.match(harness.cache.get('#yotm_results').html(), /Done\. Deleted 1 files/);
+});
+
+test('Prune module preserves empty and network-retry state transitions', () => {
+  const empty = createHarness({
+    responses: {
+      yotm_prune_prepare: {kind: 'done', value: {success: true, data: {token: 'prune-empty'}}},
+      yotm_prune_scan_batch: {kind: 'done', value: {success: true, data: {
+        scan_done: true, scan_percent: 100, scan_processed: 0, scan_total_attachments: 0, total: 0
+      }}}
+    }
+  });
+  loadAdmin(empty);
+  empty.$('input[name="yotm_prune_scope"]:checked').val('all');
+  invokeHandler(empty, '#yotm_run');
+  assert.equal(empty.storage.has('yotm_job_42_prune'), false);
+  assert.equal(actionCalls(empty, 'yotm_job_items').length, 0);
+  assert.equal(actionCalls(empty, 'yotm_prune_approve').length, 0);
+  assert.equal(actionCalls(empty, 'yotm_prune_delete_batch').length, 0);
+  assert.match(empty.cache.get('#yotm_results').html(), /No matching thumbnails found/);
+
+  const retry = createHarness({
+    responses: {
+      yotm_prune_prepare: {kind: 'done', value: {success: true, data: {token: 'prune-retry'}}},
+      yotm_prune_scan_batch: {kind: 'fail', value: {status: 0}}
+    }
+  });
+  loadAdmin(retry);
+  retry.$('input[name="yotm_prune_scope"]:checked').val('all');
+  invokeHandler(retry, '#yotm_run');
+  assert.equal(retry.storage.get('yotm_job_42_prune'), 'prune-retry');
+  assert.equal(retry.cache.get('#yotm_run').elements[0].disabled, true);
+  assert.match(retry.cache.get('#yotm_results').html(), /Reload this page to resume it/);
+});
+
+test('Prune module rejects an empty selected scope and forwards only canonical parent subpaths', () => {
+  const emptySelection = createHarness();
+  loadAdmin(emptySelection);
+  emptySelection.$('input[name="yotm_prune_scope"]:checked').val('selected');
+  emptySelection.$('.yotm_subpath_option:checked').elements.splice(0);
+  invokeHandler(emptySelection, '#yotm_run');
+  assert.equal(actionCalls(emptySelection, 'yotm_prune_prepare').length, 0);
+  assert.match(emptySelection.cache.get('#yotm_results').html(), /Choose at least one folder/);
+
+  const selected = createHarness();
+  loadAdmin(selected);
+  selected.$('input[name="yotm_prune_scope"]:checked').val('selected');
+  selected.$('.yotm_subpath_option:checked').elements.splice(
+    0,
+    1,
+    {value: '2026/08'},
+    {value: '2025/01'},
+    {value: '2025'}
+  );
+  invokeHandler(selected, '#yotm_run');
+  assert.deepEqual(
+    Array.from(actionCalls(selected, 'yotm_prune_prepare')[0].payload.limit_subpaths),
+    ['2025', '2026/08']
+  );
+});
+
+test('Prune approved/deleting resume revalidates status before forwarding the persisted manifest hash', () => {
+  for (const status of ['approved', 'deleting']) {
+    const harness = createHarness({storage: {yotm_job_42_prune: 'resume-' + status}});
+    loadAdmin(harness);
+    assert.equal(actionCalls(harness, 'yotm_prune_delete_batch').length, 0, status + ' must wait for status');
+
+    actionCalls(harness, 'yotm_job_status')[0].deferred.resolve({success: true, data: {
+      status,
+      total: 3,
+      processed: 1,
+      manifest_hash: 'persisted-' + status + '-hash'
+    }});
+    assert.deepEqual(actionCalls(harness, 'yotm_prune_delete_batch')[0].payload, {
+      action: 'yotm_prune_delete_batch',
+      nonce: 'nonce-123',
+      token: 'resume-' + status,
+      manifest_hash: 'persisted-' + status + '-hash',
+      batch: 100
+    });
+  }
+});
+
 test('Regenerate module preserves prepare and bounded batch payloads', () => {
   const harness = createHarness();
   loadAdmin(harness);
@@ -621,8 +780,14 @@ test('Recommendations module preserves terminal, empty, and network-retry state 
 });
 
 test('workflow implementation lives only in the approved extracted modules', () => {
+  assert.doesNotMatch(adminSource, /function (?:prepare|resume)Prune\b|yotm_prune_(?:prepare|scan_batch|approve|delete_batch)/);
   assert.doesNotMatch(adminSource, /function (?:prepare|resume)Regenerate\b|yotm_regenerate_(?:prepare|batch)/);
   assert.doesNotMatch(adminSource, /function (?:prepare|resume)Recommendation\b|yotm_recommend_(?:prepare|batch)/);
+  assert.match(pruneSource, /registerWorkflow\('prune'/);
+  assert.match(pruneSource, /request\('yotm_prune_prepare'/);
+  assert.match(pruneSource, /request\('yotm_prune_scan_batch'/);
+  assert.match(pruneSource, /request\('yotm_prune_approve'/);
+  assert.match(pruneSource, /request\('yotm_prune_delete_batch'/);
   assert.match(regenerateSource, /registerWorkflow\('regenerate'/);
   assert.match(regenerateSource, /request\('yotm_regenerate_prepare'/);
   assert.match(regenerateSource, /request\('yotm_regenerate_batch'/);
@@ -633,6 +798,7 @@ test('workflow implementation lives only in the approved extracted modules', () 
 
 test('WordPress assets register and enqueue each workflow module after the localized core', () => {
   for (const [handle, path] of [
+    ['yotm-prune-admin-prune', 'js/admin-prune.js'],
     ['yotm-prune-admin-recommendations', 'js/admin-recommendations.js'],
     ['yotm-prune-admin-regenerate', 'js/admin-regenerate.js'],
     ['yotm-prune-admin-sizes', 'js/admin-sizes.js']
@@ -640,6 +806,7 @@ test('WordPress assets register and enqueue each workflow module after the local
     assert.match(adminPhpSource, new RegExp("'" + handle + "'[\\s\\S]+?" + path.replace('.', '\\.') + "'[\\s\\S]+?array\\( 'yotm-prune-admin' \\)"));
     assert.match(adminPhpSource, new RegExp("wp_enqueue_script\\( '" + handle + "' \\)"));
   }
+  assert.ok(adminPhpSource.indexOf("wp_enqueue_script( 'yotm-prune-admin-prune' )") < adminPhpSource.indexOf("wp_enqueue_script( 'yotm-prune-admin-recommendations' )"));
   assert.ok(adminPhpSource.indexOf("wp_enqueue_script( 'yotm-prune-admin-recommendations' )") < adminPhpSource.indexOf("wp_enqueue_script( 'yotm-prune-admin-regenerate' )"));
   assert.ok(adminPhpSource.indexOf("wp_enqueue_script( 'yotm-prune-admin-regenerate' )") < adminPhpSource.indexOf("wp_enqueue_script( 'yotm-prune-admin-sizes' )"));
 });
@@ -666,7 +833,7 @@ test('sizes module registers moved handlers against the shared core', () => {
 });
 
 test('all localized keys consumed by bundled admin modules are discovered in PHP', () => {
-  const combined = [adminSource, recommendationsSource, regenerateSource, sizesSource].join('\n');
+  const combined = [adminSource, pruneSource, recommendationsSource, regenerateSource, sizesSource].join('\n');
   const jsKeys = new Set(
     [...combined.matchAll(/\bt\(\s*'([^']+)'/g)].map((match) => match[1])
   );
@@ -678,7 +845,7 @@ test('all localized keys consumed by bundled admin modules are discovered in PHP
 });
 
 test('admin modules retain the established AJAX action and storage contracts', () => {
-  const combined = [adminSource, recommendationsSource, regenerateSource, sizesSource].join('\n');
+  const combined = [adminSource, pruneSource, recommendationsSource, regenerateSource, sizesSource].join('\n');
   const actions = new Set([
     ...combined.matchAll(/action:\s*'(yotm_[^']+)'/g),
     ...combined.matchAll(/request\('(yotm_[^']+)'/g)
