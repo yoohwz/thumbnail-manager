@@ -223,6 +223,12 @@ function actionCalls(harness, action) {
   return harness.posts.filter((post) => post.payload.action === action);
 }
 
+function invokeHandler(harness, selector, event = 'click') {
+  const handler = harness.handlers.find((item) => item.selector === selector && item.event === event && !item.delegatedSelector);
+  assert.ok(handler, 'missing ' + event + ' handler for ' + selector);
+  handler.callback.call({});
+}
+
 test('core loads once, exposes a frozen bounded registry, and sends recent-job nonce', () => {
   const harness = createHarness();
   loadAdmin(harness);
@@ -314,6 +320,74 @@ test('network and server failures preserve every token for later revalidation', 
       });
       loadAdmin(harness);
       assert.equal(harness.storage.get(key), 'retry-token', type + ' token should survive status ' + status);
+    }
+  }
+});
+
+test('late status callbacks cannot mutate a replacement workflow token', () => {
+  const cases = [
+    {type: 'prune', cancel: '#yotm_cancel', batch: ['yotm_prune_scan_batch'], status: {success: true, data: {status: 'scanning', total: 10}}},
+    {type: 'regenerate', cancel: '#yotm_regen_cancel', batch: ['yotm_regenerate_batch'], status: {success: true, data: {status: 'running'}}},
+    {type: 'recommendation', cancel: '#yotm_recommend_cancel', batch: ['yotm_recommend_batch'], status: {success: true, data: {status: 'scanning'}}}
+  ];
+
+  for (const item of cases) {
+    for (const lateOutcome of ['404', 'success']) {
+      const key = 'yotm_job_42_' + item.type;
+      const harness = createHarness({
+        storage: {[key]: 'token-a'},
+        responses: {yotm_job_cancel: {kind: 'done', value: {success: true}}}
+      });
+      loadAdmin(harness);
+      const statusA = actionCalls(harness, 'yotm_job_status')[0];
+
+      invokeHandler(harness, item.cancel);
+      actionCalls(harness, 'yotm_jobs_recent').at(-1).deferred.resolve({
+        success: true,
+        data: {jobs: [{type: item.type, token: 'token-b', status: item.type === 'regenerate' ? 'running' : 'scanning'}]}
+      });
+      assert.equal(harness.storage.get(key), 'token-b');
+
+      if (lateOutcome === '404') {
+        statusA.deferred.reject({status: 404});
+      } else {
+        statusA.deferred.resolve(item.status);
+      }
+      assert.equal(harness.storage.get(key), 'token-b', item.type + ' late ' + lateOutcome);
+      item.batch.forEach((action) => assert.equal(actionCalls(harness, action).length, 0, item.type + ' late ' + lateOutcome));
+    }
+  }
+});
+
+test('late cancel callbacks cannot mutate a replacement workflow token', () => {
+  const cases = [
+    {type: 'prune', cancel: '#yotm_cancel'},
+    {type: 'regenerate', cancel: '#yotm_regen_cancel'},
+    {type: 'recommendation', cancel: '#yotm_recommend_cancel'}
+  ];
+
+  for (const item of cases) {
+    for (const lateOutcome of ['done', 'fail']) {
+      const key = 'yotm_job_42_' + item.type;
+      const harness = createHarness({storage: {[key]: 'token-a'}});
+      loadAdmin(harness);
+      const statusA = actionCalls(harness, 'yotm_job_status')[0];
+
+      invokeHandler(harness, item.cancel);
+      const cancelA = actionCalls(harness, 'yotm_job_cancel')[0];
+      statusA.deferred.reject({status: 404});
+      actionCalls(harness, 'yotm_jobs_recent')[0].deferred.resolve({
+        success: true,
+        data: {jobs: [{type: item.type, token: 'token-b', status: item.type === 'regenerate' ? 'running' : 'scanning'}]}
+      });
+      assert.equal(harness.storage.get(key), 'token-b');
+
+      if (lateOutcome === 'done') {
+        cancelA.deferred.resolve({success: true});
+      } else {
+        cancelA.deferred.reject({status: 500});
+      }
+      assert.equal(harness.storage.get(key), 'token-b', item.type + ' late cancel ' + lateOutcome);
     }
   }
 });

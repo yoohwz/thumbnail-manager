@@ -698,6 +698,9 @@
     $pruneCancel.removeClass('yo-hidden');
     $pruneResults.html(htmlNotice('notice-info', t('resumeAvailable', 'An unfinished job was found. Resuming it now…')));
     getJobStatus(token).done(function(response){
+      if (pruneToken !== token) {
+        return;
+      }
       if (!response || !response.success || !response.data) {
         clearPruneJob({keepResults: true});
         setPruneStep('configure');
@@ -722,6 +725,9 @@
         setPruneStep(data.status === 'completed' ? 'completed' : 'configure');
       }
     }).fail(function(request){
+      if (pruneToken !== token) {
+        return;
+      }
       if (isMissingJobStatus(request)) {
         clearPruneJob({keepResults: true});
         setPruneStep('configure');
@@ -743,12 +749,18 @@
     $pruneCancel.prop('disabled', true);
     $pruneStat.show().text(t('stopping', 'Stopping after the current batch…'));
     cancelJob(token).done(function(){
+      if (pruneToken !== token) {
+        return;
+      }
       $pruneResults.prepend(htmlNotice('notice-warning', t('jobStopped', 'Job stopped. Completed work was not rolled back, and the audit record was retained.')));
       clearPruneJob({keepResults: true});
       setPruneStep('configure');
       $pruneResults.trigger('focus');
       loadRecentJobs();
     }).fail(function(){
+      if (pruneToken !== token) {
+        return;
+      }
       pruneRunning = true;
       $pruneCancel.prop('disabled', false);
       $pruneResults.prepend(htmlNotice('notice-error', t('unknownError', 'Unknown error')));
@@ -927,6 +939,9 @@
     $regenCancel.removeClass('yo-hidden');
     $regenResults.html(htmlNotice('notice-info', t('resumeAvailable', 'An unfinished job was found. Resuming it now…')));
     getJobStatus(token).done(function(response){
+      if (regenToken !== token) {
+        return;
+      }
       if (response && response.success && response.data && response.data.status === 'running') {
         const context = response.data.context || {};
         if (response.data.total_known === false || (context.selector === 'attached_meta_v2' && !context.selection_done)) {
@@ -937,6 +952,9 @@
         clearRegenJob({keepResults: true});
       }
     }).fail(function(request){
+      if (regenToken !== token) {
+        return;
+      }
       clearRegenJob({keepResults: true, preserveJob: !isMissingJobStatus(request)});
     });
   }
@@ -954,11 +972,20 @@
     $regenCancel.prop('disabled', true);
     $regenStat.show().text(t('stopping', 'Stopping after the current batch…'));
     cancelJob(token).done(function(){
+      if (regenToken !== token) {
+        return;
+      }
       $regenResults.prepend(htmlNotice('notice-warning', t('jobStopped', 'Job stopped. Completed work was not rolled back, and the audit record was retained.')));
       clearRegenJob({keepResults: true});
       $regenResults.trigger('focus');
       loadRecentJobs();
-    }).fail(function(){ regenRunning = true; $regenCancel.prop('disabled', false); });
+    }).fail(function(){
+      if (regenToken !== token) {
+        return;
+      }
+      regenRunning = true;
+      $regenCancel.prop('disabled', false);
+    });
   });
 
   // Batched recommendation jobs.
@@ -1146,6 +1173,9 @@
     $recommendRun.prop('disabled', true);
     $recommendCancel.removeClass('yo-hidden');
     getJobStatus(token).done(function(response){
+      if (recommendToken !== token) {
+        return;
+      }
       if (!response || !response.success || !response.data) {
         clearRecommendation();
       } else if (response.data.status === 'completed' && response.data.context && response.data.context.result) {
@@ -1157,6 +1187,9 @@
         clearRecommendation();
       }
     }).fail(function(request){
+      if (recommendToken !== token) {
+        return;
+      }
       clearRecommendation({preserveJob: !isMissingJobStatus(request)});
     });
   }
@@ -1172,11 +1205,20 @@
     $recommendCancel.prop('disabled', true);
     $recommendStat.show().text(t('stopping', 'Stopping after the current batch…'));
     cancelJob(token).done(function(){
+      if (recommendToken !== token) {
+        return;
+      }
       $recommendResults.prepend(htmlNotice('notice-warning', t('jobStopped', 'Job stopped. Completed work was not rolled back, and the audit record was retained.')));
       clearRecommendation();
       $recommendResults.trigger('focus');
       loadRecentJobs();
-    }).fail(function(){ recommendRunning = true; $recommendCancel.prop('disabled', false); });
+    }).fail(function(){
+      if (recommendToken !== token) {
+        return;
+      }
+      recommendRunning = true;
+      $recommendCancel.prop('disabled', false);
+    });
   });
 
   $('#yotm_apply_recommendations').on('click', function(){
