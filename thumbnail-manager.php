@@ -51,6 +51,7 @@ class Yo_Thumbnail_Manager {
 		include_once plugin_dir_path( __FILE__ ) . 'inc/sizes-patterns.php';
 		include_once plugin_dir_path( __FILE__ ) . 'inc/upload-subpaths.php';
 		include_once plugin_dir_path( __FILE__ ) . 'inc/media-source-index.php';
+		include_once plugin_dir_path( __FILE__ ) . 'inc/media/prune.php';
 		include_once plugin_dir_path( __FILE__ ) . 'inc/admin-menu.php';
 		include_once plugin_dir_path( __FILE__ ) . 'inc/regenerate-transaction.php';
 		include_once plugin_dir_path( __FILE__ ) . 'inc/handle-regenerate.php';

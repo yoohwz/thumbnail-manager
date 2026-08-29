@@ -79,6 +79,46 @@ class YOTM_Prune_Safety_Test extends WP_UnitTestCase {
 		}
 	}
 
+	public function test_prune_media_primitives_have_one_media_owner_without_jobs_or_transport_calls() {
+		$root         = dirname( __DIR__, 2 );
+		$media_module = wp_normalize_path( $root . '/inc/media/prune.php' );
+		$functions    = array(
+			'yotm_prune_normalize_candidate_evidence',
+			'yotm_initial_orphan_summary',
+			'yotm_add_prune_candidate',
+			'yotm_collect_metadata_prune_candidates_for_ids',
+			'yotm_dimension_from_size_data',
+			'yotm_dimension_matches_keep',
+			'yotm_get_thumbnail_file_variants',
+			'yotm_prune_validate_delete_meta',
+			'yotm_delete_file_and_count',
+			'yotm_prune_journal_lexical_path',
+			'yotm_prune_journal_node_fingerprint',
+			'yotm_prune_journal_path_state',
+			'yotm_prune_validate_live_reference_evidence',
+			'yotm_validate_prune_item_ownership',
+			'yotm_delete_prune_item',
+			'yotm_reconcile_prune_item_metadata',
+			'yotm_delete_file_with_result',
+			'yotm_remove_attachment_size_metadata',
+		);
+
+		foreach ( $functions as $function ) {
+			$reflection = new ReflectionFunction( $function );
+			$this->assertSame( $media_module, wp_normalize_path( $reflection->getFileName() ), $function );
+		}
+
+		$source = file_get_contents( $media_module );
+		$this->assertIsString( $source );
+		$this->assertDoesNotMatchRegularExpression( '/\byotm_job_/', $source );
+		$this->assertDoesNotMatchRegularExpression( '/\$_POST|\bwp_send_json_/', $source );
+
+		$delete_coordinator = new ReflectionFunction( 'yotm_delete_prune_item_recoverable' );
+		$scan_coordinator   = new ReflectionFunction( 'yotm_prune_source_index_batch' );
+		$this->assertStringEndsWith( '/inc/handle-delete.php', wp_normalize_path( $delete_coordinator->getFileName() ) );
+		$this->assertStringEndsWith( '/inc/handle-prune.php', wp_normalize_path( $scan_coordinator->getFileName() ) );
+	}
+
 	public function test_path_outside_uploads_cannot_be_deleted() {
 		$outside       = trailingslashit( sys_get_temp_dir() ) . 'yotm-outside-' . wp_generate_uuid4() . '.jpg';
 		$this->files[] = $outside;
