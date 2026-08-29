@@ -361,9 +361,9 @@ test('late status callbacks cannot mutate a replacement workflow token', () => {
 
 test('late cancel callbacks cannot mutate a replacement workflow token', () => {
   const cases = [
-    {type: 'prune', cancel: '#yotm_cancel'},
-    {type: 'regenerate', cancel: '#yotm_regen_cancel'},
-    {type: 'recommendation', cancel: '#yotm_recommend_cancel'}
+    {type: 'prune', cancel: '#yotm_cancel', run: '#yotm_run', prepare: 'yotm_prune_prepare'},
+    {type: 'regenerate', cancel: '#yotm_regen_cancel', run: '#yotm_regen_run', prepare: 'yotm_regenerate_prepare'},
+    {type: 'recommendation', cancel: '#yotm_recommend_cancel', run: '#yotm_recommend_scan', prepare: 'yotm_recommend_prepare'}
   ];
 
   for (const item of cases) {
@@ -384,10 +384,14 @@ test('late cancel callbacks cannot mutate a replacement workflow token', () => {
 
       if (lateOutcome === 'done') {
         cancelA.deferred.resolve({success: true});
+        assert.equal(harness.storage.get(key), 'token-b', item.type + ' late cancel done');
       } else {
+        actionCalls(harness, 'yotm_job_status').at(-1).deferred.reject({status: 404});
+        assert.equal(harness.storage.has(key), false, item.type + ' replacement should reach terminal state');
         cancelA.deferred.reject({status: 500});
+        invokeHandler(harness, item.run);
+        assert.equal(actionCalls(harness, item.prepare).length, 1, item.type + ' late cancel fail must not block a new run');
       }
-      assert.equal(harness.storage.get(key), 'token-b', item.type + ' late cancel ' + lateOutcome);
     }
   }
 });
