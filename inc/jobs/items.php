@@ -437,7 +437,8 @@ function yotm_job_worker_add_item( $worker, $item_key, $payload, $status, $bytes
 	$tables   = yotm_job_table_names();
 	$now      = gmdate( 'Y-m-d H:i:s' );
 	$item_key = preg_match( '/^[a-f0-9]{64}$/', (string) $item_key ) ? (string) $item_key : hash( 'sha256', (string) $item_key );
-	// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Plugin-owned table names and an INSERT...SELECT statement; every value uses an exact placeholder.
+	// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Plugin-owned table names; every value uses an exact placeholder.
+	// phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- The static analyzer miscounts placeholders across this INSERT...SELECT statement.
 	$sql = $wpdb->prepare(
 		"INSERT IGNORE INTO {$tables['items']}
 		(job_id,item_key,status,payload,error,bytes,created_at,updated_at)
@@ -457,7 +458,7 @@ function yotm_job_worker_add_item( $worker, $item_key, $payload, $status, $bytes
 		absint( $worker['generation'] ?? 0 ),
 		$now
 	);
-	// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
+	// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 
 	// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Exact state-fenced insert prepared above.
 	return 1 === $wpdb->query( $sql );
