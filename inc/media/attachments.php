@@ -9,6 +9,8 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
+require_once dirname( __DIR__ ) . '/infrastructure/database.php';
+
 // Exact raw metadata reads require uncached row queries and generated placeholder lists.
 // phpcs:disable WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare,WordPress.DB.SlowDBQuery.slow_db_query_meta_key,WordPress.DB.SlowDBQuery.slow_db_query_meta_value,WordPress.WP.GetMetaSingle.Missing
 
@@ -198,7 +200,7 @@ function yotm_media_reference_raw_postmeta_rows( $attachment_id, $meta_key ) {
 		ARRAY_A
 	);
 	if ( '' !== (string) $wpdb->last_error || ! is_array( $stored ) ) {
-		return yotm_job_storage_error( 'yotm_job_storage_unavailable', (string) $wpdb->last_error );
+		return yotm_database_storage_error( 'yotm_job_storage_unavailable', (string) $wpdb->last_error );
 	}
 
 	$rows = array();
@@ -248,7 +250,7 @@ function yotm_media_reference_raw_postmeta_rows_batch( $attachment_ids, $meta_ke
 		ARRAY_A
 	);
 	if ( '' !== (string) $wpdb->last_error || ! is_array( $stored ) ) {
-		return yotm_job_storage_error( 'yotm_job_storage_unavailable', (string) $wpdb->last_error );
+		return yotm_database_storage_error( 'yotm_job_storage_unavailable', (string) $wpdb->last_error );
 	}
 
 	$grouped = array();
@@ -293,7 +295,7 @@ function yotm_media_reference_is_image_attachment( $attachment_id ) {
 	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Guard applicability must use the exact unfiltered post row.
 	$post = $attachment_id ? $wpdb->get_row( $wpdb->prepare( "SELECT post_type,post_mime_type FROM {$wpdb->posts} WHERE ID = %d", $attachment_id ), ARRAY_A ) : null;
 	if ( '' !== (string) $wpdb->last_error ) {
-		return yotm_job_storage_error( 'yotm_job_storage_unavailable', (string) $wpdb->last_error );
+		return yotm_database_storage_error( 'yotm_job_storage_unavailable', (string) $wpdb->last_error );
 	}
 	if ( ! is_array( $post ) || 'attachment' !== (string) ( $post['post_type'] ?? '' ) ) {
 		return false;

@@ -110,6 +110,39 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 		$this->assertSame( $registered_module, wp_normalize_path( $reflection->getFileName() ) );
 	}
 
+	public function test_source_store_and_mutation_locks_have_media_owners_without_jobs_runtime_calls() {
+		$root         = dirname( __DIR__, 2 );
+		$store_module = wp_normalize_path( $root . '/inc/media/source-store.php' );
+		$locks_module = wp_normalize_path( $root . '/inc/media/source-locks.php' );
+
+		foreach ( array( 'yotm_media_source_table_name', 'yotm_media_source_upsert_aliases', 'yotm_media_source_replace_attachment' ) as $function ) {
+			$reflection = new ReflectionFunction( $function );
+			$this->assertSame( $store_module, wp_normalize_path( $reflection->getFileName() ), $function );
+		}
+
+		foreach ( array( 'yotm_media_source_fence_acquire', 'yotm_media_attachment_lock_acquire', 'yotm_media_path_lock_acquire' ) as $function ) {
+			$reflection = new ReflectionFunction( $function );
+			$this->assertSame( $locks_module, wp_normalize_path( $reflection->getFileName() ), $function );
+		}
+
+		foreach ( array( 'attachments.php', 'source-store.php', 'source-locks.php' ) as $file ) {
+			$source = file_get_contents( $root . '/inc/media/' . $file );
+			$this->assertIsString( $source );
+			$this->assertDoesNotMatchRegularExpression(
+				'/\byotm_job_(?:table_names|storage_error|acquire_named_lock|release_named_lock)\b/',
+				$source,
+				$file
+			);
+		}
+
+		$index_source = file_get_contents( $root . '/inc/media-source-index.php' );
+		$this->assertIsString( $index_source );
+		$this->assertDoesNotMatchRegularExpression(
+			'/\byotm_job_(?:table_names|storage_error|acquire_named_lock|release_named_lock)\b/',
+			$index_source
+		);
+	}
+
 	public function test_only_exact_metadata_file_becomes_a_candidate() {
 		$fixture = $this->create_attachment_with_thumbnail( 'exact.jpg', 'exact-150x150.webp', 'image/webp' );
 		$sidecar = $fixture['thumbnail'] . '.avif';
@@ -880,7 +913,7 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 		$fixture = $this->create_attachment_with_thumbnail( 'delete-complete.jpg', 'delete-complete-150x150.jpg' );
 		$this->assertTrue( yotm_media_source_sync_attachment( $fixture['attachment_id'] ) );
 		global $wpdb;
-		$table = yotm_job_table_names()['sources'];
+		$table = yotm_media_source_table_name();
 		$this->assertGreaterThan(
 			0,
 			// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Test inspects plugin-owned source rows directly.
@@ -998,7 +1031,7 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 		$lock_names            = array_keys( $GLOBALS['yotm_media_path_locks'] );
 		$attachment_lock_names = array_keys( $GLOBALS['yotm_media_attachment_locks'] );
 		global $wpdb;
-		$table = yotm_job_table_names()['sources'];
+		$table = yotm_media_source_table_name();
 		$hash  = hash( 'sha256', yotm_media_source_canonical_path( $fixture['thumbnail'] ) );
 		$this->assertGreaterThan(
 			0,
@@ -1085,7 +1118,7 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 		$this->assertGreaterThanOrEqual( 2, $calls );
 		$this->assertSame( $this->relative_path( $raw ), get_post_meta( $other_id, '_wp_attached_file', true ) );
 		$this->assertWPError( $GLOBALS['yotm_media_source_last_error'] );
-		$table = yotm_job_table_names()['sources'];
+		$table = yotm_media_source_table_name();
 		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- A conservative pre-write positive may remain, but the unresolved mutation must stay dirty.
 		$this->assertGreaterThanOrEqual( 1, (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$table} WHERE path_hash = %s", $this->failed_source_hash ) ) );
 		$this->assertNotEmpty( yotm_media_source_dirty_state()['entries'] );
@@ -1339,16 +1372,16 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 	}
 
 	public function force_source_upsert_failure( $query ) {
-		return false !== strpos( $query, 'INSERT INTO ' . yotm_job_table_names()['sources'] ) ? 'SELECT * FROM yotm_missing_source_table' : $query;
+		return false !== strpos( $query, 'INSERT INTO ' . yotm_media_source_table_name() ) ? 'SELECT * FROM yotm_missing_source_table' : $query;
 	}
 
 	public function force_source_resync_failure( $query ) {
-		return false !== strpos( $query, 'SELECT id,source_kind,path_hash FROM ' . yotm_job_table_names()['sources'] ) ? 'SELECT * FROM yotm_missing_source_table' : $query;
+		return false !== strpos( $query, 'SELECT id,source_kind,path_hash FROM ' . yotm_media_source_table_name() ) ? 'SELECT * FROM yotm_missing_source_table' : $query;
 	}
 
 	public function force_filtered_source_upsert_failure( $query ) {
 		return '' !== $this->failed_source_hash
-			&& false !== strpos( $query, 'INSERT INTO ' . yotm_job_table_names()['sources'] )
+			&& false !== strpos( $query, 'INSERT INTO ' . yotm_media_source_table_name() )
 			&& false !== strpos( $query, $this->failed_source_hash )
 			? 'SELECT * FROM yotm_missing_source_table'
 			: $query;

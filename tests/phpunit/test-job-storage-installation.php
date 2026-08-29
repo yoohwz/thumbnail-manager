@@ -70,6 +70,27 @@ class YOTM_Job_Storage_Installation_Test extends WP_UnitTestCase {
 		$this->assertSame( 10, has_action( 'yotm_cleanup_jobs', 'yotm_cleanup_expired_jobs' ) );
 	}
 
+	public function test_database_and_source_table_ownership_preserve_installation_compatibility() {
+		$root           = dirname( __DIR__, 2 );
+		$database       = new ReflectionFunction( 'yotm_database_acquire_named_lock' );
+		$job_lock       = new ReflectionFunction( 'yotm_job_acquire_named_lock' );
+		$source_table   = new ReflectionFunction( 'yotm_media_source_table_name' );
+		$source_replace = new ReflectionFunction( 'yotm_media_source_replace_attachment' );
+
+		$this->assertSame( wp_normalize_path( $root . '/inc/infrastructure/database.php' ), wp_normalize_path( $database->getFileName() ) );
+		$this->assertSame( wp_normalize_path( $root . '/inc/jobs/engine.php' ), wp_normalize_path( $job_lock->getFileName() ) );
+		$this->assertSame( wp_normalize_path( $root . '/inc/media/source-store.php' ), wp_normalize_path( $source_table->getFileName() ) );
+		$this->assertSame( wp_normalize_path( $root . '/inc/media/source-store.php' ), wp_normalize_path( $source_replace->getFileName() ) );
+		$this->assertSame( yotm_job_table_names()['sources'], yotm_media_source_table_name() );
+		$this->assertSame( YOTM_JOB_DB_VERSION, get_option( 'yotm_job_db_version' ) );
+
+		$job_error      = yotm_job_storage_error( 'yotm_job_storage_unavailable', 'compatibility-fixture' );
+		$database_error = yotm_database_storage_error( 'yotm_job_storage_unavailable', 'compatibility-fixture' );
+		$this->assertSame( $job_error->get_error_code(), $database_error->get_error_code() );
+		$this->assertSame( $job_error->get_error_message(), $database_error->get_error_message() );
+		$this->assertSame( $job_error->get_error_data(), $database_error->get_error_data() );
+	}
+
 	public function test_extracted_job_layers_do_not_depend_on_transport_or_feature_projection() {
 		$job_directory = dirname( __DIR__, 2 ) . '/inc/jobs/';
 

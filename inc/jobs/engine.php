@@ -115,23 +115,7 @@ function yotm_job_worker_lock_name( $job_id ) {
  * @return bool|WP_Error True when acquired, false for contention, or a persistence error.
  */
 function yotm_job_acquire_named_lock( $lock_name ) {
-	global $wpdb;
-
-	$sql = $wpdb->prepare( 'SELECT GET_LOCK(%s, 0)', sanitize_text_field( $lock_name ) );
-
-	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared -- Advisory locks are connection state and cannot use the object cache.
-	$result      = $wpdb->get_var( $sql );
-	$query_error = yotm_job_last_database_error();
-
-	if ( is_wp_error( $query_error ) ) {
-		return $query_error;
-	}
-
-	if ( null === $result || ! in_array( (string) $result, array( '0', '1' ), true ) ) {
-		return yotm_job_storage_error();
-	}
-
-	return '1' === (string) $result;
+	return yotm_database_acquire_named_lock( $lock_name );
 }
 
 /**
@@ -141,12 +125,7 @@ function yotm_job_acquire_named_lock( $lock_name ) {
  * @return bool
  */
 function yotm_job_release_named_lock( $lock_name ) {
-	global $wpdb;
-
-	$sql = $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', sanitize_text_field( $lock_name ) );
-
-	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared -- Advisory locks are connection state and cannot use the object cache.
-	return 1 === (int) $wpdb->get_var( $sql );
+	return yotm_database_release_named_lock( $lock_name );
 }
 
 /**

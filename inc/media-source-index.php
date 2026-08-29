@@ -11,6 +11,8 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 require_once __DIR__ . '/media/paths.php';
 require_once __DIR__ . '/media/attachments.php';
+require_once __DIR__ . '/media/source-store.php';
+require_once __DIR__ . '/media/source-locks.php';
 
 // Exact raw metadata fencing requires uncached row queries and generated placeholder lists.
 // phpcs:disable WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare,WordPress.DB.SlowDBQuery.slow_db_query_meta_key,WordPress.DB.SlowDBQuery.slow_db_query_meta_value,WordPress.WP.GetMetaSingle.Missing
@@ -585,81 +587,6 @@ function yotm_media_source_filter_proposed_original( $attachment_id, $filtered_f
 }
 
 /**
- * Insert conservative positive source rows.
- *
- * @param array[] $aliases Source aliases.
- * @return true|WP_Error
- */
-function yotm_media_source_upsert_aliases( $aliases ) {
-	global $wpdb;
-
-	$table = yotm_job_table_names()['sources'];
-	$now   = gmdate( 'Y-m-d H:i:s' );
-
-	foreach ( (array) $aliases as $alias ) {
-		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Plugin-owned table name is derived from the trusted WordPress prefix; values use placeholders.
-		$sql = $wpdb->prepare(
-			// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Plugin-owned table name is trusted; values use placeholders.
-			"INSERT INTO {$table} (attachment_id,source_kind,path_hash,path,updated_at)
-			VALUES (%d,%s,%s,%s,%s)
-			ON DUPLICATE KEY UPDATE path = VALUES(path), updated_at = VALUES(updated_at)",
-			absint( $alias['attachment_id'] ?? 0 ),
-			sanitize_key( $alias['source_kind'] ?? '' ),
-			(string) ( $alias['path_hash'] ?? '' ),
-			(string) ( $alias['path'] ?? '' ),
-			$now
-		);
-		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Source fencing requires an immediate uncached upsert; prepared above.
-		if ( false === $wpdb->query( $sql ) ) {
-			return yotm_job_storage_error( 'yotm_job_storage_unavailable', (string) $wpdb->last_error );
-		}
-	}
-
-	return true;
-}
-
-/**
- * Replace one attachment's index after positive aliases are durable.
- *
- * @param int     $attachment_id Attachment ID.
- * @param array[] $aliases Live aliases.
- * @return true|WP_Error
- */
-function yotm_media_source_replace_attachment( $attachment_id, $aliases ) {
-	global $wpdb;
-
-	$attachment_id = absint( $attachment_id );
-	$upserted      = yotm_media_source_upsert_aliases( $aliases );
-	if ( is_wp_error( $upserted ) ) {
-		return $upserted;
-	}
-
-	$table = yotm_job_table_names()['sources'];
-	$keep  = array();
-	foreach ( $aliases as $alias ) {
-		$keep[] = sanitize_key( $alias['source_kind'] ?? '' ) . ':' . (string) ( $alias['path_hash'] ?? '' );
-	}
-
-	// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Plugin-owned table name is trusted; values use placeholders and current rows must be uncached.
-	$rows = $wpdb->get_results( $wpdb->prepare( "SELECT id,source_kind,path_hash FROM {$table} WHERE attachment_id = %d", $attachment_id ) );
-	if ( '' !== (string) $wpdb->last_error ) {
-		return yotm_job_storage_error( 'yotm_job_storage_unavailable', (string) $wpdb->last_error );
-	}
-
-	foreach ( $rows as $row ) {
-		if ( in_array( $row->source_kind . ':' . $row->path_hash, $keep, true ) ) {
-			continue;
-		}
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Plugin-owned source-index row.
-		if ( false === $wpdb->delete( $table, array( 'id' => (int) $row->id ), array( '%d' ) ) ) {
-			return yotm_job_storage_error( 'yotm_job_storage_unavailable', (string) $wpdb->last_error );
-		}
-	}
-
-	return true;
-}
-
-/**
  * Synchronize one image attachment from live source metadata.
  *
  * @param int           $attachment_id Attachment ID.
@@ -719,8 +646,6 @@ function yotm_media_source_clear_index() {
  * @return array|WP_Error Building state.
  */
 function yotm_media_reference_baseline_begin( $token = '' ) {
-	global $wpdb;
-
 	$source_fence = yotm_media_source_fence_acquire();
 	if ( is_wp_error( $source_fence ) ) {
 		return $source_fence;
@@ -738,12 +663,9 @@ function yotm_media_reference_baseline_begin( $token = '' ) {
 		if ( is_wp_error( $persisted ) ) {
 			return $persisted;
 		}
-		$table = yotm_job_table_names()['sources'];
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Site-specific plugin table is intentionally rebuilt before a prune baseline.
-		$result = $wpdb->query( "DELETE FROM {$table}" );
-
-		if ( false === $result ) {
-			return yotm_job_storage_error( 'yotm_job_storage_unavailable', (string) $wpdb->last_error );
+		$cleared = yotm_media_source_store_clear();
+		if ( is_wp_error( $cleared ) ) {
+			return $cleared;
 		}
 
 		return yotm_media_reference_index_state();
@@ -790,266 +712,6 @@ function yotm_media_reference_baseline_complete( $token ) {
 	} finally {
 		yotm_media_source_fence_release( $source_fence );
 	}//end try
-}
-
-/**
- * Return a site-scoped named lock for a canonical media path.
- *
- * @param string $canonical_path Canonical path.
- * @return string
- */
-function yotm_media_path_lock_name( $canonical_path ) {
-	global $wpdb;
-
-	$database = defined( 'DB_NAME' ) ? DB_NAME : 'WordPress';
-	$scope    = $database . '|' . $wpdb->prefix . '|' . get_current_blog_id() . '|' . hash( 'sha256', (string) $canonical_path );
-
-	return 'yotm_media_' . md5( $scope );
-}
-
-/**
- * Return the site-scoped source-mutation/delete fence name.
- *
- * @return string
- */
-function yotm_media_source_fence_lock_name() {
-	global $wpdb;
-
-	$database = defined( 'DB_NAME' ) ? DB_NAME : 'WordPress';
-	$scope    = $database . '|' . $wpdb->prefix . '|' . get_current_blog_id();
-
-	return 'yotm_source_fence_' . md5( $scope );
-}
-
-/**
- * Acquire the re-entrant site-wide source-mutation/delete fence.
- *
- * @return array|WP_Error
- */
-function yotm_media_source_fence_acquire() {
-	$name = yotm_media_source_fence_lock_name();
-	if ( ! isset( $GLOBALS['yotm_media_source_fence_locks'] ) || ! is_array( $GLOBALS['yotm_media_source_fence_locks'] ) ) {
-		$GLOBALS['yotm_media_source_fence_locks'] = array();
-		register_shutdown_function( 'yotm_media_source_shutdown_cleanup' );
-	}
-
-	if ( isset( $GLOBALS['yotm_media_source_fence_locks'][ $name ] ) ) {
-		++$GLOBALS['yotm_media_source_fence_locks'][ $name ]['refs'];
-		return array( 'name' => $name );
-	}
-
-	$acquired = yotm_job_acquire_named_lock( $name );
-	if ( is_wp_error( $acquired ) ) {
-		return new WP_Error( 'yotm_media_source_fence_failed', $acquired->get_error_message(), $acquired->get_error_data() );
-	}
-	if ( ! $acquired ) {
-		return new WP_Error( 'yotm_media_source_fence_busy', __( 'Media sources are being changed by another request. Retrying shortly.', 'thumbnail-manager' ) );
-	}
-
-	$GLOBALS['yotm_media_source_fence_locks'][ $name ] = array(
-		'name' => $name,
-		'refs' => 1,
-	);
-
-	return array( 'name' => $name );
-}
-
-/**
- * Release one request-local site-wide source fence reference.
- *
- * @param array $handle Lock handle.
- * @return void
- */
-function yotm_media_source_fence_release( $handle ) {
-	$name = (string) ( $handle['name'] ?? '' );
-	if ( '' === $name || empty( $GLOBALS['yotm_media_source_fence_locks'][ $name ] ) ) {
-		return;
-	}
-
-	--$GLOBALS['yotm_media_source_fence_locks'][ $name ]['refs'];
-	if ( $GLOBALS['yotm_media_source_fence_locks'][ $name ]['refs'] <= 0 ) {
-		yotm_job_release_named_lock( $name );
-		unset( $GLOBALS['yotm_media_source_fence_locks'][ $name ] );
-	}
-}
-
-/**
- * Return a site-scoped named lock for one attachment source state.
- *
- * Lock ordering is job worker, site-wide source fence, attachment source state,
- * then sorted media paths. Delete workers use worker, source fence, then path.
- *
- * @param int $attachment_id Attachment ID.
- * @return string
- */
-function yotm_media_attachment_lock_name( $attachment_id ) {
-	global $wpdb;
-
-	$database = defined( 'DB_NAME' ) ? DB_NAME : 'WordPress';
-	$scope    = $database . '|' . $wpdb->prefix . '|' . get_current_blog_id() . '|' . absint( $attachment_id );
-
-	return 'yotm_source_' . md5( $scope );
-}
-
-/**
- * Acquire one re-entrant request-local attachment source-state lock.
- *
- * @param int $attachment_id Attachment ID.
- * @return array|WP_Error
- */
-function yotm_media_attachment_lock_acquire( $attachment_id ) {
-	$attachment_id = absint( $attachment_id );
-	if ( ! $attachment_id ) {
-		return new WP_Error( 'yotm_media_attachment_invalid', __( 'Attachment source state could not be locked.', 'thumbnail-manager' ) );
-	}
-
-	$name = yotm_media_attachment_lock_name( $attachment_id );
-	if ( ! isset( $GLOBALS['yotm_media_attachment_locks'] ) || ! is_array( $GLOBALS['yotm_media_attachment_locks'] ) ) {
-		$GLOBALS['yotm_media_attachment_locks'] = array();
-		register_shutdown_function( 'yotm_media_source_shutdown_cleanup' );
-	}
-
-	if ( isset( $GLOBALS['yotm_media_attachment_locks'][ $name ] ) ) {
-		++$GLOBALS['yotm_media_attachment_locks'][ $name ]['refs'];
-		return array(
-			'name'          => $name,
-			'attachment_id' => $attachment_id,
-		);
-	}
-
-	$acquired = yotm_job_acquire_named_lock( $name );
-	if ( is_wp_error( $acquired ) ) {
-		return new WP_Error( 'yotm_media_attachment_lock_failed', $acquired->get_error_message(), $acquired->get_error_data() );
-	}
-	if ( ! $acquired ) {
-		return new WP_Error( 'yotm_media_attachment_busy', __( 'This attachment source is being updated by another request. Retrying shortly.', 'thumbnail-manager' ) );
-	}
-
-	$GLOBALS['yotm_media_attachment_locks'][ $name ] = array(
-		'name'          => $name,
-		'attachment_id' => $attachment_id,
-		'refs'          => 1,
-	);
-
-	return array(
-		'name'          => $name,
-		'attachment_id' => $attachment_id,
-	);
-}
-
-/**
- * Release one request-local attachment lock reference.
- *
- * @param array $handle Lock handle.
- * @return void
- */
-function yotm_media_attachment_lock_release( $handle ) {
-	$name = (string) ( $handle['name'] ?? '' );
-	if ( '' === $name || empty( $GLOBALS['yotm_media_attachment_locks'][ $name ] ) ) {
-		return;
-	}
-
-	--$GLOBALS['yotm_media_attachment_locks'][ $name ]['refs'];
-	if ( $GLOBALS['yotm_media_attachment_locks'][ $name ]['refs'] <= 0 ) {
-		yotm_job_release_named_lock( $name );
-		unset( $GLOBALS['yotm_media_attachment_locks'][ $name ] );
-	}
-}
-
-/**
- * Acquire one re-entrant request-local media path lock.
- *
- * @param string $path Media path.
- * @return array|WP_Error
- */
-function yotm_media_path_lock_acquire( $path ) {
-	$canonical = yotm_media_source_canonical_path( $path );
-	if ( is_wp_error( $canonical ) ) {
-		return $canonical;
-	}
-
-	$name = yotm_media_path_lock_name( $canonical );
-	if ( ! isset( $GLOBALS['yotm_media_path_locks'] ) || ! is_array( $GLOBALS['yotm_media_path_locks'] ) ) {
-		$GLOBALS['yotm_media_path_locks'] = array();
-		register_shutdown_function( 'yotm_media_source_shutdown_cleanup' );
-	}
-
-	if ( isset( $GLOBALS['yotm_media_path_locks'][ $name ] ) ) {
-		++$GLOBALS['yotm_media_path_locks'][ $name ]['refs'];
-		return array(
-			'name' => $name,
-			'path' => $canonical,
-		);
-	}
-
-	$acquired = yotm_job_acquire_named_lock( $name );
-	if ( is_wp_error( $acquired ) ) {
-		return new WP_Error( 'yotm_media_path_lock_failed', $acquired->get_error_message(), $acquired->get_error_data() );
-	}
-	if ( ! $acquired ) {
-		return new WP_Error( 'yotm_media_path_busy', __( 'This media path is being updated by another request. Retrying shortly.', 'thumbnail-manager' ) );
-	}
-
-	$GLOBALS['yotm_media_path_locks'][ $name ] = array(
-		'name' => $name,
-		'path' => $canonical,
-		'refs' => 1,
-	);
-
-	return array(
-		'name' => $name,
-		'path' => $canonical,
-	);
-}
-
-/**
- * Release one request-local media path lock reference.
- *
- * @param array $handle Lock handle.
- * @return void
- */
-function yotm_media_path_lock_release( $handle ) {
-	$name = (string) ( $handle['name'] ?? '' );
-	if ( '' === $name || empty( $GLOBALS['yotm_media_path_locks'][ $name ] ) ) {
-		return;
-	}
-
-	--$GLOBALS['yotm_media_path_locks'][ $name ]['refs'];
-	if ( $GLOBALS['yotm_media_path_locks'][ $name ]['refs'] <= 0 ) {
-		yotm_job_release_named_lock( $name );
-		unset( $GLOBALS['yotm_media_path_locks'][ $name ] );
-	}
-}
-
-/**
- * Acquire a deterministic set of media path locks.
- *
- * @param array[] $aliases Source aliases.
- * @return array[]|WP_Error
- */
-function yotm_media_path_lock_aliases( $aliases ) {
-	$paths = array();
-	foreach ( (array) $aliases as $alias ) {
-		$path = (string) ( $alias['path'] ?? '' );
-		if ( '' !== $path ) {
-			$paths[ hash( 'sha256', $path ) ] = $path;
-		}
-	}
-	ksort( $paths );
-
-	$handles = array();
-	foreach ( $paths as $path ) {
-		$handle = yotm_media_path_lock_acquire( $path );
-		if ( is_wp_error( $handle ) ) {
-			foreach ( array_reverse( $handles ) as $owned ) {
-				yotm_media_path_lock_release( $owned );
-			}
-			return $handle;
-		}
-		$handles[] = $handle;
-	}
-
-	return $handles;
 }
 
 /**
@@ -1799,7 +1461,6 @@ function yotm_media_source_resync_after_meta_delete( $meta_ids, $object_id, $met
  * @param WP_Post|null $post Deleted post object supplied by Core.
  */
 function yotm_media_source_delete_attachment_rows( $attachment_id, $post = null ) {
-	global $wpdb;
 	if ( ! yotm_media_source_guard_enabled() || ! $post instanceof WP_Post || 'attachment' !== $post->post_type ) {
 		return;
 	}
@@ -1811,10 +1472,9 @@ function yotm_media_source_delete_attachment_rows( $attachment_id, $post = null 
 	}
 
 	try {
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Plugin-owned source-index rows.
-		$deleted = $wpdb->delete( yotm_job_table_names()['sources'], array( 'attachment_id' => absint( $attachment_id ) ), array( '%d' ) );
-		if ( false === $deleted ) {
-			$GLOBALS['yotm_media_source_last_error'] = yotm_job_storage_error( 'yotm_job_storage_unavailable', (string) $wpdb->last_error );
+		$deleted = yotm_media_source_store_delete_attachment( $attachment_id );
+		if ( is_wp_error( $deleted ) ) {
+			$GLOBALS['yotm_media_source_last_error'] = $deleted;
 			return;
 		}
 
@@ -1860,19 +1520,19 @@ function yotm_media_source_shutdown_cleanup() {
 	$GLOBALS['yotm_media_source_invocations'] = array();
 	if ( ! empty( $GLOBALS['yotm_media_path_locks'] ) ) {
 		foreach ( array_keys( $GLOBALS['yotm_media_path_locks'] ) as $name ) {
-			yotm_job_release_named_lock( $name );
+			yotm_database_release_named_lock( $name );
 		}
 		$GLOBALS['yotm_media_path_locks'] = array();
 	}
 	if ( ! empty( $GLOBALS['yotm_media_attachment_locks'] ) ) {
 		foreach ( array_keys( $GLOBALS['yotm_media_attachment_locks'] ) as $name ) {
-			yotm_job_release_named_lock( $name );
+			yotm_database_release_named_lock( $name );
 		}
 		$GLOBALS['yotm_media_attachment_locks'] = array();
 	}
 	if ( ! empty( $GLOBALS['yotm_media_source_fence_locks'] ) ) {
 		foreach ( array_keys( $GLOBALS['yotm_media_source_fence_locks'] ) as $name ) {
-			yotm_job_release_named_lock( $name );
+			yotm_database_release_named_lock( $name );
 		}
 		$GLOBALS['yotm_media_source_fence_locks'] = array();
 	}
@@ -2056,8 +1716,6 @@ function yotm_media_source_path_is_authoritative( $path, $limit = YOTM_MEDIA_SOU
  * @return array{path:string,protected:array,generated:array}|WP_Error
  */
 function yotm_media_reference_path_owners( $path, $limit = YOTM_MEDIA_SOURCE_FANOUT_LIMIT ) {
-	global $wpdb;
-
 	$canonical = yotm_media_source_canonical_path( $path );
 	if ( is_wp_error( $canonical ) ) {
 		return $canonical;
@@ -2067,12 +1725,10 @@ function yotm_media_reference_path_owners( $path, $limit = YOTM_MEDIA_SOURCE_FAN
 		return $clean;
 	}
 	$hash  = hash( 'sha256', $canonical );
-	$table = yotm_job_table_names()['sources'];
 	$limit = max( 1, absint( $limit ) );
-	// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Plugin-owned table name is trusted; live source veto is uncached and values use placeholders.
-	$rows = $wpdb->get_results( $wpdb->prepare( "SELECT attachment_id,source_kind,path FROM {$table} WHERE path_hash = %s ORDER BY attachment_id ASC,source_kind ASC LIMIT %d", $hash, $limit + 1 ) );
-	if ( '' !== (string) $wpdb->last_error ) {
-		return yotm_job_storage_error( 'yotm_job_storage_unavailable', (string) $wpdb->last_error );
+	$rows  = yotm_media_source_store_path_rows( $hash, $limit );
+	if ( is_wp_error( $rows ) ) {
+		return $rows;
 	}
 	if ( count( $rows ) > $limit ) {
 		return new WP_Error( 'yotm_media_source_fanout', __( 'Too many authoritative media aliases matched this path.', 'thumbnail-manager' ) );
