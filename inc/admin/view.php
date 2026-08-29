@@ -416,7 +416,7 @@ function yotm_render_admin_view( $view ) {
 							<?php
 							echo wp_kses(
 								__(
-									'Also include orphan sizes found in attachment metadata and report unmapped disk matches',
+									'Include verified legacy thumbnails (disk-only)',
 									'thumbnail-manager'
 								),
 								array(
@@ -426,7 +426,7 @@ function yotm_render_admin_view( $view ) {
 							?>
 					</label>
 					<span class="description" style="display:block;margin-top:4px;">
-						<?php echo esc_html__( 'Disk-only orphan reporting scans the selected uploads folder and never deletes unmapped files by default. Choose a smaller folder first on very large sites.', 'thumbnail-manager' ); ?>
+						<?php echo esc_html__( 'Only files bound to one authoritative local attachment source, an explicitly removed registered size, matching decoded dimensions/MIME, and no current reference can enter the review manifest. Ambiguous files and sidecars are preserved. Choose a smaller folder first on very large sites.', 'thumbnail-manager' ); ?>
 					</span>
 				</p>
 
@@ -613,7 +613,7 @@ function yotm_render_admin_view( $view ) {
 						<?php
 						echo wp_kses(
 							__(
-								'This will delete all thumbnails for sizes that are <em>disabled</em> below. It won’t affect originals.',
+								'This starts a review-first Prune scan for metadata-backed and verified legacy thumbnails matching sizes that are <em>disabled</em> below. Nothing is deleted until you review and explicitly approve the immutable manifest. Originals remain protected.',
 								'thumbnail-manager'
 							),
 							array(

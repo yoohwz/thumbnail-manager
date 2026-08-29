@@ -391,19 +391,18 @@ function yotm_job_manifest_digest_advance( $digest, $item_key, $payload_json ) {
  * @param string     $digest Current digest.
  * @param bool       $done Whether the bounded read reached the end.
  * @param array|null $worker Optional worker ownership data.
- * @param array      $completion_payload Opaque caller payload fields added on completion.
+ * @param array      $completion_payload Opaque caller checkpoint fields; persisted each batch.
  * @return array{done:bool,job:array}
  */
 function yotm_job_update_manifest_checkpoint( $job, $after, $digest, $done, $worker = null, $completion_payload = array() ) {
 	$payload                    = $job['payload'];
 	$payload['manifest_after']  = (string) $after;
 	$payload['manifest_digest'] = (string) $digest;
+	$payload                    = array_merge( $payload, is_array( $completion_payload ) ? $completion_payload : array() );
 	$fields                     = array( 'payload' => $payload );
 
 	if ( $done ) {
-		$payload                 = array_merge( $payload, is_array( $completion_payload ) ? $completion_payload : array() );
 		$fields['manifest_hash'] = (string) $digest;
-		$fields['payload']       = $payload;
 	}
 
 	$updated = is_array( $worker )

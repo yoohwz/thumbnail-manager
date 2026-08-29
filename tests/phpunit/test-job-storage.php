@@ -733,6 +733,39 @@ class YOTM_Job_Storage_Test extends WP_UnitTestCase {
 		$this->assertSame( 2, yotm_job_count_items( $job['id'] ) );
 	}
 
+	public function test_manifest_class_counts_persist_on_partial_checkpoint_without_double_counting_on_resume() {
+		$job = yotm_job_create(
+			'prune',
+			array(
+				'manifest_class_counts' => array(
+					'metadata_backed' => 0,
+					'verified_legacy' => 0,
+				),
+			),
+			array(
+				'status' => 'scanning',
+				'phase'  => 'manifest',
+			)
+		);
+		$this->assertIsArray( $job );
+		$digest = yotm_job_manifest_digest_seed();
+		$counts = array(
+			'metadata_backed' => 7,
+			'verified_legacy' => 3,
+		);
+
+		$partial = yotm_job_update_manifest_checkpoint( $job, 'row-10', $digest, false, null, array( 'manifest_class_counts' => $counts ) );
+		$this->assertFalse( $partial['done'] );
+		$this->assertSame( $counts, $partial['job']['payload']['manifest_class_counts'] );
+		$this->assertSame( 'row-10', $partial['job']['payload']['manifest_after'] );
+		$this->assertSame( $counts, yotm_job_public_data( $partial['job'] )['context']['manifest_class_counts'] );
+
+		$resumed = yotm_job_update_manifest_checkpoint( $partial['job'], 'row-10', $digest, true, null, array( 'manifest_class_counts' => $counts ) );
+		$this->assertTrue( $resumed['done'] );
+		$this->assertSame( $counts, $resumed['job']['payload']['manifest_class_counts'] );
+		$this->assertSame( $digest, $resumed['job']['manifest_hash'] );
+	}
+
 	public function test_manifest_items_are_paged_searchable_and_sum_estimated_bytes() {
 		$job = yotm_job_create(
 			'prune',

@@ -222,6 +222,261 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 		$this->assertSame( 'image/avif', $candidate['ownership_evidence'][0]['mime'] );
 	}
 
+	public function test_strict_disk_only_thumbnail_gets_versioned_legacy_evidence() {
+		$fixture = $this->create_real_legacy_fixture( 'legacy-valid' );
+		$policy  = $this->legacy_policy( array(), array( 'legacy_remove' ) );
+		$result  = yotm_classify_legacy_disk_candidates( array( $fixture['candidate'] ), $policy );
+
+		$this->assertIsArray( $result );
+		$item = $result[ yotm_prune_journal_lexical_path( $fixture['candidate'] ) ];
+		$this->assertNotWPError( $item );
+		$this->assertSame( 'legacy_generated_v1', $item['ownership_schema'] );
+		$this->assertSame( 'legacy_disk', $item['ownership'] );
+		$this->assertSame( 0, $item['remove_metadata'] );
+		$this->assertSame( array(), $item['metadata_refs'] );
+		$this->assertSame( array( 'legacy_remove' ), $item['matched_remove_sizes'] );
+		$this->assertSame( 'image/jpeg', $item['observed_mime'] );
+		$this->assertSame( 'image/jpeg', yotm_legacy_extension_mime( 'jpeg' ) );
+		$this->assertTrue( yotm_prune_validate_legacy_evidence( $item, $policy ) );
+
+		$legacy_job = $policy;
+		unset( $legacy_job['legacy_policy'] );
+		$this->assertWPError( yotm_classify_legacy_disk_candidates( array( $fixture['candidate'] ), $legacy_job ) );
+		$changed_policy                                    = $policy;
+		$changed_policy['sizes']['legacy_remove']['width'] = 151;
+		$error = yotm_classify_legacy_disk_candidates( array( $fixture['candidate'] ), $changed_policy );
+		$this->assertWPError( $error );
+		$this->assertSame( 'yotm_legacy_policy_changed', $error->get_error_code() );
+	}
+
+	public function test_bulk_source_lookup_is_exact_bounded_and_fanout_limited() {
+		$fixture = $this->create_real_legacy_fixture( 'legacy-bulk-source' );
+		$hash    = hash( 'sha256', yotm_normalize_filesystem_path( $fixture['source'] ) );
+		$missing = hash( 'sha256', 'missing-exact-path' );
+		global $wpdb;
+		$before_queries = (int) $wpdb->num_queries;
+		$rows           = yotm_media_source_store_paths_rows( array( $hash, $missing ) );
+
+		$this->assertNotWPError( $rows );
+		$this->assertSame( 1, (int) $wpdb->num_queries - $before_queries );
+		$this->assertArrayHasKey( $hash, $rows );
+		$this->assertArrayNotHasKey( $missing, $rows );
+		foreach ( $rows[ $hash ] as $row ) {
+			$this->assertSame( $hash, $row->path_hash );
+		}
+
+		$this->assertWPError( yotm_media_source_store_paths_rows( array( $hash ), 1 ) );
+		$too_many = array();
+		for ( $index = 0; $index < 4001; ++$index ) {
+			$too_many[] = hash( 'sha256', 'bounded-' . $index );
+		}
+		$this->assertWPError( yotm_media_source_store_paths_rows( $too_many ) );
+	}
+
+	public function test_kept_size_match_vetoes_legacy_candidate_even_when_removed_size_matches() {
+		$fixture = $this->create_real_legacy_fixture( 'legacy-kept-veto' );
+		$policy  = $this->legacy_policy( array( 'legacy_keep' ), array( 'legacy_remove' ) );
+		$result  = yotm_classify_legacy_disk_candidates( array( $fixture['candidate'] ), $policy );
+		$this->assertNotWPError( $result );
+		$error = $result[ yotm_prune_journal_lexical_path( $fixture['candidate'] ) ];
+
+		$this->assertWPError( $error );
+		$this->assertSame( 'yotm_legacy_kept_dimension', $error->get_error_code() );
+	}
+
+	public function test_legacy_candidate_mime_mismatch_and_duplicate_family_fail_closed() {
+		$fixture  = $this->create_real_legacy_fixture( 'legacy-ambiguous' );
+		$mismatch = preg_replace( '/\.jpg$/', '.png', $fixture['candidate'] );
+		copy( $fixture['candidate'], $mismatch );
+		$this->files[] = $mismatch;
+		$policy        = $this->legacy_policy( array(), array( 'legacy_remove' ) );
+		$result        = yotm_classify_legacy_disk_candidates( array( $mismatch ), $policy );
+		$this->assertNotWPError( $result );
+		$error = $result[ yotm_prune_journal_lexical_path( $mismatch ) ];
+		$this->assertWPError( $error );
+		$this->assertSame( 'yotm_legacy_image_mismatch', $error->get_error_code() );
+
+		$this->assertTrue(
+			yotm_media_source_upsert_aliases(
+				array(
+					array(
+						'attachment_id' => $fixture['attachment_id'] + 1000000,
+						'source_kind'   => 'attached',
+						'path_hash'     => hash( 'sha256', $fixture['source'] ),
+						'path'          => $fixture['source'],
+					),
+				)
+			)
+		);
+		$result = yotm_classify_legacy_disk_candidates( array( $fixture['candidate'] ), $policy );
+		$error  = $result[ yotm_prune_journal_lexical_path( $fixture['candidate'] ) ];
+		$this->assertWPError( $error );
+		$this->assertSame( 'yotm_legacy_family_ambiguous', $error->get_error_code() );
+	}
+
+	public function test_legacy_evidence_is_revoked_when_candidate_gains_metadata_owner() {
+		$fixture = $this->create_real_legacy_fixture( 'legacy-late-owner' );
+		$policy  = $this->legacy_policy( array(), array( 'legacy_remove' ) );
+		$result  = yotm_classify_legacy_disk_candidates( array( $fixture['candidate'] ), $policy );
+		$this->assertNotWPError( $result );
+		$item = $result[ yotm_prune_journal_lexical_path( $fixture['candidate'] ) ];
+		$this->assertNotWPError( $item );
+
+		$metadata                     = wp_get_attachment_metadata( $fixture['attachment_id'] );
+		$metadata['sizes']['claimed'] = array(
+			'file'      => wp_basename( $fixture['candidate'] ),
+			'width'     => 150,
+			'height'    => 150,
+			'mime-type' => 'image/jpeg',
+		);
+		$this->assertNotFalse( wp_update_attachment_metadata( $fixture['attachment_id'], $metadata ) );
+		$this->assertTrue( yotm_media_source_sync_attachment( $fixture['attachment_id'] ) );
+
+		$error = yotm_prune_validate_legacy_evidence( $item, $policy );
+		$this->assertWPError( $error );
+		$this->assertSame( 'yotm_legacy_path_owned', $error->get_error_code() );
+	}
+
+	public function test_legacy_evidence_rejects_byte_identical_node_replacement() {
+		$fixture = $this->create_real_legacy_fixture( 'legacy-node-replacement' );
+		$policy  = $this->legacy_policy( array(), array( 'legacy_remove' ) );
+		$result  = yotm_classify_legacy_disk_candidates( array( $fixture['candidate'] ), $policy );
+		$item    = $result[ yotm_prune_journal_lexical_path( $fixture['candidate'] ) ];
+		$this->assertNotWPError( $item );
+
+		$replacement   = trailingslashit( dirname( $fixture['candidate'] ) ) . 'legacy-node-replacement.tmp';
+		$this->files[] = $replacement;
+		$this->assertTrue( copy( $fixture['candidate'], $replacement ) );
+		$replacement_state = yotm_prune_journal_path_state( $replacement );
+		$this->assertIsArray( $replacement_state );
+		$this->assertNotSame( $item['candidate_node_fingerprint'], $replacement_state['fingerprint'] );
+		$this->assertTrue( unlink( $fixture['candidate'] ) );
+		$this->assertTrue( rename( $replacement, $fixture['candidate'] ) );
+
+		$error = yotm_prune_validate_legacy_evidence( $item, $policy );
+		$this->assertWPError( $error );
+		$this->assertSame( 'yotm_legacy_evidence_changed', $error->get_error_code() );
+	}
+
+	public function test_legacy_reconciliation_has_no_metadata_authority() {
+		$fixture = $this->create_real_legacy_fixture( 'legacy-no-metadata' );
+		$before  = get_post_meta( $fixture['attachment_id'], '_wp_attachment_metadata', true );
+		$item    = array(
+			'ownership_schema' => 'legacy_generated_v1',
+			'ownership'        => 'legacy_disk',
+			'remove_metadata'  => 0,
+			'metadata_refs'    => array(),
+		);
+
+		$this->assertTrue( yotm_reconcile_prune_item_metadata( $item, $fixture['candidate'] ) );
+		$this->assertSame( $before, get_post_meta( $fixture['attachment_id'], '_wp_attachment_metadata', true ) );
+		$item['metadata_refs'][] = array(
+			'attachment_id' => $fixture['attachment_id'],
+			'size'          => 'legacy_remove',
+			'filename'      => wp_basename( $fixture['candidate'] ),
+		);
+		$this->assertWPError( yotm_reconcile_prune_item_metadata( $item, $fixture['candidate'] ) );
+		$this->assertSame( $before, get_post_meta( $fixture['attachment_id'], '_wp_attachment_metadata', true ) );
+	}
+
+	public function test_legacy_family_uses_original_generation_basename_not_scaled_current_full_basename() {
+		$original = trailingslashit( $this->test_dir ) . 'basename-diverge.jpg';
+		$scaled   = trailingslashit( $this->test_dir ) . 'basename-diverge-scaled.jpg';
+		copy( DIR_TESTDATA . '/images/2004-07-22-DSC_0007.jpg', $original );
+		copy( $original, $scaled );
+		$this->files[] = $original;
+		$this->files[] = $scaled;
+		$image         = wp_getimagesize( $original );
+		$attachment_id = $this->create_attachment(
+			$scaled,
+			array(
+				'file'           => $this->relative_path( $scaled ),
+				'original_image' => wp_basename( $original ),
+				'width'          => absint( $image[0] ),
+				'height'         => absint( $image[1] ),
+				'sizes'          => array(),
+			)
+		);
+		$editor        = wp_get_image_editor( $original );
+		$this->assertNotWPError( $editor );
+		$created = $editor->make_subsize(
+			array(
+				'width'  => 150,
+				'height' => 150,
+				'crop'   => true,
+			)
+		);
+		$this->assertNotWPError( $created );
+		$candidate     = trailingslashit( $this->test_dir ) . $created['file'];
+		$this->files[] = $candidate;
+		$this->assertTrue( yotm_media_source_sync_attachment( $attachment_id ) );
+
+		$policy    = $this->legacy_policy( array(), array( 'legacy_remove' ) );
+		$candidate = yotm_media_source_canonical_path( $candidate );
+		$result    = yotm_classify_legacy_disk_candidates( array( $candidate ), $policy );
+		$this->assertNotWPError( $result );
+		$item = $result[ yotm_prune_journal_lexical_path( $candidate ) ];
+		$this->assertNotWPError( $item );
+		$this->assertSame( yotm_media_source_canonical_path( $original ), $item['source_path'] );
+
+		$scaled_candidate = trailingslashit( $this->test_dir ) . 'basename-diverge-scaled-150x150.jpg';
+		copy( $candidate, $scaled_candidate );
+		$this->files[]    = $scaled_candidate;
+		$scaled_candidate = yotm_media_source_canonical_path( $scaled_candidate );
+		$result           = yotm_classify_legacy_disk_candidates( array( $scaled_candidate ), $policy );
+		$this->assertWPError( $result[ yotm_prune_journal_lexical_path( $scaled_candidate ) ] );
+	}
+
+	public function test_reviewed_legacy_manifest_lifecycle_deletes_file_without_metadata_reconciliation() {
+		$fixture = $this->create_real_legacy_fixture( 'legacy-lifecycle' );
+		$keep    = array_values( array_diff( array_keys( yotm_get_registered_sizes() ), array( 'thumbnail' ) ) );
+		$before  = get_metadata_raw( 'post', $fixture['attachment_id'], '_wp_attachment_metadata', true );
+		$prepare = yotm_prune_prepare_application( $keep, array( wp_basename( $this->test_dir ) ), true );
+		$this->assertTrue( $prepare['success'], $prepare['data']['msg'] ?? '' );
+		$token = $prepare['data']['token'];
+
+		for ( $batch = 0; $batch < 30; ++$batch ) {
+			$scan = yotm_prune_scan_application( $token, 500 );
+			yotm_job_release_all_workers();
+			$this->assertTrue( $scan['success'], $scan['data']['msg'] ?? '' );
+			if ( ! empty( $scan['data']['scan_done'] ) ) {
+				break;
+			}
+		}
+		$this->assertNotEmpty( $scan['data']['scan_done'] );
+		$this->assertSame( 1, $scan['data']['total'] );
+		$this->assertSame( 1, $scan['data']['manifest_class_counts']['verified_legacy'] );
+		$this->assertSame( 0, $scan['data']['manifest_class_counts']['metadata_backed'] );
+		$this->assertFileExists( $fixture['candidate'] );
+
+		$approval = yotm_prune_approve_application( $token, $scan['data']['manifest_hash'], false );
+		$this->assertFalse( $approval['success'] );
+		$this->assertTrue( yotm_media_source_dirty_mark( 'legacy-review-dirty', $fixture['attachment_id'] ) );
+		$approval = yotm_prune_approve_application( $token, $scan['data']['manifest_hash'], true );
+		$this->assertFalse( $approval['success'] );
+		$this->assertTrue( yotm_media_source_sync_attachment( $fixture['attachment_id'], null, true ) );
+		$approval = yotm_prune_approve_application( $token, $scan['data']['manifest_hash'], true );
+		$this->assertTrue( $approval['success'], $approval['data']['msg'] ?? '' );
+		$this->assertTrue( yotm_media_source_dirty_mark( 'legacy-delete-dirty', $fixture['attachment_id'] ) );
+		$delete = yotm_prune_delete_application( $token, $scan['data']['manifest_hash'], 10 );
+		$this->assertFalse( $delete['success'] );
+		$this->assertFileExists( $fixture['candidate'] );
+		$this->assertTrue( yotm_media_source_sync_attachment( $fixture['attachment_id'], null, true ) );
+
+		for ( $batch = 0; $batch < 10; ++$batch ) {
+			$delete = yotm_prune_delete_application( $token, $scan['data']['manifest_hash'], 10 );
+			yotm_job_release_all_workers();
+			$this->assertTrue( $delete['success'], $delete['data']['msg'] ?? '' );
+			if ( ! empty( $delete['data']['done'] ) ) {
+				break;
+			}
+		}
+		$this->assertNotEmpty( $delete['data']['done'] );
+		$this->assertSame( 1, $delete['data']['deleted'] );
+		$this->assertFileDoesNotExist( $fixture['candidate'] );
+		$this->assertSame( $before, get_metadata_raw( 'post', $fixture['attachment_id'], '_wp_attachment_metadata', true ) );
+	}
+
 	public function test_cross_attachment_source_is_excluded_even_outside_candidate_attachment() {
 		$fixture = $this->create_attachment_with_thumbnail( 'owner.jpg', 'owner-150x150.jpg' );
 		$source  = $this->create_attachment( $fixture['thumbnail'], array( 'file' => $this->relative_path( $fixture['thumbnail'] ) ) );
@@ -1478,6 +1733,75 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 			)
 		);
 		return compact( 'attachment_id', 'original', 'thumbnail' );
+	}
+
+	private function create_real_legacy_fixture( $stem ) {
+		$source = trailingslashit( $this->test_dir ) . $stem . '.jpg';
+		copy( DIR_TESTDATA . '/images/2004-07-22-DSC_0007.jpg', $source );
+		$this->files[] = $source;
+		$image         = wp_getimagesize( $source );
+		$attachment_id = $this->create_attachment(
+			$source,
+			array(
+				'file'   => $this->relative_path( $source ),
+				'width'  => absint( $image[0] ),
+				'height' => absint( $image[1] ),
+				'sizes'  => array(),
+			)
+		);
+		$editor        = wp_get_image_editor( $source );
+		$this->assertNotWPError( $editor );
+		$created = $editor->make_subsize(
+			array(
+				'width'  => 150,
+				'height' => 150,
+				'crop'   => true,
+			)
+		);
+		$this->assertNotWPError( $created );
+		$candidate     = trailingslashit( $this->test_dir ) . $created['file'];
+		$this->files[] = $candidate;
+		$this->assertTrue( yotm_media_source_sync_attachment( $attachment_id ) );
+
+		return array(
+			'attachment_id' => $attachment_id,
+			'source'        => yotm_media_source_canonical_path( $source ),
+			'source_width'  => absint( $image[0] ),
+			'source_height' => absint( $image[1] ),
+			'candidate'     => yotm_media_source_canonical_path( $candidate ),
+		);
+	}
+
+	private function legacy_policy( $keep, $remove ) {
+		$scan_base                = trailingslashit( yotm_normalize_filesystem_path( realpath( $this->test_dir ) ) );
+		$payload                  = array(
+			'scan_base'          => $scan_base,
+			'scan_bases'         => array( $scan_base ),
+			'selector'           => 'attachment_id_v1',
+			'selection_meta_max' => 0,
+			'selection_subpaths' => array(),
+			'keep'               => $keep,
+			'remove'             => $remove,
+			'sizes'              => array(
+				'legacy_keep'   => array(
+					'width'  => 150,
+					'height' => 150,
+					'crop'   => true,
+				),
+				'legacy_remove' => array(
+					'width'  => 150,
+					'height' => 150,
+					'crop'   => true,
+				),
+			),
+			'discover_orphans'   => 1,
+		);
+		$payload['legacy_policy'] = array(
+			'version' => 1,
+			'enabled' => 1,
+			'hash'    => yotm_legacy_policy_hash( $payload ),
+		);
+		return $payload;
 	}
 
 	private function create_attachment( $file, $metadata ) {

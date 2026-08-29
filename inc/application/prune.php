@@ -128,20 +128,25 @@ function yotm_prune_get_items_page( $job_id, $page = 1, $per_page = 25, $search 
 	foreach ( $rows['items'] as $row ) {
 		$payload = $row['payload'];
 		$items[] = array(
-			'id'                 => (int) $row['id'],
-			'path'               => (string) ( $payload['path'] ?? '' ),
-			'attachment_id'      => absint( $payload['attachment_id'] ?? 0 ),
-			'size'               => (string) ( $payload['size'] ?? '' ),
-			'source'             => (string) ( $payload['source'] ?? '' ),
-			'ownership'          => (string) ( $payload['ownership'] ?? '' ),
-			'ownership_schema'   => (string) ( $payload['ownership_schema'] ?? '' ),
-			'ownership_evidence' => is_array( $payload['ownership_evidence'] ?? null ) ? $payload['ownership_evidence'] : array(),
-			'status'             => (string) $row['status'],
-			'error'              => (string) $row['error'],
-			'estimated_bytes'    => absint( $payload['estimated_bytes'] ?? $row['bytes'] ),
-			'bytes'              => (int) $row['bytes'],
+			'id'                   => (int) $row['id'],
+			'path'                 => (string) ( $payload['path'] ?? '' ),
+			'attachment_id'        => absint( $payload['attachment_id'] ?? 0 ),
+			'size'                 => (string) ( $payload['size'] ?? '' ),
+			'source'               => (string) ( $payload['source'] ?? '' ),
+			'ownership'            => (string) ( $payload['ownership'] ?? '' ),
+			'ownership_schema'     => (string) ( $payload['ownership_schema'] ?? '' ),
+			'ownership_evidence'   => is_array( $payload['ownership_evidence'] ?? null ) ? $payload['ownership_evidence'] : array(),
+			'observed_width'       => absint( $payload['observed_width'] ?? 0 ),
+			'observed_height'      => absint( $payload['observed_height'] ?? 0 ),
+			'observed_mime'        => (string) ( $payload['observed_mime'] ?? '' ),
+			'matched_remove_sizes' => array_values( array_map( 'sanitize_key', (array) ( $payload['matched_remove_sizes'] ?? array() ) ) ),
+			'source_path'          => (string) ( $payload['source_path'] ?? '' ),
+			'status'               => (string) $row['status'],
+			'error'                => (string) $row['error'],
+			'estimated_bytes'      => absint( $payload['estimated_bytes'] ?? $row['bytes'] ),
+			'bytes'                => (int) $row['bytes'],
 		);
-	}
+	}//end foreach
 
 	$rows['items'] = $items;
 	return $rows;
@@ -156,19 +161,22 @@ function yotm_prune_get_items_page( $job_id, $page = 1, $per_page = 25, $search 
  * @return array{done:bool,job:array}
  */
 function yotm_prune_build_manifest_batch( $job, $limit = 1000, $worker = null ) {
-	$payload = $job['payload'];
-	$after   = isset( $payload['manifest_after'] ) ? (string) $payload['manifest_after'] : '';
-	$digest  = isset( $payload['manifest_digest'] ) ? (string) $payload['manifest_digest'] : yotm_job_manifest_digest_seed();
-	$limit   = max( 10, min( 5000, absint( $limit ) ) );
-	$rows    = yotm_job_get_manifest_rows_after( $job['id'], $after, $limit );
+	$payload      = $job['payload'];
+	$after        = isset( $payload['manifest_after'] ) ? (string) $payload['manifest_after'] : '';
+	$digest       = isset( $payload['manifest_digest'] ) ? (string) $payload['manifest_digest'] : yotm_job_manifest_digest_seed();
+	$class_counts = is_array( $payload['manifest_class_counts'] ?? null )
+		? $payload['manifest_class_counts']
+		: array(
+			'metadata_backed' => 0,
+			'verified_legacy' => 0,
+		);
+	$limit        = max( 10, min( 5000, absint( $limit ) ) );
+	$rows         = yotm_job_get_manifest_rows_after( $job['id'], $after, $limit );
 
 	foreach ( $rows as $row ) {
 		$item_payload = $row['payload'];
-		if (
-			'prune' === ( $job['type'] ?? '' )
-			&& 'generated_file_v1' === ( $item_payload['ownership_schema'] ?? '' )
-			&& function_exists( 'yotm_prune_validate_live_reference_evidence' )
-		) {
+		$item_schema  = (string) ( $item_payload['ownership_schema'] ?? '' );
+		if ( 'prune' === ( $job['type'] ?? '' ) && in_array( $item_schema, array( 'generated_file_v1', 'legacy_generated_v1' ), true ) ) {
 			$source_fence = yotm_media_source_fence_acquire();
 			if ( is_wp_error( $source_fence ) ) {
 				return array(
@@ -177,7 +185,9 @@ function yotm_prune_build_manifest_batch( $job, $limit = 1000, $worker = null ) 
 				);
 			}
 			try {
-				$reference_check = yotm_prune_validate_live_reference_evidence( $item_payload, $item_payload['path'] ?? '' );
+				$reference_check = 'legacy_generated_v1' === $item_schema
+					? yotm_prune_validate_legacy_evidence( $item_payload, $payload )
+					: yotm_prune_validate_live_reference_evidence( $item_payload, $item_payload['path'] ?? '' );
 			} finally {
 				yotm_media_source_fence_release( $source_fence );
 			}
@@ -193,6 +203,11 @@ function yotm_prune_build_manifest_batch( $job, $limit = 1000, $worker = null ) 
 			}
 		}//end if
 
+		if ( 'generated_file_v1' === $item_schema ) {
+			$class_counts['metadata_backed'] = absint( $class_counts['metadata_backed'] ?? 0 ) + 1;
+		} elseif ( 'legacy_generated_v1' === $item_schema ) {
+			$class_counts['verified_legacy'] = absint( $class_counts['verified_legacy'] ?? 0 ) + 1;
+		}
 		$digest = yotm_job_manifest_digest_advance( $digest, $row['item_key'], $row['payload_json'] );
 		$after  = $row['item_key'];
 	}//end foreach
@@ -204,7 +219,8 @@ function yotm_prune_build_manifest_batch( $job, $limit = 1000, $worker = null ) 
 		count( $rows ) < $limit,
 		$worker,
 		array(
-			'reference_generation' => defined( 'YOTM_MEDIA_REFERENCE_GENERATION' ) ? YOTM_MEDIA_REFERENCE_GENERATION : 0,
+			'reference_generation'  => defined( 'YOTM_MEDIA_REFERENCE_GENERATION' ) ? YOTM_MEDIA_REFERENCE_GENERATION : 0,
+			'manifest_class_counts' => $class_counts,
 		)
 	);
 }
@@ -238,48 +254,55 @@ function yotm_prune_prepare_application( $keep, $limit_subpaths, $discover_orpha
 	if ( is_wp_error( $selection_meta_max ) ) {
 		return yotm_prune_application_error( array( 'msg' => $selection_meta_max->get_error_message() ), 503 );
 	}
-	$scan_total  = 'attached_meta_v2' === $selector ? 0 : yotm_count_image_attachments( $query_args );
-	$scope_label = yotm_uploads_scope_label( $base, $scan_bases );
-	$job         = yotm_job_create(
-		'prune',
-		array(
-			'scan_base'                => $scan_bases[0],
-			'scan_bases'               => $scan_bases,
-			'scan_subpaths'            => $limit_subpaths,
-			'scan_base_label'          => $scope_label,
-			'scan_base_labels'         => array_map(
-				static function ( $scan_base ) use ( $base ) {
-					return yotm_uploads_relative_label( $base, $scan_base );
-				},
-				$scan_bases
-			),
-			'base'                     => $base,
-			'query_args'               => $query_args,
-			'selector'                 => $selector,
-			'selection_done'           => 'attached_meta_v2' === $selector ? 0 : 1,
-			'selection_meta_after'     => 0,
-			'selection_meta_max'       => absint( $selection_meta_max ),
-			'selection_scanned'        => 0,
-			'selection_matched'        => 0,
-			'selection_subpaths'       => $limit_subpaths,
-			'scan_processed'           => 0,
-			'scan_total_attachments'   => $scan_total,
-			'scan_phase'               => 'source_index',
-			'ownership_schema'         => 'generated_file_v1',
-			'source_index_initialized' => 0,
-			'source_index_complete'    => 0,
-			'source_index_cursor'      => 0,
-			'source_index_max_id'      => 0,
-			'sample'                   => array(),
-			'keep'                     => $keep,
-			'remove'                   => $to_remove,
-			'sizes'                    => $sizes,
-			'discover_orphans'         => $discover_orphans ? 1 : 0,
-			'orphan_summary'           => yotm_initial_orphan_summary(),
-			'disk_queue'               => array(),
-			'disk_cursor_version'      => 'dfs_v2',
-			'disk_entries_processed'   => 0,
+	$scan_total                           = 'attached_meta_v2' === $selector ? 0 : yotm_count_image_attachments( $query_args );
+	$scope_label                          = yotm_uploads_scope_label( $base, $scan_bases );
+	$job_payload                          = array(
+		'scan_base'                => $scan_bases[0],
+		'scan_bases'               => $scan_bases,
+		'scan_subpaths'            => $limit_subpaths,
+		'scan_base_label'          => $scope_label,
+		'scan_base_labels'         => array_map(
+			static function ( $scan_base ) use ( $base ) {
+				return yotm_uploads_relative_label( $base, $scan_base );
+			},
+			$scan_bases
 		),
+		'base'                     => $base,
+		'query_args'               => $query_args,
+		'selector'                 => $selector,
+		'selection_done'           => 'attached_meta_v2' === $selector ? 0 : 1,
+		'selection_meta_after'     => 0,
+		'selection_meta_max'       => absint( $selection_meta_max ),
+		'selection_scanned'        => 0,
+		'selection_matched'        => 0,
+		'selection_subpaths'       => $limit_subpaths,
+		'scan_processed'           => 0,
+		'scan_total_attachments'   => $scan_total,
+		'scan_phase'               => 'source_index',
+		'ownership_schema'         => 'generated_file_v1',
+		'source_index_initialized' => 0,
+		'source_index_complete'    => 0,
+		'source_index_cursor'      => 0,
+		'source_index_max_id'      => 0,
+		'sample'                   => array(),
+		'keep'                     => $keep,
+		'remove'                   => $to_remove,
+		'sizes'                    => $sizes,
+		'discover_orphans'         => $discover_orphans ? 1 : 0,
+		'orphan_summary'           => yotm_initial_orphan_summary(),
+		'disk_queue'               => array(),
+		'disk_cursor_version'      => 'dfs_v2',
+		'disk_entries_processed'   => 0,
+	);
+	$job_payload['legacy_policy']         = array(
+		'version' => 1,
+		'enabled' => $discover_orphans ? 1 : 0,
+		'hash'    => '',
+	);
+	$job_payload['legacy_policy']['hash'] = yotm_legacy_policy_hash( $job_payload );
+	$job                                  = yotm_job_create(
+		'prune',
+		$job_payload,
 		array(
 			'status'       => 'scanning',
 			'phase'        => 'source_index',
@@ -906,20 +929,70 @@ function yotm_prune_scan_disk_batch( $job, $limit = 100, $worker = null ) {
 		}
 	}//end while
 
-	$existing = yotm_job_existing_item_keys( $job['id'], array_keys( $disk_checks ) );
-	foreach ( array_diff_key( $disk_checks, $existing ) as $path ) {
+	$existing             = yotm_job_existing_item_keys( $job['id'], array_keys( $disk_checks ) );
+	$unmapped_paths       = array_diff_key( $disk_checks, $existing );
+	$legacy_paths         = array();
+	$legacy_results       = array();
+	$precounted_ambiguous = array();
+	foreach ( $unmapped_paths as $path ) {
 		$filename = wp_basename( $path );
 		if ( preg_match( '/\.(?:jpe?g|png|gif)\.(?:webp|avif)$/i', $filename ) ) {
 			$summary['unverified_sidecars'] = (int) ( $summary['unverified_sidecars'] ?? 0 ) + 1;
+			$legacy_results[ $path ]        = new WP_Error( 'yotm_legacy_sidecar_unverified', __( 'The format sidecar is not exact generated-file ownership evidence.', 'thumbnail-manager' ) );
 		} elseif ( preg_match( '/(?:\.(?:bak|backup|orig|original|old|tmp|temp)(?:\.|$)|@\d+x|-\d+\.)/i', $filename ) ) {
 			$summary['ambiguous_siblings'] = (int) ( $summary['ambiguous_siblings'] ?? 0 ) + 1;
+			$precounted_ambiguous[ $path ] = true;
+			$legacy_results[ $path ]       = new WP_Error( 'yotm_legacy_sibling_ambiguous', __( 'The disk file is an ambiguous sibling.', 'thumbnail-manager' ) );
+		} else {
+			$legacy_paths[] = $path;
+		}
+	}
+	if ( ! empty( $legacy_paths ) ) {
+		$classified = yotm_classify_legacy_disk_candidates( $legacy_paths, $payload );
+		if ( is_wp_error( $classified ) ) {
+			foreach ( $legacy_paths as $path ) {
+				$legacy_results[ $path ] = $classified;
+			}
+		} else {
+			$legacy_results = array_merge( $legacy_results, $classified );
+		}
+	}
+
+	foreach ( $unmapped_paths as $path ) {
+		$result = $legacy_results[ $path ] ?? new WP_Error( 'yotm_legacy_unclassified', __( 'The disk-only file could not be classified safely.', 'thumbnail-manager' ) );
+		if ( is_array( $result ) ) {
+			$item_key = hash( 'sha256', $path );
+			$inserted = yotm_job_add_item( $job['id'], $item_key, $result, 'queued', absint( $result['estimated_bytes'] ?? 0 ) );
+			if ( $inserted ) {
+				$summary['verified_legacy'] = (int) ( $summary['verified_legacy'] ?? 0 ) + 1;
+				if ( count( $payload['sample'] ) < 300 ) {
+					$payload['sample'][] = $path;
+				}
+				continue;
+			}
+			$result = new WP_Error( 'yotm_legacy_item_persist_failed', __( 'The verified legacy item could not be persisted safely.', 'thumbnail-manager' ) );
+		}
+
+		$code = is_wp_error( $result ) ? $result->get_error_code() : 'yotm_legacy_unclassified';
+		if ( 'yotm_legacy_kept_dimension' === $code ) {
+			$summary['kept_dimension_preserved'] = (int) ( $summary['kept_dimension_preserved'] ?? 0 ) + 1;
+		} elseif ( in_array( $code, array( 'yotm_legacy_filename_invalid', 'yotm_legacy_image_mismatch', 'yotm_legacy_node_invalid', 'yotm_legacy_path_invalid', 'yotm_legacy_file_unreadable' ), true ) ) {
+			$summary['malformed_preserved'] = (int) ( $summary['malformed_preserved'] ?? 0 ) + 1;
+		} elseif ( in_array( $code, array( 'yotm_legacy_sibling_ambiguous', 'yotm_legacy_family_ambiguous', 'yotm_legacy_generation_source_mismatch' ), true ) ) {
+			if ( empty( $precounted_ambiguous[ $path ] ) ) {
+				$summary['ambiguous_siblings'] = (int) ( $summary['ambiguous_siblings'] ?? 0 ) + 1;
+			}
+		} elseif ( 'yotm_legacy_path_owned' === $code ) {
+			$summary['protected_sources'] = (int) ( $summary['protected_sources'] ?? 0 ) + 1;
+		} elseif ( 0 === strpos( $code, 'yotm_media_' ) || 0 === strpos( $code, 'yotm_regenerate_' ) || 0 === strpos( $code, 'yotm_prune_selector_' ) ) {
+			$summary['source_errors'] = (int) ( $summary['source_errors'] ?? 0 ) + 1;
 		}
 		$summary['unmapped']         = (int) ( $summary['unmapped'] ?? 0 ) + 1;
 		$summary['unmapped_skipped'] = (int) ( $summary['unmapped_skipped'] ?? 0 ) + 1;
 		if ( count( $summary['unmapped_sample'] ) < 20 ) {
 			$summary['unmapped_sample'][] = $path;
 		}
-	}
+	}//end foreach
 
 	arsort( $summary['found'] );
 	$payload['orphan_summary']         = $summary;
@@ -984,6 +1057,10 @@ function yotm_build_prune_scan_response( $job, $done ) {
 		'remove'                 => is_array( $payload['remove'] ?? null ) ? $payload['remove'] : array(),
 		'scan_base'              => (string) ( $payload['scan_base_label'] ?? 'uploads/' ),
 		'orphan_summary'         => is_array( $payload['orphan_summary'] ?? null ) ? $payload['orphan_summary'] : yotm_initial_orphan_summary(),
+		'manifest_class_counts'  => is_array( $payload['manifest_class_counts'] ?? null ) ? $payload['manifest_class_counts'] : array(
+			'metadata_backed' => 0,
+			'verified_legacy' => 0,
+		),
 		'manifest_hash'          => $job['manifest_hash'],
 		'expires_at'             => $job['expires_at'],
 		'stopped'                => in_array( $job['status'], array( 'cancelled', 'expired' ), true ),
@@ -1066,6 +1143,12 @@ function yotm_prune_validate_review_job( $job, $manifest_hash, $confirmed ) {
 	) {
 		return new WP_Error( 'yotm_prune_ownership_upgrade_required', __( 'This prune manifest predates the current media-safety rules. Run and review a new scan.', 'thumbnail-manager' ) );
 	}
+	if ( ! empty( $job['payload']['manifest_class_counts']['verified_legacy'] ) ) {
+		$legacy_policy = yotm_legacy_policy_validate( $job['payload'] );
+		if ( is_wp_error( $legacy_policy ) ) {
+			return $legacy_policy;
+		}
+	}
 
 	return true;
 }
@@ -1100,6 +1183,12 @@ function yotm_prune_validate_delete_job( $job, $manifest_hash ) {
 		|| YOTM_MEDIA_REFERENCE_GENERATION !== absint( $job['payload']['reference_generation'] ?? 0 )
 	) {
 		return new WP_Error( 'yotm_prune_ownership_upgrade_required', __( 'This prune manifest predates the current media-safety rules. Run and review a new scan.', 'thumbnail-manager' ) );
+	}
+	if ( ! empty( $job['payload']['manifest_class_counts']['verified_legacy'] ) ) {
+		$legacy_policy = yotm_legacy_policy_validate( $job['payload'] );
+		if ( is_wp_error( $legacy_policy ) ) {
+			return $legacy_policy;
+		}
 	}
 
 	return true;
@@ -1200,7 +1289,12 @@ function yotm_process_claimed_prune_item( $item, $job, $worker, $uploads_base, $
 				}
 			}
 
-			$references = $journal_absent ? true : yotm_prune_validate_live_reference_evidence( $item['payload'] ?? array(), $path );
+			$item_schema = (string) ( $item['payload']['ownership_schema'] ?? '' );
+			$references  = $journal_absent
+				? true
+				: ( 'legacy_generated_v1' === $item_schema
+					? yotm_prune_validate_legacy_evidence( $item['payload'] ?? array(), $job['payload'] ?? array() )
+					: yotm_prune_validate_live_reference_evidence( $item['payload'] ?? array(), $path ) );
 			if ( is_wp_error( $references ) ) {
 				if ( 'yotm_prune_path_protected' === $references->get_error_code() ) {
 					return array(

@@ -77,4 +77,26 @@ class YOTM_Size_Management_Test extends WP_UnitTestCase {
 		$this->assertArrayHasKey( 'thumbnail', $filtered );
 		$this->assertArrayNotHasKey( 'medium', $filtered );
 	}
+
+	/**
+	 * The canonical policy only removes names from caller-permitted subsets.
+	 */
+	public function test_enabled_size_policy_is_monotonic_on_all_core_surfaces() {
+		yotm_update_disabled_sizes_option( array( 'medium', 'unknown-size' ) );
+		$sizes = array(
+			'thumbnail' => array( 'width' => 150 ),
+			'medium'    => array( 'width' => 300 ),
+		);
+
+		$this->assertSame( array( 'thumbnail' => array( 'width' => 150 ) ), yotm_apply_enabled_size_policy( $sizes ) );
+		$this->assertSame(
+			array( 'thumbnail' => array( 'width' => 150 ) ),
+			apply_filters( 'intermediate_image_sizes_advanced', $sizes, array(), 123 )
+		);
+		$this->assertSame(
+			array( 'thumbnail' => array( 'width' => 150 ) ),
+			apply_filters( 'wp_get_missing_image_subsizes', $sizes, array(), 123 )
+		);
+		$this->assertArrayNotHasKey( 'not-permitted', yotm_apply_enabled_size_policy( $sizes ) );
+	}
 }

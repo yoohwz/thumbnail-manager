@@ -109,6 +109,7 @@ function yotm_job_public_data( $job ) {
 		'scan_base_labels',
 		'scan_subpaths',
 		'orphan_summary',
+		'manifest_class_counts',
 		'result',
 		'scan_phase',
 		'estimated_bytes',

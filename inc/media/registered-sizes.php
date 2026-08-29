@@ -47,3 +47,41 @@ function yotm_get_registered_sizes() {
 	}
 	return $sizes;
 }
+
+/**
+ * Remove sizes disabled by Thumbnail Manager from an already permitted set.
+ *
+ * This policy is intentionally monotonic: it never starts from the global
+ * registered-size set and never adds a size removed by Core or another plugin.
+ *
+ * @param array $permitted_sizes Image sizes already permitted by the caller.
+ * @return array
+ */
+function yotm_apply_enabled_size_policy( $permitted_sizes ) {
+	if ( ! is_array( $permitted_sizes ) ) {
+		return array();
+	}
+
+	$disabled = yotm_get_disabled_sizes_option( array() );
+	if ( ! is_array( $disabled ) || empty( $disabled ) ) {
+		return $permitted_sizes;
+	}
+
+	foreach ( $disabled as $name ) {
+		$name = is_string( $name ) ? $name : '';
+		if ( '' !== $name ) {
+			unset( $permitted_sizes[ $name ] );
+		}
+	}
+
+	return $permitted_sizes;
+}
+
+/**
+ * Return the current registered sizes after the saved enabled-size policy.
+ *
+ * @return array
+ */
+function yotm_get_effective_enabled_sizes() {
+	return yotm_apply_enabled_size_policy( yotm_get_registered_sizes() );
+}

@@ -205,16 +205,17 @@
 		updateSubpathSelection();
 	});
 
-  function renderOrphanSummary(summary) {
+  function renderOrphanSummary(summary, classCounts) {
     if (!summary) {
       return '';
     }
     const found = summary.found ? Object.keys(summary.found).length : 0;
     const marked = Array.isArray(summary.delete) ? summary.delete.length : 0;
-    if (!found && !marked && !summary.unmapped && !summary.skipped_original && !summary.protected_sources && !summary.source_errors && !summary.unverified_sidecars && !summary.ambiguous_siblings) {
+    classCounts = classCounts || {};
+    if (!found && !marked && !summary.unmapped && !summary.skipped_original && !summary.protected_sources && !summary.source_errors && !summary.unverified_sidecars && !summary.ambiguous_siblings && !summary.malformed_preserved && !summary.kept_dimension_preserved && !classCounts.metadata_backed && !classCounts.verified_legacy) {
       return '';
     }
-    return '<div class="notice notice-info inline"><p><strong>' + escapeHtml(t('orphanDiscovery', 'Orphan discovery:')) + '</strong> ' + found + ' ' + escapeHtml(t('distinctDimsFound', 'distinct dimensions found.')) + '<br><strong>' + escapeHtml(t('metadataOrphanDimsDelete', 'Metadata orphan dimensions marked for deletion:')) + '</strong> ' + marked + '<br><strong>' + escapeHtml(t('originalFilesProtected', 'Original files protected:')) + '</strong> ' + escapeHtml(summary.skipped_original || 0) + '<br><strong>' + escapeHtml(t('protectedSources', 'Authoritative source paths protected:')) + '</strong> ' + escapeHtml(summary.protected_sources || 0) + '<br><strong>' + escapeHtml(t('sourceErrors', 'Indeterminate source checks preserved:')) + '</strong> ' + escapeHtml(summary.source_errors || 0) + '<br><strong>' + escapeHtml(t('unverifiedSidecars', 'Unverified format sidecars preserved:')) + '</strong> ' + escapeHtml(summary.unverified_sidecars || 0) + '<br><strong>' + escapeHtml(t('ambiguousSiblings', 'Ambiguous sibling files preserved:')) + '</strong> ' + escapeHtml(summary.ambiguous_siblings || 0) + '<br><strong>' + escapeHtml(t('unmappedDiskSkipped', 'Unmapped disk candidates skipped:')) + '</strong> ' + escapeHtml(Math.max(summary.unmapped || 0, summary.unmapped_skipped || 0)) + '</p></div>';
+    return '<div class="notice notice-info inline"><p><strong>' + escapeHtml(t('orphanDiscovery', 'Orphan discovery:')) + '</strong> ' + found + ' ' + escapeHtml(t('distinctDimsFound', 'distinct dimensions found.')) + '<br><strong>' + escapeHtml(t('metadataBackedCandidates', 'Metadata-backed candidates:')) + '</strong> ' + escapeHtml(classCounts.metadata_backed || 0) + '<br><strong>' + escapeHtml(t('verifiedLegacyCandidates', 'Verified legacy disk-only candidates:')) + '</strong> ' + escapeHtml(classCounts.verified_legacy || 0) + '<br><strong>' + escapeHtml(t('metadataOrphanDimsDelete', 'Metadata orphan dimensions marked for deletion:')) + '</strong> ' + marked + '<br><strong>' + escapeHtml(t('originalFilesProtected', 'Original files protected:')) + '</strong> ' + escapeHtml(summary.skipped_original || 0) + '<br><strong>' + escapeHtml(t('protectedSources', 'Authoritative source paths protected:')) + '</strong> ' + escapeHtml(summary.protected_sources || 0) + '<br><strong>' + escapeHtml(t('sourceErrors', 'Indeterminate source checks preserved:')) + '</strong> ' + escapeHtml(summary.source_errors || 0) + '<br><strong>' + escapeHtml(t('unverifiedSidecars', 'Unverified format sidecars preserved:')) + '</strong> ' + escapeHtml(summary.unverified_sidecars || 0) + '<br><strong>' + escapeHtml(t('ambiguousSiblings', 'Ambiguous sibling files preserved:')) + '</strong> ' + escapeHtml(summary.ambiguous_siblings || 0) + '<br><strong>' + escapeHtml(t('malformedPreserved', 'Malformed or mismatched files preserved:')) + '</strong> ' + escapeHtml(summary.malformed_preserved || 0) + '<br><strong>' + escapeHtml(t('keptDimensionPreserved', 'Files matching a kept size preserved:')) + '</strong> ' + escapeHtml(summary.kept_dimension_preserved || 0) + '<br><strong>' + escapeHtml(t('unmappedDiskSkipped', 'Unmapped disk candidates skipped:')) + '</strong> ' + escapeHtml(Math.max(summary.unmapped || 0, summary.unmapped_skipped || 0)) + '</p></div>';
   }
 
   function loadManifest(page) {
@@ -243,7 +244,10 @@
           const proof = Array.isArray(item.ownership_evidence) && item.ownership_evidence.length ? item.ownership_evidence[0] : {};
           const attachmentId = proof.attachment_id || item.attachment_id;
           const attachment = attachmentId ? '#' + attachmentId : '—';
-          const evidence = attachmentId ? [t('attachmentMetadata', 'Attachment metadata'), '#' + attachmentId, proof.size || item.size, proof.filename].filter(Boolean).join(' / ') : '—';
+          const legacy = item.ownership_schema === 'legacy_generated_v1';
+          const evidence = legacy
+            ? [t('verifiedLegacyEvidence', 'Verified legacy disk-only evidence'), item.observed_width && item.observed_height ? item.observed_width + '×' + item.observed_height : '', item.observed_mime, Array.isArray(item.matched_remove_sizes) ? item.matched_remove_sizes.join(', ') : ''].filter(Boolean).join(' / ')
+            : (attachmentId ? [t('attachmentMetadata', 'Attachment metadata'), '#' + attachmentId, proof.size || item.size, proof.filename].filter(Boolean).join(' / ') : '—');
           $body.append('<tr><td><code>' + escapeHtml(item.path || t('unknownPath', 'Unknown item')) + '</code></td><td>' + escapeHtml(attachment) + '</td><td>' + escapeHtml(evidence) + '</td><td>' + escapeHtml(formatBytes(item.estimated_bytes || item.bytes)) + '</td></tr>');
         });
       }
@@ -265,7 +269,7 @@
     $('#yotm_review_scope').text(data.scan_base || (data.context && data.context.scan_base_label) || 'uploads/');
     $('#yotm_review_expiry').text(formatDate(data.expires_at));
     $('#yotm_review_hash').text(pruneManifest);
-    $('#yotm_review_orphans').html(renderOrphanSummary(data.orphan_summary || (data.context && data.context.orphan_summary)));
+    $('#yotm_review_orphans').html(renderOrphanSummary(data.orphan_summary || (data.context && data.context.orphan_summary), data.manifest_class_counts || (data.context && data.context.manifest_class_counts)));
     $('#yotm_review_confirm').prop('checked', false).prop('disabled', false);
     $pruneApprove.text(String(t('deleteReviewedCount', 'Delete %s reviewed files')).replace('%s', pruneTotal.toLocaleString())).prop('disabled', true).removeClass('yo-hidden');
     $('#yotm_manifest_search').val('').prop('disabled', false);

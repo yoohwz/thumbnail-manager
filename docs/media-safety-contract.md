@@ -44,9 +44,20 @@ If containment cannot be established confidently, deletion fails closed.
 
 Metadata-backed generated files may be considered for deletion when the corresponding attachment/size relationship is established and all other safety checks pass.
 
-Disk-only files discovered by thumbnail-style filename patterns are informational by default when they cannot be mapped safely to attachment metadata. They must not silently become destructive candidates because of a broader scan, refactor, or recommendation change.
+Disk-only files discovered by thumbnail-style filename patterns are informational by default when they cannot be mapped safely to one authoritative attachment family. They must not silently become destructive candidates because of a broader scan, refactor, or recommendation change.
 
-Any future design that makes currently unmapped disk-only files deletable is a product/safety contract change and requires explicit Human approval through Controlled Lane.
+The sole reviewed exception is a `legacy_generated_v1` item produced under an explicit, versioned job policy. It must prove all of the following from raw authoritative state at scan, manifest, and delete time:
+
+- the candidate is a regular non-symlink file inside uploads and its decoded dimensions and MIME agree exactly with its filename extension and strict terminal `-WxH` suffix;
+- exactly one authoritative attachment family owns the current generation source stem and directory, with no source ambiguity or index dirtiness;
+- the observed dimensions are projected by at least one currently registered explicitly removed size and by no kept size; a kept-size match is an unconditional veto;
+- no metadata-generated owner or protected/source reference owns the candidate path;
+- folder-scoped jobs remain bound to the frozen authoritative attached-file meta ID; and
+- immutable source/candidate hashes and node fingerprints still match.
+
+Legacy authority is job-local and cannot be inferred for an older job that lacks the exact policy version and policy hash. The job-level compatibility marker may remain `generated_file_v1`; item-level `ownership_schema` is the authority discriminator. A legacy item never authorizes attachment-metadata reconciliation, including when its file is already absent.
+
+Any broader design that makes other unmapped disk-only files deletable is a product/safety contract change and requires explicit Human approval through Controlled Lane.
 
 ## 4. Review-first prune lifecycle
 
@@ -55,6 +66,8 @@ The prune lifecycle remains separated into discovery and deletion:
 `scan -> manifest -> review -> explicit approval -> bounded deletion`
 
 The item set must become immutable before review. Late scan batches or other requests must not append or mutate candidate payloads after manifest finalization begins.
+
+The disabled-size cleanup bridge may enable legacy discovery and start the scan, but it must stop at this immutable review boundary. It must never approve a manifest or begin deletion automatically.
 
 The persisted manifest hash identifies the reviewed candidate set. Approval and deletion must require the same hash; a missing or mismatched hash fails closed and requires a new review cycle.
 
@@ -93,6 +106,8 @@ Finishing, cancelling, or expiring a job must eventually release the logical des
 ## 8. Metadata reconciliation
 
 When a generated file is successfully removed, attachment metadata may be updated only for the references represented by that approved candidate.
+
+`legacy_generated_v1` is intentionally disk-only evidence. Its candidate payload must carry no metadata-removal instruction or generated metadata references, and every reconciliation path must reject any legacy payload that attempts to introduce either.
 
 If the file is already absent, reconciliation may remove a stale matching metadata reference when the candidate contains enough evidence to identify it safely.
 
@@ -162,6 +177,8 @@ A Controlled change touching this contract must preserve or deliberately update 
 - job ownership;
 - destructive-job locking;
 - manifest immutability and hash matching;
+- strict legacy filename/dimension/MIME proof, kept-size veto, one-family source ownership, policy/hash compatibility, and zero metadata reconciliation;
+- scaled/original source-basename divergence and folder meta-ID replacement rejection for legacy candidates;
 - cancellation/audit retention;
 - resumable deletion and persisted cursors.
 - raw meta-ID folder snapshots, execution-time scope drift, and delete/reinsert replacement rejection;

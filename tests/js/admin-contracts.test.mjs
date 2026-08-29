@@ -832,6 +832,23 @@ test('sizes module registers moved handlers against the shared core', () => {
   }
 });
 
+test('disabled-size cleanup enables reviewed legacy discovery without approving or deleting', () => {
+  const harness = createHarness();
+  loadAdmin(harness);
+  harness.$('input[name="yotm_enable_sizes[]"]:checked').elements.splice(0, 1, {value: 'thumbnail'});
+  harness.$('.yotm_keep').elements.splice(0, 1, {value: 'thumbnail'}, {value: 'medium'});
+  vm.runInContext(sizesSource, harness.context, {filename: 'js/admin-sizes.js'});
+
+  invokeHandler(harness, '#yotm_sizes_prune_disabled');
+  invokeHandler(harness, '#yotm_run');
+
+  assert.equal(harness.$('#yotm_discover_orphans').elements[0].checked, true);
+  assert.equal(actionCalls(harness, 'yotm_prune_prepare')[0].payload.discover_orphans, 1);
+  assert.equal(actionCalls(harness, 'yotm_prune_approve').length, 0);
+  assert.equal(actionCalls(harness, 'yotm_prune_delete_batch').length, 0);
+  assert.match(sizesSource, /#yotm_run[^\n]+trigger\('click'\)/);
+});
+
 test('all localized keys consumed by bundled admin modules are discovered in PHP', () => {
   const combined = [adminSource, pruneSource, recommendationsSource, regenerateSource, sizesSource].join('\n');
   const jsKeys = new Set(

@@ -174,4 +174,24 @@ class YOTM_Admin_Adapters_Test extends WP_UnitTestCase {
 			$this->assertStringContainsString( $needle, $source, $needle );
 		}
 	}
+
+	/**
+	 * Prune AJAX remains administrator/nonce gated and forwards discovery only to prepare.
+	 */
+	public function test_prune_ajax_source_preserves_review_first_authorization_contract() {
+		$source  = file_get_contents( dirname( __DIR__, 2 ) . '/inc/handle-prune.php' );
+		$source .= file_get_contents( dirname( __DIR__, 2 ) . '/inc/handle-delete.php' );
+
+		foreach ( array(
+			"current_user_can( 'manage_options' )",
+			"check_ajax_referer( 'yotm_prune_nonce', 'nonce' )",
+			"! empty( \$_POST['discover_orphans'] )",
+			'yotm_prune_prepare_application(',
+			'yotm_prune_scan_application(',
+			'yotm_prune_approve_application(',
+			'yotm_prune_delete_application(',
+		) as $needle ) {
+			$this->assertStringContainsString( $needle, $source, $needle );
+		}
+	}
 }

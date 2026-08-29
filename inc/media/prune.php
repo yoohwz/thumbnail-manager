@@ -33,25 +33,462 @@ function yotm_prune_normalize_candidate_evidence( $candidate ) {
 }
 
 /**
+ * Hash the immutable policy state that may authorize verified legacy items.
+ *
+ * @param array $payload Prune job payload.
+ * @return string
+ */
+function yotm_legacy_policy_hash( $payload ) {
+	$sizes = array();
+	foreach ( (array) ( $payload['sizes'] ?? array() ) as $name => $definition ) {
+		if ( ! is_array( $definition ) ) {
+			continue;
+		}
+		$sizes[ (string) $name ] = array(
+			'width'  => absint( $definition['width'] ?? 0 ),
+			'height' => absint( $definition['height'] ?? 0 ),
+			'crop'   => ! empty( $definition['crop'] ),
+		);
+	}
+	ksort( $sizes );
+	$keep       = array_values( array_map( 'strval', (array) ( $payload['keep'] ?? array() ) ) );
+	$remove     = array_values( array_map( 'strval', (array) ( $payload['remove'] ?? array() ) ) );
+	$subpaths   = array_values( array_map( 'strval', (array) ( $payload['selection_subpaths'] ?? array() ) ) );
+	$scan_bases = array_values( array_map( 'yotm_normalize_filesystem_path', (array) ( $payload['scan_bases'] ?? array() ) ) );
+	sort( $keep );
+	sort( $remove );
+	sort( $subpaths );
+	sort( $scan_bases );
+
+	return hash(
+		'sha256',
+		(string) wp_json_encode(
+			array(
+				'version'            => 1,
+				'keep'               => $keep,
+				'remove'             => $remove,
+				'sizes'              => $sizes,
+				'selector'           => (string) ( $payload['selector'] ?? '' ),
+				'selection_meta_max' => absint( $payload['selection_meta_max'] ?? 0 ),
+				'selection_subpaths' => $subpaths,
+				'scan_bases'         => $scan_bases,
+			)
+		)
+	);
+}
+
+/**
+ * Verify that one persisted job explicitly enabled legacy evidence version 1.
+ *
+ * @param array $payload Prune job payload.
+ * @return true|WP_Error
+ */
+function yotm_legacy_policy_validate( $payload ) {
+	$policy = is_array( $payload['legacy_policy'] ?? null ) ? $payload['legacy_policy'] : array();
+	if ( empty( $payload['discover_orphans'] ) || 1 !== absint( $policy['version'] ?? 0 ) || empty( $policy['enabled'] ) ) {
+		return new WP_Error( 'yotm_legacy_policy_unavailable', __( 'This prune job does not contain reviewed legacy-cleanup policy evidence.', 'thumbnail-manager' ) );
+	}
+	$expected = yotm_legacy_policy_hash( $payload );
+	$actual   = (string) ( $policy['hash'] ?? '' );
+	if ( ! preg_match( '/^[a-f0-9]{64}$/', $actual ) || ! hash_equals( $expected, $actual ) ) {
+		return new WP_Error( 'yotm_legacy_policy_changed', __( 'The persisted legacy-cleanup policy is incomplete or changed.', 'thumbnail-manager' ) );
+	}
+
+	return true;
+}
+
+/**
+ * Return the allowed decoded MIME for one legacy filename extension.
+ *
+ * @param string $extension Filename extension.
+ * @return string
+ */
+function yotm_legacy_extension_mime( $extension ) {
+	$map = array(
+		'jpg'  => 'image/jpeg',
+		'jpeg' => 'image/jpeg',
+		'png'  => 'image/png',
+		'gif'  => 'image/gif',
+		'webp' => 'image/webp',
+		'avif' => 'image/avif',
+	);
+
+	return $map[ strtolower( (string) $extension ) ] ?? '';
+}
+
+/**
+ * Parse and decode one strict Core-style disk-only derivative.
+ *
+ * @param string   $path Candidate path.
+ * @param string[] $scan_bases Selected canonical scan roots.
+ * @return array|WP_Error
+ */
+function yotm_legacy_parse_disk_candidate( $path, $scan_bases ) {
+	$lexical   = yotm_prune_journal_lexical_path( $path );
+	$canonical = yotm_media_source_canonical_path( $lexical );
+	if ( is_wp_error( $canonical ) || ! hash_equals( $lexical, (string) $canonical ) || ! yotm_is_path_inside_any_dir( $canonical, $scan_bases ) ) {
+		return new WP_Error( 'yotm_legacy_path_invalid', __( 'The disk-only path is outside the exact reviewed uploads scope.', 'thumbnail-manager' ) );
+	}
+	$node = yotm_prune_journal_path_state( $canonical );
+	if ( is_wp_error( $node ) || 'regular' !== ( $node['state'] ?? '' ) ) {
+		return is_wp_error( $node ) ? $node : new WP_Error( 'yotm_legacy_node_invalid', __( 'The disk-only path is not a regular non-symlink file.', 'thumbnail-manager' ) );
+	}
+
+	$filename = wp_basename( $canonical );
+	if ( ! preg_match( '/^(.+)-([1-9][0-9]*)x([1-9][0-9]*)\.(jpe?g|png|gif|webp|avif)$/i', $filename, $matches ) ) {
+		return new WP_Error( 'yotm_legacy_filename_invalid', __( 'The disk-only filename is not one strict generated-size form.', 'thumbnail-manager' ) );
+	}
+	$stem = (string) $matches[1];
+	if (
+		preg_match( '/(?:-[0-9]+x[0-9]+|-e[0-9]+|-scaled|-rotated)$/i', $stem )
+		|| preg_match( '/(?:^|[._-])(?:bak|backup|orig|original|old|tmp|temp)(?:$|[._-])/i', $stem )
+	) {
+		return new WP_Error( 'yotm_legacy_sibling_ambiguous', __( 'The disk-only filename is an ambiguous edit, scale, rotation, or backup sibling.', 'thumbnail-manager' ) );
+	}
+
+	$image         = wp_getimagesize( $canonical );
+	$mime          = is_array( $image ) ? sanitize_mime_type( $image['mime'] ?? '' ) : '';
+	$width         = absint( $matches[2] );
+	$height        = absint( $matches[3] );
+	$expected_mime = yotm_legacy_extension_mime( $matches[4] );
+	if ( ! is_array( $image ) || absint( $image[0] ?? 0 ) !== $width || absint( $image[1] ?? 0 ) !== $height || '' === $expected_mime || ! hash_equals( $expected_mime, $mime ) ) {
+		return new WP_Error( 'yotm_legacy_image_mismatch', __( 'The disk-only file dimensions or MIME type do not match its filename.', 'thumbnail-manager' ) );
+	}
+	$file_hash = hash_file( 'sha256', $canonical );
+	if ( ! is_string( $file_hash ) || ! preg_match( '/^[a-f0-9]{64}$/', $file_hash ) ) {
+		return new WP_Error( 'yotm_legacy_file_unreadable', __( 'The disk-only file could not be hashed exactly.', 'thumbnail-manager' ) );
+	}
+
+	return array(
+		'path'        => $canonical,
+		'filename'    => $filename,
+		'directory'   => dirname( $canonical ),
+		'stem'        => $stem,
+		'width'       => $width,
+		'height'      => $height,
+		'mime'        => $mime,
+		'bytes'       => absint( $node['bytes'] ?? 0 ),
+		'fingerprint' => (string) ( $node['fingerprint'] ?? '' ),
+		'file_hash'   => $file_hash,
+	);
+}
+
+/**
+ * Return registered size names that project to exact observed dimensions.
+ *
+ * @param string[] $names Registered size names.
+ * @param array    $sizes Registered definitions.
+ * @param int      $source_width Source width.
+ * @param int      $source_height Source height.
+ * @param int      $width Observed output width.
+ * @param int      $height Observed output height.
+ * @return string[]
+ */
+function yotm_legacy_matching_size_names( $names, $sizes, $source_width, $source_height, $width, $height ) {
+	$matched = array();
+	foreach ( (array) $names as $name ) {
+		if ( ! isset( $sizes[ $name ] ) || ! is_array( $sizes[ $name ] ) ) {
+			continue;
+		}
+		$definition = $sizes[ $name ];
+		$projected  = image_resize_dimensions(
+			absint( $source_width ),
+			absint( $source_height ),
+			absint( $definition['width'] ?? 0 ),
+			absint( $definition['height'] ?? 0 ),
+			! empty( $definition['crop'] )
+		);
+		if ( is_array( $projected ) && absint( $projected[4] ?? 0 ) === absint( $width ) && absint( $projected[5] ?? 0 ) === absint( $height ) ) {
+			$matched[] = (string) $name;
+		}
+	}
+	sort( $matched );
+
+	return array_values( array_unique( $matched ) );
+}
+
+/**
+ * Classify a bounded set of strict disk paths using exact authoritative state.
+ *
+ * @param string[] $paths Candidate paths.
+ * @param array    $job_payload Immutable Prune policy/scope payload.
+ * @return array<string,array|WP_Error>|WP_Error Results keyed by normalized path.
+ */
+function yotm_classify_legacy_disk_candidates( $paths, $job_payload ) {
+	$policy = yotm_legacy_policy_validate( $job_payload );
+	if ( is_wp_error( $policy ) ) {
+		return $policy;
+	}
+	$clean = yotm_media_reference_require_complete_index();
+	if ( is_wp_error( $clean ) ) {
+		return $clean;
+	}
+	$scan_bases       = is_array( $job_payload['scan_bases'] ?? null ) ? $job_payload['scan_bases'] : array( $job_payload['scan_base'] ?? '' );
+	$parsed           = array();
+	$results          = array();
+	$source_map       = array();
+	$all_hashes       = array();
+	$candidate_hashes = array();
+	$extensions       = array( 'jpg', 'jpeg', 'png', 'gif', 'webp', 'avif' );
+
+	foreach ( array_slice( array_values( array_unique( array_map( 'strval', (array) $paths ) ) ), 0, 1000 ) as $path ) {
+		$key  = yotm_prune_journal_lexical_path( $path );
+		$info = yotm_legacy_parse_disk_candidate( $key, $scan_bases );
+		if ( is_wp_error( $info ) ) {
+			$results[ $key ] = $info;
+			continue;
+		}
+		$parsed[ $key ]                          = $info;
+		$candidate_hashes[ $key ]                = hash( 'sha256', $info['path'] );
+		$all_hashes[ $candidate_hashes[ $key ] ] = $candidate_hashes[ $key ];
+		foreach ( $extensions as $extension ) {
+			$source = yotm_media_source_canonical_path( $info['directory'] . '/' . $info['stem'] . '.' . $extension );
+			if ( is_wp_error( $source ) ) {
+				continue;
+			}
+			$hash                        = hash( 'sha256', $source );
+			$source_map[ $key ][ $hash ] = $source;
+			$all_hashes[ $hash ]         = $hash;
+		}
+	}
+
+	$rows_by_hash = yotm_media_source_store_paths_rows( array_values( $all_hashes ), YOTM_MEDIA_SOURCE_FANOUT_LIMIT );
+	if ( is_wp_error( $rows_by_hash ) ) {
+		return $rows_by_hash;
+	}
+	$preflights         = array();
+	$source_owner_cache = array();
+	foreach ( $parsed as $key => $info ) {
+		$family_ids = array();
+		foreach ( (array) ( $source_map[ $key ] ?? array() ) as $hash => $source_path ) {
+			foreach ( (array) ( $rows_by_hash[ $hash ] ?? array() ) as $row ) {
+				$kind = sanitize_key( $row->source_kind ?? '' );
+				if ( in_array( $kind, array( 'attached', 'metadata_full', 'original' ), true ) && hash_equals( $source_path, (string) $row->path ) ) {
+					$family_ids[ absint( $row->attachment_id ?? 0 ) ] = absint( $row->attachment_id ?? 0 );
+				}
+			}
+		}
+		$family_ids = array_values( array_filter( $family_ids ) );
+		if ( 1 !== count( $family_ids ) ) {
+			$results[ $key ] = new WP_Error( 'yotm_legacy_family_ambiguous', __( 'The disk-only file could not be bound to exactly one authoritative attachment family.', 'thumbnail-manager' ) );
+			continue;
+		}
+
+		$attachment_id = $family_ids[0];
+		if ( ! array_key_exists( $attachment_id, $preflights ) ) {
+			$preflights[ $attachment_id ] = yotm_regenerate_preflight( $attachment_id );
+		}
+		$snapshot = $preflights[ $attachment_id ];
+		if ( is_wp_error( $snapshot ) ) {
+			$results[ $key ] = $snapshot;
+			continue;
+		}
+		$source = (string) ( $snapshot['source'] ?? '' );
+		if (
+			! isset( $source_map[ $key ][ hash( 'sha256', $source ) ] )
+			|| ! hash_equals( $info['directory'], dirname( $source ) )
+			|| ! hash_equals( $info['stem'], pathinfo( $source, PATHINFO_FILENAME ) )
+			|| ! yotm_is_path_inside_any_dir( $source, $scan_bases )
+		) {
+			$results[ $key ] = new WP_Error( 'yotm_legacy_generation_source_mismatch', __( 'The inferred disk family does not match the authoritative generation source.', 'thumbnail-manager' ) );
+			continue;
+		}
+
+		if ( ! array_key_exists( $source, $source_owner_cache ) ) {
+			$source_owner_cache[ $source ] = yotm_media_reference_path_owners( $source );
+		}
+		$source_owners = $source_owner_cache[ $source ];
+		if ( is_wp_error( $source_owners ) ) {
+			$results[ $key ] = $source_owners;
+			continue;
+		}
+		$source_owned = false;
+		foreach ( (array) $source_owners['protected'] as $owner ) {
+			if ( absint( $owner['attachment_id'] ?? 0 ) === $attachment_id ) {
+				$source_owned = true;
+				break;
+			}
+		}
+		if ( ! $source_owned ) {
+			$results[ $key ] = new WP_Error( 'yotm_legacy_source_unowned', __( 'The authoritative generation source is not owned by the matched attachment.', 'thumbnail-manager' ) );
+			continue;
+		}
+
+		if ( 'attached_meta_v2' === ( $job_payload['selector'] ?? '' ) ) {
+			$authorized = yotm_authorize_attached_file_selector_scope(
+				$attachment_id,
+				absint( $snapshot['attached_meta_id'] ?? 0 ),
+				absint( $job_payload['selection_meta_max'] ?? 0 ),
+				(array) ( $job_payload['selection_subpaths'] ?? array() )
+			);
+			if ( is_wp_error( $authorized ) ) {
+				$results[ $key ] = $authorized;
+				continue;
+			}
+		}
+
+		$source_image = wp_getimagesize( $source );
+		if ( ! is_array( $source_image ) || empty( $source_image[0] ) || empty( $source_image[1] ) ) {
+			$results[ $key ] = new WP_Error( 'yotm_legacy_source_dimensions', __( 'The authoritative generation-source dimensions could not be decoded.', 'thumbnail-manager' ) );
+			continue;
+		}
+		$sizes          = is_array( $job_payload['sizes'] ?? null ) ? $job_payload['sizes'] : array();
+		$matched_keep   = yotm_legacy_matching_size_names( $job_payload['keep'] ?? array(), $sizes, $source_image[0], $source_image[1], $info['width'], $info['height'] );
+		$matched_remove = yotm_legacy_matching_size_names( $job_payload['remove'] ?? array(), $sizes, $source_image[0], $source_image[1], $info['width'], $info['height'] );
+		if ( ! empty( $matched_keep ) ) {
+			$results[ $key ] = new WP_Error( 'yotm_legacy_kept_dimension', __( 'The disk-only dimensions also match a size selected to keep.', 'thumbnail-manager' ) );
+			continue;
+		}
+		if ( empty( $matched_remove ) ) {
+			$results[ $key ] = new WP_Error( 'yotm_legacy_unregistered_dimension', __( 'The disk-only dimensions do not match a currently registered removed size.', 'thumbnail-manager' ) );
+			continue;
+		}
+
+		$candidate_rows = (array) ( $rows_by_hash[ $candidate_hashes[ $key ] ] ?? array() );
+		if ( ! empty( $candidate_rows ) ) {
+			foreach ( $candidate_rows as $candidate_row ) {
+				if ( ! hash_equals( $info['path'], (string) $candidate_row->path ) ) {
+					$results[ $key ] = new WP_Error( 'yotm_legacy_path_hash_collision', __( 'The disk-only path hash matched a different authoritative path.', 'thumbnail-manager' ) );
+					continue 2;
+				}
+			}
+			$owners = yotm_media_reference_path_owners( $info['path'] );
+			if ( is_wp_error( $owners ) ) {
+				$results[ $key ] = $owners;
+				continue;
+			}
+			if ( ! empty( $owners['protected'] ) || ! empty( $owners['generated'] ) ) {
+				$results[ $key ] = new WP_Error( 'yotm_legacy_path_owned', __( 'The disk-only path now has an authoritative media reference.', 'thumbnail-manager' ) );
+				continue;
+			}
+		}
+
+		$policy_hash     = (string) ( $job_payload['legacy_policy']['hash'] ?? '' );
+		$proof           = array(
+			'attachment_id'     => $attachment_id,
+			'size'              => implode( ',', $matched_remove ),
+			'filename'          => $info['filename'],
+			'mime'              => $info['mime'],
+			'selection'         => 'legacy_generated',
+			'selection_meta_id' => 'attached_meta_v2' === ( $job_payload['selector'] ?? '' ) ? absint( $snapshot['attached_meta_id'] ?? 0 ) : 0,
+		);
+		$results[ $key ] = array(
+			'path'                       => $info['path'],
+			'attachment_id'              => $attachment_id,
+			'size'                       => implode( ',', $matched_remove ),
+			'source'                     => 'legacy_disk',
+			'ownership_schema'           => 'legacy_generated_v1',
+			'ownership'                  => 'legacy_disk',
+			'ownership_evidence'         => array( $proof ),
+			'remove_metadata'            => 0,
+			'metadata_refs'              => array(),
+			'evidence_version'           => 1,
+			'legacy_policy_hash'         => $policy_hash,
+			'source_path'                => $source,
+			'source_path_hash'           => hash( 'sha256', $source ),
+			'source_file_hash'           => (string) $snapshot['source_hash'],
+			'source_width'               => absint( $source_image[0] ),
+			'source_height'              => absint( $source_image[1] ),
+			'observed_width'             => $info['width'],
+			'observed_height'            => $info['height'],
+			'observed_mime'              => $info['mime'],
+			'matched_remove_sizes'       => $matched_remove,
+			'estimated_bytes'            => $info['bytes'],
+			'candidate_file_hash'        => $info['file_hash'],
+			'candidate_node_fingerprint' => $info['fingerprint'],
+		);
+	}//end foreach
+
+	return $results;
+}
+
+/**
+ * Rebuild and compare every class-specific legacy authorization fact.
+ *
+ * @param array $item Immutable item payload.
+ * @param array $job_payload Immutable job policy payload.
+ * @return true|WP_Error
+ */
+function yotm_prune_validate_legacy_evidence( $item, $job_payload ) {
+	if (
+		! is_array( $item )
+		|| 'legacy_generated_v1' !== ( $item['ownership_schema'] ?? '' )
+		|| 'legacy_disk' !== ( $item['ownership'] ?? '' )
+		|| 1 !== absint( $item['evidence_version'] ?? 0 )
+		|| ! empty( $item['remove_metadata'] )
+		|| ! empty( $item['metadata_refs'] )
+	) {
+		return new WP_Error( 'yotm_legacy_evidence_invalid', __( 'The legacy prune item lacks exact disk-only evidence.', 'thumbnail-manager' ) );
+	}
+	$classified = yotm_classify_legacy_disk_candidates( array( $item['path'] ?? '' ), $job_payload );
+	if ( is_wp_error( $classified ) ) {
+		return $classified;
+	}
+	$key     = yotm_prune_journal_lexical_path( $item['path'] ?? '' );
+	$current = $classified[ $key ] ?? null;
+	if ( is_wp_error( $current ) ) {
+		return $current;
+	}
+	if ( ! is_array( $current ) ) {
+		return new WP_Error( 'yotm_legacy_evidence_changed', __( 'The legacy disk-only evidence could not be reproduced.', 'thumbnail-manager' ) );
+	}
+	$fields = array(
+		'path',
+		'attachment_id',
+		'size',
+		'source',
+		'ownership_schema',
+		'ownership',
+		'ownership_evidence',
+		'remove_metadata',
+		'metadata_refs',
+		'evidence_version',
+		'legacy_policy_hash',
+		'source_path',
+		'source_path_hash',
+		'source_file_hash',
+		'source_width',
+		'source_height',
+		'observed_width',
+		'observed_height',
+		'observed_mime',
+		'matched_remove_sizes',
+		'estimated_bytes',
+		'candidate_file_hash',
+		'candidate_node_fingerprint',
+	);
+	foreach ( $fields as $field ) {
+		if ( ( $item[ $field ] ?? null ) !== ( $current[ $field ] ?? null ) ) {
+			return new WP_Error( 'yotm_legacy_evidence_changed', __( 'The legacy disk-only evidence changed after scanning.', 'thumbnail-manager' ) );
+		}
+	}
+
+	return true;
+}
+
+/**
  * Return the initial disk-orphan reporting counters.
  *
  * @return array
  */
 function yotm_initial_orphan_summary() {
 	return array(
-		'found'                   => array(),
-		'delete'                  => array(),
-		'kept_match'              => array(),
-		'total_files'             => 0,
-		'skipped_original'        => 0,
-		'skipped_original_sample' => array(),
-		'unmapped'                => 0,
-		'unmapped_sample'         => array(),
-		'unmapped_skipped'        => 0,
-		'unverified_sidecars'     => 0,
-		'ambiguous_siblings'      => 0,
-		'protected_sources'       => 0,
-		'source_errors'           => 0,
+		'found'                    => array(),
+		'delete'                   => array(),
+		'kept_match'               => array(),
+		'total_files'              => 0,
+		'skipped_original'         => 0,
+		'skipped_original_sample'  => array(),
+		'unmapped'                 => 0,
+		'unmapped_sample'          => array(),
+		'unmapped_skipped'         => 0,
+		'unverified_sidecars'      => 0,
+		'ambiguous_siblings'       => 0,
+		'malformed_preserved'      => 0,
+		'kept_dimension_preserved' => 0,
+		'verified_legacy'          => 0,
+		'protected_sources'        => 0,
+		'source_errors'            => 0,
 	);
 }
 
@@ -471,13 +908,29 @@ function yotm_prune_validate_live_reference_evidence( $item, $path ) {
  * @return string|WP_Error Canonical candidate path.
  */
 function yotm_validate_prune_item_ownership( $item, $uploads_base ) {
-	if ( ! is_array( $item ) || 'generated_file_v1' !== ( $item['ownership_schema'] ?? '' ) || 'metadata_size' !== ( $item['ownership'] ?? '' ) ) {
+	if ( ! is_array( $item ) ) {
 		return new WP_Error( 'yotm_prune_ownership_invalid', __( 'The prune item lacks exact generated-file ownership evidence.', 'thumbnail-manager' ) );
 	}
 
 	$path = yotm_media_source_canonical_path( $item['path'] ?? '' );
 	if ( is_wp_error( $path ) || ! yotm_is_path_inside_dir( is_wp_error( $path ) ? '' : $path, $uploads_base ) ) {
 		return is_wp_error( $path ) ? $path : new WP_Error( 'yotm_prune_path_invalid', __( 'File path is outside uploads.', 'thumbnail-manager' ) );
+	}
+	if ( 'legacy_generated_v1' === ( $item['ownership_schema'] ?? '' ) && 'legacy_disk' === ( $item['ownership'] ?? '' ) ) {
+		if (
+			1 !== absint( $item['evidence_version'] ?? 0 )
+			|| empty( $item['attachment_id'] )
+			|| ! empty( $item['remove_metadata'] )
+			|| ! empty( $item['metadata_refs'] )
+			|| 1 !== count( (array) ( $item['ownership_evidence'] ?? array() ) )
+		) {
+			return new WP_Error( 'yotm_legacy_evidence_invalid', __( 'The legacy prune item lacks exact disk-only evidence.', 'thumbnail-manager' ) );
+		}
+
+		return $path;
+	}
+	if ( 'generated_file_v1' !== ( $item['ownership_schema'] ?? '' ) || 'metadata_size' !== ( $item['ownership'] ?? '' ) ) {
+		return new WP_Error( 'yotm_prune_ownership_invalid', __( 'The prune item lacks exact generated-file ownership evidence.', 'thumbnail-manager' ) );
 	}
 
 	$filename = wp_basename( $path );
@@ -543,11 +996,14 @@ function yotm_delete_prune_item( $item, $uploads_base ) {
 			return $reconciled;
 		}
 
+		$legacy = is_array( $item ) && 'legacy_generated_v1' === ( $item['ownership_schema'] ?? '' );
 		return array(
 			'deleted' => false,
 			'skipped' => true,
 			'bytes'   => 0,
-			'message' => __( 'File was already missing; metadata was reconciled.', 'thumbnail-manager' ),
+			'message' => $legacy
+				? __( 'The reviewed legacy file was already missing; no attachment metadata was changed.', 'thumbnail-manager' )
+				: __( 'File was already missing; metadata was reconciled.', 'thumbnail-manager' ),
 		);
 	}
 
@@ -571,6 +1027,13 @@ function yotm_delete_prune_item( $item, $uploads_base ) {
  */
 function yotm_reconcile_prune_item_metadata( $item, $path ) {
 	if ( ! is_array( $item ) ) {
+		return true;
+	}
+	if ( 'legacy_generated_v1' === ( $item['ownership_schema'] ?? '' ) ) {
+		if ( 'legacy_disk' !== ( $item['ownership'] ?? '' ) || ! empty( $item['remove_metadata'] ) || ! empty( $item['metadata_refs'] ) ) {
+			return new WP_Error( 'yotm_legacy_metadata_authority_invalid', __( 'A disk-only legacy item attempted to acquire attachment metadata authority.', 'thumbnail-manager' ) );
+		}
+
 		return true;
 	}
 
