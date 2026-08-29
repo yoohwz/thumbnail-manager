@@ -7,6 +7,8 @@
   const nonce   = config.nonce || '';
   const siteId  = config.siteId || 0;
   const activeStatuses = ['scanning', 'running', 'awaiting_approval', 'approved', 'deleting'];
+  const workflowTypes = new Set(['prune', 'regenerate', 'recommendation']);
+  const workflows = Object.create(null);
 
   function t(key, fallback) {
     return i18n[key] || fallback;
@@ -95,12 +97,32 @@
     }
   }
 
+  function request(action, data) {
+    return $.post(ajaxurl, Object.assign({}, data || {}, {action: action, nonce: nonce}));
+  }
+
   function cancelJob(token) {
-    return $.post(ajaxurl, {action: 'yotm_job_cancel', nonce: nonce, token: token});
+    return request('yotm_job_cancel', {token: token});
   }
 
   function getJobStatus(token) {
-    return $.post(ajaxurl, {action: 'yotm_job_status', nonce: nonce, token: token});
+    return request('yotm_job_status', {token: token});
+  }
+
+  function registerWorkflow(type, workflow) {
+    if (!workflowTypes.has(type) || !workflow || typeof workflow.resume !== 'function') {
+      return;
+    }
+    workflows[type] = workflow;
+  }
+
+  function resumeWorkflow(type, token) {
+    const workflow = workflows[type];
+    if (!token || !workflow || (typeof workflow.isActive === 'function' && workflow.isActive())) {
+      return false;
+    }
+    workflow.resume(token);
+    return true;
   }
 
   function activateTab(tab) {
@@ -133,28 +155,6 @@
     const $next = $tabs.eq(next);
     activateTab($next.data('tab'));
     $next.trigger('focus');
-  });
-
-  const coreSet = new Set(['thumbnail', 'medium', 'large', 'medium_large', '1536x1536', '2048x2048']);
-
-  $('#yotm_sizes_enable_core').on('click', function(){
-    $('input[name="yotm_enable_sizes[]"]').each(function(){ this.checked = coreSet.has(this.value); });
-  });
-  $('#yotm_sizes_enable_all').on('click', function(){ $('input[name="yotm_enable_sizes[]"]').prop('checked', true); });
-  $('#yotm_sizes_disable_all').on('click', function(){ $('input[name="yotm_enable_sizes[]"]').prop('checked', false); });
-
-  $('#yotm_sizes_prune_disabled').on('click', function(){
-    const enabled = new Set();
-    $('input[name="yotm_enable_sizes[]"]:checked').each(function(){ enabled.add(this.value); });
-    const allSizes = $('.yotm_keep').map(function(){ return this.value; }).get();
-    if (enabled.size === allSizes.length) {
-      window.alert(t('allSizesEnabled', 'All sizes are enabled — there are no disabled sizes to prune.'));
-      return;
-    }
-    activateTab('prune');
-    $('.yotm_keep').each(function(){ this.checked = enabled.has(this.value); });
-    $('#yotm_discover_orphans').prop('checked', false);
-    $('#yotm_run').trigger('click');
   });
 
   function jobTypeLabel(type) {
@@ -217,7 +217,7 @@
   }
 
   function loadRecentJobs() {
-    $.post(ajaxurl, {action: 'yotm_jobs_recent', nonce: nonce}).done(function(response){
+    request('yotm_jobs_recent').done(function(response){
       if (response && response.success && response.data) {
         renderRecentJobs(response.data.jobs || []);
         resumeDiscoveredJob(recentActiveJob);
@@ -948,18 +948,6 @@
     }).fail(function(){ regenRunning = true; $regenCancel.prop('disabled', false); });
   });
 
-  $(document).on('click', 'button[name="yotm_save_and_regenerate"]', function(){
-    const $form = $(this).closest('form');
-    if (!$form.length) {
-      return;
-    }
-    let $hidden = $form.find('input[type="hidden"][name="yotm_save_and_regenerate"]');
-    if (!$hidden.length) {
-      $hidden = $('<input>', {type: 'hidden', name: 'yotm_save_and_regenerate'}).appendTo($form);
-    }
-    $hidden.val('1');
-  });
-
   // Batched recommendation jobs.
   let recommendToken = '';
   let recommendRunning = false;
@@ -1196,36 +1184,83 @@
 
   function resumeDiscoveredJob(job) {
     if (!job) {
+      return false;
+    }
+    return resumeWorkflow(job.type, job.token);
+  }
+
+  registerWorkflow('prune', {
+    isActive: function(){ return !!pruneToken; },
+    resume: resumePrune
+  });
+  registerWorkflow('regenerate', {
+    isActive: function(){ return !!regenToken; },
+    prepare: prepareRegenerate,
+    resume: resumeRegenerate
+  });
+  registerWorkflow('recommendation', {
+    isActive: function(){ return !!recommendToken; },
+    resume: resumeRecommendation
+  });
+
+  let started = false;
+
+  function start() {
+    if (started) {
       return;
     }
-    if (job.type === 'prune' && !pruneToken) {
-      resumePrune(job.token);
-    } else if (job.type === 'regenerate' && !regenToken) {
-      resumeRegenerate(job.token);
-    } else if (job.type === 'recommendation' && !recommendToken) {
-      resumeRecommendation(job.token);
+    started = true;
+
+    toggleRegenScopeFields();
+    toggleRegenModeNote();
+    toggleSubpathPicker();
+    filterSubpathOptions();
+
+    const storedPrune = recallJob('prune');
+    const storedRegen = recallJob('regenerate');
+    const storedRecommend = recallJob('recommendation');
+    if (storedPrune) {
+      resumeWorkflow('prune', storedPrune);
+    } else if (storedRegen) {
+      resumeWorkflow('regenerate', storedRegen);
     }
+    if (storedRecommend) {
+      resumeWorkflow('recommendation', storedRecommend);
+    }
+    if (window.YOTM_RUN_REGENERATE_AFTER_SAVE && !storedPrune && !storedRegen) {
+      activateTab('regenerate');
+      window.setTimeout(function(){
+        const workflow = workflows.regenerate;
+        if (workflow && typeof workflow.prepare === 'function' &&
+          !(typeof workflow.isActive === 'function' && workflow.isActive())) {
+          workflow.prepare();
+        }
+      }, 250);
+    }
+    loadRecentJobs();
   }
 
-  toggleRegenScopeFields();
-  toggleRegenModeNote();
-	toggleSubpathPicker();
-	filterSubpathOptions();
+  // Internal module seam for bundled admin modules; not a public extension API.
+  window.YOTMAdmin = Object.freeze({
+    activateTab: activateTab,
+    cancelJob: cancelJob,
+    errorDetails: errorDetails,
+    escapeHtml: escapeHtml,
+    forgetJob: forgetJob,
+    formatBytes: formatBytes,
+    formatDate: formatDate,
+    formatTemplate: formatTemplate,
+    getJobStatus: getJobStatus,
+    htmlNotice: htmlNotice,
+    jobProgress: jobProgress,
+    loadRecentJobs: loadRecentJobs,
+    recallJob: recallJob,
+    registerWorkflow: registerWorkflow,
+    rememberJob: rememberJob,
+    request: request,
+    responseError: responseError,
+    t: t
+  });
 
-  const storedPrune = recallJob('prune');
-  const storedRegen = recallJob('regenerate');
-  const storedRecommend = recallJob('recommendation');
-  if (storedPrune) {
-    resumePrune(storedPrune);
-  } else if (storedRegen) {
-    resumeRegenerate(storedRegen);
-  }
-  if (storedRecommend) {
-    resumeRecommendation(storedRecommend);
-  }
-  if (window.YOTM_RUN_REGENERATE_AFTER_SAVE && !storedPrune && !storedRegen) {
-    activateTab('regenerate');
-    window.setTimeout(function(){ prepareRegenerate(); }, 250);
-  }
-  loadRecentJobs();
+  start();
 })(jQuery);

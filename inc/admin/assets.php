@@ -37,7 +37,15 @@ function yotm_admin_enqueue_assets( $hook ) {
 		file_exists( YOTM_PLUGIN_PATH . 'js/admin.js' ) ? (string) filemtime( YOTM_PLUGIN_PATH . 'js/admin.js' ) : YOTM_VERSION,
 		true
 	);
+	wp_register_script(
+		'yotm-prune-admin-sizes',
+		YOTM_PLUGIN_URL . 'js/admin-sizes.js',
+		array( 'yotm-prune-admin' ),
+		file_exists( YOTM_PLUGIN_PATH . 'js/admin-sizes.js' ) ? (string) filemtime( YOTM_PLUGIN_PATH . 'js/admin-sizes.js' ) : YOTM_VERSION,
+		true
+	);
 	wp_enqueue_script( 'yotm-prune-admin' );
+	wp_enqueue_script( 'yotm-prune-admin-sizes' );
 
 	// Pass data to JS.
 	wp_localize_script(
