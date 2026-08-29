@@ -19,6 +19,101 @@ class YOTM_Recommendations_Test extends WP_UnitTestCase {
 		parent::tearDown();
 	}
 
+	public function test_recommendation_modules_enforce_application_transport_and_compatibility_boundaries() {
+		$root               = dirname( __DIR__, 2 );
+		$application_module = wp_normalize_path( $root . '/inc/application/recommendations.php' );
+		$transport_module   = wp_normalize_path( $root . '/inc/handle-recommendations.php' );
+		$jobs_compat_module = wp_normalize_path( $root . '/inc/job-storage.php' );
+		$bootstrap_module   = wp_normalize_path( $root . '/thumbnail-manager.php' );
+
+		$application_functions = array(
+			'yotm_recommend_prepare_application',
+			'yotm_recommend_batch_application',
+			'yotm_recommend_scan_attachment_metadata_ids',
+			'yotm_recommend_scan_content_ids',
+			'yotm_recommend_registered_sizes_signature',
+			'yotm_recommend_classify_item',
+			'yotm_recommend_build_evidence',
+			'yotm_build_recommendation_result',
+			'yotm_recommendation_result_for_response',
+			'yotm_recommendation_public_result_application',
+			'yotm_build_recommendation_progress_response',
+		);
+		foreach ( $application_functions as $function ) {
+			$reflection = new ReflectionFunction( $function );
+			$this->assertSame( $application_module, wp_normalize_path( $reflection->getFileName() ), $function );
+		}
+
+		foreach ( array( 'yotm_recommend_prepare', 'yotm_recommend_batch', 'yotm_recommend_send_application_outcome' ) as $function ) {
+			$reflection = new ReflectionFunction( $function );
+			$this->assertSame( $transport_module, wp_normalize_path( $reflection->getFileName() ), $function );
+		}
+		$reflection = new ReflectionFunction( 'yotm_job_public_recommendation_result' );
+		$this->assertSame( $jobs_compat_module, wp_normalize_path( $reflection->getFileName() ) );
+		$this->assertSame( 10, has_action( 'wp_ajax_yotm_recommend_prepare', 'yotm_recommend_prepare' ) );
+		$this->assertSame( 10, has_action( 'wp_ajax_yotm_recommend_batch', 'yotm_recommend_batch' ) );
+
+		$application_source = file_get_contents( $application_module );
+		$transport_source   = file_get_contents( $transport_module );
+		$jobs_compat_source = file_get_contents( $jobs_compat_module );
+		$bootstrap_source   = file_get_contents( $bootstrap_module );
+
+		$this->assertDoesNotMatchRegularExpression( '/\\$_POST|wp_send_json_|current_user_can|check_ajax_referer|add_action\\s*\\(/', $application_source );
+		$this->assertDoesNotMatchRegularExpression( '/\\b(?:unlink|rename|wp_delete_attachment|update_post_meta|delete_post_meta)\\s*\\(/', $application_source );
+		$this->assertDoesNotMatchRegularExpression( '/yotm_job_(?:create|get|acquire_worker|worker_update)|yotm_build_recommendation_result|yotm_recommend_scan_/', $transport_source );
+		$this->assertDoesNotMatchRegularExpression( '/is_callable|call_user_func|yotm_recommendation_result_for_response/', $jobs_compat_source );
+		$this->assertStringContainsString( 'yotm_recommendation_public_result_application( $result, $projector )', $jobs_compat_source );
+		$this->assertLessThan(
+			strpos( $bootstrap_source, 'inc/handle-recommendations.php' ),
+			strpos( $bootstrap_source, 'inc/application/recommendations.php' )
+		);
+	}
+
+	public function test_application_prepare_and_completed_batch_preserve_progress_contract() {
+		$GLOBALS['yotm_job_storage_readiness'] = array();
+		delete_option( 'yotm_job_db_version' );
+		delete_transient( 'yotm_job_db_migration_failure' );
+		$this->assertTrue( yotm_install_job_tables() );
+		$missing = yotm_recommend_batch_application( 'missing-recommendation-token', 100 );
+		$this->assertFalse( $missing['success'] );
+		$this->assertSame( 400, $missing['status'] );
+		$this->assertArrayHasKey( 'msg', $missing['data'] );
+
+		$prepared = yotm_recommend_prepare_application();
+		$this->assertTrue( $prepared['success'] );
+		$this->assertSame( 200, $prepared['status'] );
+		$this->assertFalse( $prepared['data']['done'] );
+		$this->assertSame( 'metadata', $prepared['data']['phase'] );
+
+		$job                   = yotm_job_get( $prepared['data']['token'] );
+		$payload               = $job['payload'];
+		$payload['scan_phase'] = 'completed';
+		$payload['result']     = array(
+			'items'            => array(),
+			'recommended_keep' => array( 'thumbnail' ),
+		);
+		$completed             = yotm_job_update(
+			$job['id'],
+			array(
+				'payload'   => $payload,
+				'status'    => 'completed',
+				'phase'     => 'completed',
+				'total'     => 1,
+				'processed' => 1,
+			)
+		);
+		$this->assertTrue( $completed );
+		$job = yotm_job_get_by_id( $job['id'] );
+		$this->assertIsArray( $job );
+
+		$outcome = yotm_recommend_batch_application( $job['token'], 100 );
+		$this->assertTrue( $outcome['success'] );
+		$this->assertSame( 200, $outcome['status'] );
+		$this->assertTrue( $outcome['data']['done'] );
+		$this->assertSame( 100, $outcome['data']['percent'] );
+		$this->assertSame( array( 'thumbnail' ), yotm_job_get_by_id( $job['id'] )['payload']['result']['recommended_keep'] );
+	}
+
 	public function test_decision_table_uses_positive_evidence_only() {
 		$sizes  = array(
 			'thumbnail'             => array(
@@ -191,6 +286,7 @@ class YOTM_Recommendations_Test extends WP_UnitTestCase {
 		$projected = yotm_recommendation_result_for_response( $persisted );
 
 		$this->assertContains( 'tm_aud_new_size', $projected['recommended_keep'] );
+		$this->assertSame( $projected, yotm_job_public_recommendation_result( $persisted ) );
 		$this->assertSame( $before, $persisted );
 		$this->assertSame( 'older-snapshot', $projected['registered_sizes_signature'] );
 	}
