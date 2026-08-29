@@ -170,7 +170,9 @@ function yotm_job_get_mutable_item( $job_id, $item_key ) {
 
 	$tables   = yotm_job_table_names();
 	$item_key = preg_match( '/^[a-f0-9]{64}$/', (string) $item_key ) ? (string) $item_key : hash( 'sha256', (string) $item_key );
-	$row      = $wpdb->get_row(
+	// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Plugin-owned table names; values use placeholders.
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Mutable item lookup must be uncached and state-fenced.
+	$row = $wpdb->get_row(
 		$wpdb->prepare(
 			"SELECT items.* FROM {$tables['items']} items
 			INNER JOIN {$tables['jobs']} jobs ON jobs.id = items.job_id
@@ -180,6 +182,7 @@ function yotm_job_get_mutable_item( $job_id, $item_key ) {
 			$item_key
 		)
 	);
+	// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 
 	return $row ? yotm_job_normalize_item_row( $row ) : false;
 }
@@ -195,7 +198,8 @@ function yotm_job_update_mutable_item_payload( $item_id, $payload ) {
 	global $wpdb;
 
 	$tables = yotm_job_table_names();
-	$sql    = $wpdb->prepare(
+	// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Plugin-owned table names; values use placeholders.
+	$sql = $wpdb->prepare(
 		"UPDATE {$tables['items']} items
 		INNER JOIN {$tables['jobs']} jobs ON jobs.id = items.job_id
 		SET items.payload = %s, items.updated_at = %s
@@ -204,6 +208,7 @@ function yotm_job_update_mutable_item_payload( $item_id, $payload ) {
 		gmdate( 'Y-m-d H:i:s' ),
 		absint( $item_id )
 	);
+	// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 
 	// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Mutable payload replacement is state-fenced and prepared above.
 	return 1 === $wpdb->query( $sql );
@@ -233,6 +238,7 @@ function yotm_job_get_item_rows_page( $job_id, $page = 1, $per_page = 25, $searc
 		$args[] = '%' . $wpdb->esc_like( $search ) . '%';
 	}
 
+	// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Plugin-owned table/WHERE fragments and their bounded arguments are assembled above.
 	// phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- Dynamic WHERE contains only the job ID and optional payload-search placeholders.
 	$count_sql = $wpdb->prepare( "SELECT COUNT(*) FROM {$tables['items']} WHERE {$where}", ...$args );
 	// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Prepared above; table name is plugin-owned.
@@ -242,6 +248,7 @@ function yotm_job_get_item_rows_page( $job_id, $page = 1, $per_page = 25, $searc
 	$offset     = ( $page - 1 ) * $per_page;
 	$query_args = array_merge( $args, array( $per_page, $offset ) );
 	$list_sql   = $wpdb->prepare( "SELECT * FROM {$tables['items']} WHERE {$where} ORDER BY id ASC LIMIT %d OFFSET %d", ...$query_args );
+	// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
 	// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Prepared above; table name is plugin-owned.
 	$rows = $wpdb->get_results( $list_sql );
 	$out  = array();
@@ -272,14 +279,17 @@ function yotm_job_get_failed_item_rows( $job_id, $limit = 20 ) {
 	global $wpdb;
 
 	$tables = yotm_job_table_names();
-	$rows   = $wpdb->get_results(
+	// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Plugin-owned table name; values use placeholders.
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Failed item reporting must read current persistent rows uncached.
+	$rows = $wpdb->get_results(
 		$wpdb->prepare(
 			"SELECT * FROM {$tables['items']} WHERE job_id = %d AND status = 'failed' ORDER BY id DESC LIMIT %d",
 			absint( $job_id ),
 			max( 1, min( 100, absint( $limit ) ) )
 		)
 	);
-	$out    = array();
+	// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+	$out = array();
 
 	foreach ( $rows as $row ) {
 		$item = yotm_job_normalize_item_row( $row );
@@ -304,7 +314,9 @@ function yotm_job_get_manifest_rows_after( $job_id, $after, $limit ) {
 
 	$tables = yotm_job_table_names();
 	$limit  = max( 10, min( 5000, absint( $limit ) ) );
-	$rows   = $wpdb->get_results(
+	// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Plugin-owned table name; values use placeholders.
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Manifest construction must read exact persisted rows uncached.
+	$rows = $wpdb->get_results(
 		$wpdb->prepare(
 			"SELECT item_key,payload FROM {$tables['items']} WHERE job_id = %d AND item_key > %s ORDER BY item_key ASC LIMIT %d",
 			absint( $job_id ),
@@ -312,7 +324,8 @@ function yotm_job_get_manifest_rows_after( $job_id, $after, $limit ) {
 			$limit
 		)
 	);
-	$out    = array();
+	// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+	$out = array();
 
 	foreach ( $rows as $row ) {
 		$out[] = array(
