@@ -112,7 +112,10 @@ function createHarness(options = {}) {
           elements.forEach((element) => { element.html = value; });
           return collection;
         }
-        return elements[0] ? elements[0].html || '' : '';
+        if (!elements[0]) {
+          return '';
+        }
+        return elements[0].html === undefined ? elements[0].text || '' : elements[0].html;
       },
       prop(key, value) {
         if (typeof key === 'object') {
@@ -131,8 +134,14 @@ function createHarness(options = {}) {
       show() { return collection; },
       hide() { return collection; },
       empty() { return collection; },
-      append() { return collection; },
-      prepend() { return collection; },
+      append(value) {
+        elements.forEach((element) => { element.html = (element.html || '') + String(value ?? ''); });
+        return collection;
+      },
+      prepend(value) {
+        elements.forEach((element) => { element.html = String(value ?? '') + (element.html || ''); });
+        return collection;
+      },
       trigger() { return collection; },
       filter() { return collection; },
       is() { return false; },
@@ -508,6 +517,107 @@ test('Recommendations module preserves prepare and bounded batch payloads', () =
   assert.deepEqual(actionCalls(harness, 'yotm_recommend_batch')[0].payload, {
     action: 'yotm_recommend_batch', nonce: 'nonce-123', token: 'recommend-module-token', batch: 100
   });
+});
+
+test('Regenerate module preserves terminal, empty, and network-retry state transitions', () => {
+  const terminal = createHarness({
+    responses: {
+      yotm_regenerate_prepare: {kind: 'done', value: {success: true, data: {
+        token: 'regen-terminal', total_known: true, total: 1, processed: 0,
+        regenerated: 0, skipped: 0, failed: 0, scope_label: 'All media'
+      }}},
+      yotm_regenerate_batch: {kind: 'done', value: {success: true, data: {
+        done: true, total_known: true, total: 1, processed: 1, percent: 100,
+        regenerated: 1, skipped: 0, failed: 0, scope_label: 'All media', errors: []
+      }}}
+    }
+  });
+  loadAdmin(terminal);
+  invokeHandler(terminal, '#yotm_regen_run');
+  assert.equal(terminal.storage.has('yotm_job_42_regenerate'), false);
+  assert.match(terminal.cache.get('#yotm_regen_results').html(), /Done\. Regenerated 1 attachments/);
+  assert.equal(terminal.cache.get('#yotm_regen_run').elements[0].disabled, false);
+
+  const empty = createHarness({
+    responses: {
+      yotm_regenerate_prepare: {kind: 'done', value: {success: true, data: {
+        token: 'regen-empty', total_known: true, total: 0, processed: 0,
+        regenerated: 0, skipped: 0, failed: 0, scope_label: 'All media'
+      }}},
+      yotm_job_cancel: {kind: 'done', value: {success: true}}
+    }
+  });
+  loadAdmin(empty);
+  invokeHandler(empty, '#yotm_regen_run');
+  assert.equal(actionCalls(empty, 'yotm_regenerate_batch').length, 0);
+  assert.equal(actionCalls(empty, 'yotm_job_cancel').length, 1);
+  assert.equal(empty.storage.has('yotm_job_42_regenerate'), false);
+  assert.match(empty.cache.get('#yotm_regen_results').html(), /No image attachments found/);
+
+  const retry = createHarness({
+    responses: {
+      yotm_regenerate_prepare: {kind: 'done', value: {success: true, data: {
+        token: 'regen-retry', total_known: true, total: 1, processed: 0,
+        regenerated: 0, skipped: 0, failed: 0, scope_label: 'All media'
+      }}},
+      yotm_regenerate_batch: {kind: 'fail', value: {status: 0}}
+    }
+  });
+  loadAdmin(retry);
+  invokeHandler(retry, '#yotm_regen_run');
+  assert.equal(retry.storage.get('yotm_job_42_regenerate'), 'regen-retry');
+  assert.equal(retry.cache.get('#yotm_regen_run').elements[0].disabled, true);
+  assert.match(retry.cache.get('#yotm_regen_results').html(), /Reload this page to resume it/);
+});
+
+test('Recommendations module preserves terminal, empty, and network-retry state transitions', () => {
+  const terminal = createHarness({
+    config: {registeredSizesSignature: 'sizes-signature'},
+    responses: {
+      yotm_recommend_prepare: {kind: 'done', value: {success: true, data: {token: 'recommend-terminal'}}},
+      yotm_recommend_batch: {kind: 'done', value: {success: true, data: {
+        done: true, phase: 'content', processed: 1, total: 1, percent: 100,
+        result: {
+          schema_version: 2, registered_sizes_signature: 'sizes-signature',
+          protected_count: 1, detected_reference_count: 0, unknown_count: 0,
+          generated_bytes_human: '1 KB',
+          items: [{name: 'thumbnail', dimensions: '150x150', status: 'protected', apply_action: 'preserve'}]
+        }
+      }}}
+    }
+  });
+  loadAdmin(terminal);
+  invokeHandler(terminal, '#yotm_recommend_scan');
+  assert.equal(terminal.storage.has('yotm_job_42_recommendation'), false);
+  assert.match(terminal.cache.get('#yotm_recommend_results').html(), /Safe recommendations are ready/);
+  assert.equal(terminal.cache.get('#yotm_recommend_scan').elements[0].disabled, false);
+
+  const empty = createHarness({
+    config: {registeredSizesSignature: 'sizes-signature'},
+    responses: {
+      yotm_recommend_prepare: {kind: 'done', value: {success: true, data: {token: 'recommend-empty'}}},
+      yotm_recommend_batch: {kind: 'done', value: {success: true, data: {
+        done: true, phase: 'content', processed: 0, total: 0, percent: 100,
+        result: {schema_version: 2, registered_sizes_signature: 'sizes-signature', items: []}
+      }}}
+    }
+  });
+  loadAdmin(empty);
+  invokeHandler(empty, '#yotm_recommend_scan');
+  assert.equal(empty.storage.has('yotm_job_42_recommendation'), false);
+  assert.match(empty.cache.get('#yotm_recommend_results').html(), /No recommendation data found/);
+
+  const retry = createHarness({
+    responses: {
+      yotm_recommend_prepare: {kind: 'done', value: {success: true, data: {token: 'recommend-retry'}}},
+      yotm_recommend_batch: {kind: 'fail', value: {status: 0}}
+    }
+  });
+  loadAdmin(retry);
+  invokeHandler(retry, '#yotm_recommend_scan');
+  assert.equal(retry.storage.get('yotm_job_42_recommendation'), 'recommend-retry');
+  assert.equal(retry.cache.get('#yotm_recommend_scan').elements[0].disabled, true);
+  assert.match(retry.cache.get('#yotm_recommend_results').html(), /Reload this page to resume it/);
 });
 
 test('workflow implementation lives only in the approved extracted modules', () => {
