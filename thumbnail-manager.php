@@ -41,6 +41,7 @@ class Yo_Thumbnail_Manager {
 	 */
 	private function include_files() {
 		include_once plugin_dir_path( __FILE__ ) . 'inc/infrastructure/database.php';
+		include_once plugin_dir_path( __FILE__ ) . 'inc/infrastructure/options.php';
 		include_once plugin_dir_path( __FILE__ ) . 'inc/job-storage.php';
 		include_once plugin_dir_path( __FILE__ ) . 'inc/media/paths.php';
 		include_once plugin_dir_path( __FILE__ ) . 'inc/media/attachments.php';
@@ -57,8 +58,10 @@ class Yo_Thumbnail_Manager {
 		include_once plugin_dir_path( __FILE__ ) . 'inc/application/prune.php';
 		include_once plugin_dir_path( __FILE__ ) . 'inc/application/regenerate.php';
 		include_once plugin_dir_path( __FILE__ ) . 'inc/application/recommendations.php';
+		include_once plugin_dir_path( __FILE__ ) . 'inc/application/size-management.php';
 		include_once plugin_dir_path( __FILE__ ) . 'inc/admin-menu.php';
 		include_once plugin_dir_path( __FILE__ ) . 'inc/regenerate-transaction.php';
+		include_once plugin_dir_path( __FILE__ ) . 'inc/handle-jobs.php';
 		include_once plugin_dir_path( __FILE__ ) . 'inc/handle-regenerate.php';
 		include_once plugin_dir_path( __FILE__ ) . 'inc/handle-recommendations.php';
 		include_once plugin_dir_path( __FILE__ ) . 'inc/handle-prune.php';

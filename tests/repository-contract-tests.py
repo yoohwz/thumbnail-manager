@@ -45,8 +45,13 @@ wporg_policy = json.loads(read("release/wporg-policy.json"))
 wporg_helper = read("bin/wporg-release.py")
 release_validator = read("bin/validate-release.py")
 phpcs_config = read("phpcs.xml.dist")
-admin_php = read("inc/admin-menu.php")
-admin_js = read("js/admin.js")
+admin_php = "\n".join(
+    [read("inc/admin-menu.php")]
+    + [path.read_text(encoding="utf-8") for path in sorted((ROOT / "inc/admin").glob("*.php"))]
+)
+admin_js = "\n".join(
+    path.read_text(encoding="utf-8") for path in sorted((ROOT / "js").glob("admin*.js"))
+)
 pot = read("languages/thumbnail-manager.pot")
 
 plugin_version = match(r"^\s*\*\s*Version:\s*(\S+)", plugin, "plugin header Version")

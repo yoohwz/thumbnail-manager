@@ -13,7 +13,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 add_filter(
 	'intermediate_image_sizes_advanced',
 	function ( $sizes ) {
-		$disabled = get_option( 'yotm_disabled_sizes', array() );
+		$disabled = yotm_get_disabled_sizes_option( array() );
 
 		if ( ! is_array( $disabled ) || empty( $disabled ) ) {
 			return $sizes;
