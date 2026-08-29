@@ -40,10 +40,13 @@ class Yo_Thumbnail_Manager {
 	 * Include the plugin modules in dependency order.
 	 */
 	private function include_files() {
+		include_once plugin_dir_path( __FILE__ ) . 'inc/infrastructure/database.php';
 		include_once plugin_dir_path( __FILE__ ) . 'inc/job-storage.php';
 		include_once plugin_dir_path( __FILE__ ) . 'inc/media/paths.php';
 		include_once plugin_dir_path( __FILE__ ) . 'inc/media/attachments.php';
 		include_once plugin_dir_path( __FILE__ ) . 'inc/media/registered-sizes.php';
+		include_once plugin_dir_path( __FILE__ ) . 'inc/media/source-store.php';
+		include_once plugin_dir_path( __FILE__ ) . 'inc/media/source-locks.php';
 		include_once plugin_dir_path( __FILE__ ) . 'inc/helper.php';
 		include_once plugin_dir_path( __FILE__ ) . 'inc/sizes-patterns.php';
 		include_once plugin_dir_path( __FILE__ ) . 'inc/upload-subpaths.php';

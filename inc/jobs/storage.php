@@ -9,6 +9,8 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
+require_once dirname( __DIR__ ) . '/infrastructure/database.php';
+
 if ( ! defined( 'YOTM_JOB_DB_VERSION' ) ) {
 	define( 'YOTM_JOB_DB_VERSION', '1.2.0' );
 }
@@ -27,12 +29,10 @@ if ( ! defined( 'YOTM_JOB_DB_MIGRATION_BACKOFF' ) ) {
  * @return array{jobs:string,items:string,sources:string}
  */
 function yotm_job_table_names() {
-	global $wpdb;
-
 	return array(
-		'jobs'    => $wpdb->prefix . 'yotm_jobs',
-		'items'   => $wpdb->prefix . 'yotm_job_items',
-		'sources' => $wpdb->prefix . 'yotm_media_sources',
+		'jobs'    => yotm_database_table_name( 'yotm_jobs' ),
+		'items'   => yotm_database_table_name( 'yotm_job_items' ),
+		'sources' => yotm_database_table_name( 'yotm_media_sources' ),
 	);
 }
 
@@ -87,16 +87,7 @@ function yotm_job_storage_request_key() {
  * @return WP_Error
  */
 function yotm_job_storage_error( $code = 'yotm_job_storage_unavailable', $database_error = '' ) {
-	$message = 'yotm_job_storage_inconsistent' === $code
-		? __( 'Persistent job storage is incomplete. Restore the job database tables before continuing.', 'thumbnail-manager' )
-		: __( 'Persistent job storage is unavailable. Please try again later or ask an administrator to check the database.', 'thumbnail-manager' );
-
-	$data = array();
-	if ( '' !== $database_error ) {
-		$data['database_error'] = $database_error;
-	}
-
-	return new WP_Error( $code, $message, $data );
+	return yotm_database_storage_error( $code, $database_error );
 }
 
 /**
@@ -105,13 +96,7 @@ function yotm_job_storage_error( $code = 'yotm_job_storage_unavailable', $databa
  * @return WP_Error|false
  */
 function yotm_job_last_database_error() {
-	global $wpdb;
-
-	if ( '' === (string) $wpdb->last_error ) {
-		return false;
-	}
-
-	return yotm_job_storage_error( 'yotm_job_storage_unavailable', (string) $wpdb->last_error );
+	return yotm_database_last_error();
 }
 
 /**
