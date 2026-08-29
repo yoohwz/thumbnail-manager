@@ -111,19 +111,6 @@ Deactivation clears Thumbnail Manager's scheduled cleanup task but retains setti
 * Added a clearer radio-card Scope picker for Regenerate while preserving targeted folder and attachment selection
 * Improved admin accessibility, compatibility checks, workflow feedback, and automated safety coverage
 
-= 1.4.0 (Jul 17, 2026) =
-
-* Added persistent job and job-item database storage with ownership, expiry, cancellation, cleanup, locking, resume, and per-item errors
-* Split Prune Files into scan, immutable hashed manifest review, explicit approval, and resumable deletion
-* Added a five-step prune workflow, paginated manifest review, active and recent jobs, inline delete approval, and responsive layouts
-* Added a searchable, grouped multi-folder picker for limiting Prune scans to several upload years or months
-* Limited attachment queries and disk orphan scans to the selected upload folders
-* Made UI accents inherit the administrator's WordPress profile Color Scheme
-* Changed Stop to retain cancelled job and item audit records and prevent late batches from overwriting that state
-* Batched disk orphan discovery and recommendation scans with persisted cursors
-* Updated force regeneration to prefer the original image source and preserve existing metadata
-* Added PHPUnit safety and storage tests, WordPress Coding Standards, PHP compatibility checks, Plugin Check, and a PHP/WordPress CI matrix
-
 See `changelog.txt` for the complete release history.
 
 == Upgrade Notice ==
