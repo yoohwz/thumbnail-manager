@@ -313,6 +313,7 @@ class YOTM_Job_Storage_Test extends WP_UnitTestCase {
 		add_filter( 'query', array( $this, 'fail_historical_evidence_read' ) );
 		$this->assertWPError( yotm_job_count_items_by_status( $job['id'], array( 'historical_cohort' ) ) );
 		$this->assertWPError( yotm_job_get_status_rows_after_id( $job['id'], 'historical_cohort', 0, 10 ) );
+		$this->assertWPError( yotm_job_get_manifest_rows_after( $job['id'], '', 10 ) );
 		remove_filter( 'query', array( $this, 'fail_historical_evidence_read' ) );
 		$wpdb->suppress_errors( $suppressing );
 
@@ -1208,7 +1209,9 @@ class YOTM_Job_Storage_Test extends WP_UnitTestCase {
 	}
 
 	public function fail_historical_evidence_read( $query ) {
-		return false !== strpos( $query, 'historical_cohort' ) && 0 === stripos( ltrim( $query ), 'SELECT' )
+		$is_historical = false !== strpos( $query, 'historical_cohort' );
+		$is_manifest   = false !== strpos( $query, 'SELECT item_key,payload' ) && false !== strpos( $query, "status = 'queued'" );
+		return ( $is_historical || $is_manifest ) && 0 === stripos( ltrim( $query ), 'SELECT' )
 			? 'SELECT * FROM yotm_missing_historical_evidence_table'
 			: $query;
 	}

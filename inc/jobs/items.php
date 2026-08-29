@@ -329,6 +329,10 @@ function yotm_job_get_manifest_rows_after( $job_id, $after, $limit ) {
 		)
 	);
 	// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+	$query_error = yotm_job_last_database_error();
+	if ( is_wp_error( $query_error ) ) {
+		return $query_error;
+	}
 	$out = array();
 
 	foreach ( $rows as $row ) {
@@ -349,7 +353,7 @@ function yotm_job_get_manifest_rows_after( $job_id, $after, $limit ) {
  * @param string $status Exact inert item status.
  * @param int    $after_id Exclusive row ID cursor.
  * @param int    $limit Maximum rows.
- * @return array[]
+ * @return array[]|WP_Error
  */
 function yotm_job_get_status_rows_after_id( $job_id, $status, $after_id, $limit ) {
 	global $wpdb;
