@@ -41,6 +41,7 @@ class YOTM_Job_Storage_Test extends WP_UnitTestCase {
 	public function tearDown(): void {
 		remove_filter( 'query', array( $this, 'fail_named_lock_query' ) );
 		remove_filter( 'query', array( $this, 'fail_worker_cas_query' ) );
+		remove_filter( 'query', array( $this, 'fail_historical_evidence_read' ) );
 		remove_filter( 'query', array( $this, 'force_named_lock_contention' ) );
 		$this->clear_jobs();
 		foreach ( array_unique( $this->files ) as $file ) {
@@ -267,6 +268,58 @@ class YOTM_Job_Storage_Test extends WP_UnitTestCase {
 		$this->assertTrue( yotm_job_worker_update( $second_worker, array( 'processed' => 2 ) ) );
 		$this->assertSame( 2, yotm_job_get_by_id( $job['id'] )['processed'] );
 
+		yotm_job_release_worker( $second_worker );
+	}
+
+	public function test_historical_evidence_mutation_and_cleanup_are_exact_worker_fenced() {
+		global $wpdb;
+
+		$job = yotm_job_create(
+			'prune',
+			array(),
+			array(
+				'status'       => 'scanning',
+				'phase'        => 'cohort_aggregate',
+				'counter_mode' => 'item_v3',
+			)
+		);
+		$this->assertIsArray( $job );
+		$first_worker = yotm_job_acquire_worker( $job['id'], array( 'scanning' ), array( 'cohort_aggregate', 'cohort_materialize' ) );
+		$this->assertIsArray( $first_worker );
+
+		$tables = yotm_job_table_names();
+		$wpdb->update(
+			$tables['jobs'],
+			array( 'worker_lease_expires_at' => gmdate( 'Y-m-d H:i:s', time() - MINUTE_IN_SECONDS ) ),
+			array( 'id' => $job['id'] )
+		);
+		yotm_job_release_named_lock( $first_worker['lock_name'] );
+		$second_worker = yotm_job_acquire_worker( $job['id'], array( 'scanning' ), array( 'cohort_aggregate', 'cohort_materialize' ) );
+		$this->assertIsArray( $second_worker );
+
+		$this->assertFalse( yotm_job_add_item( $job['id'], 'late-generic-row', array( 'late' => 1 ), 'queued' ) );
+		$this->assertFalse( yotm_job_worker_add_item( $second_worker, 'invalid-worker-row', array( 'late' => 1 ), 'queued' ) );
+		$stale_key = hash( 'sha256', 'stale-historical-row' );
+		$this->assertFalse( yotm_job_worker_add_item( $first_worker, $stale_key, array( 'stale' => 1 ), 'historical_cohort' ) );
+		$this->assertFalse( yotm_job_item_exists( $job['id'], $stale_key ) );
+
+		$item_key = hash( 'sha256', 'current-historical-row' );
+		$this->assertTrue( yotm_job_worker_add_item( $second_worker, $item_key, array( 'sealed' => 0 ), 'historical_cohort' ) );
+		$item = yotm_job_get_item_by_key( $job['id'], $item_key );
+		$this->assertIsArray( $item );
+		$this->assertFalse( yotm_job_worker_replace_item( $second_worker, $item['id'], 'historical_cohort', 'queued', array( 'sealed' => 1 ) ) );
+		$this->assertSame( 1, yotm_job_count_items_by_status( $job['id'], array( 'historical_cohort' ) ) );
+		$suppressing = $wpdb->suppress_errors();
+		add_filter( 'query', array( $this, 'fail_historical_evidence_read' ) );
+		$this->assertWPError( yotm_job_count_items_by_status( $job['id'], array( 'historical_cohort' ) ) );
+		$this->assertWPError( yotm_job_get_status_rows_after_id( $job['id'], 'historical_cohort', 0, 10 ) );
+		remove_filter( 'query', array( $this, 'fail_historical_evidence_read' ) );
+		$wpdb->suppress_errors( $suppressing );
+
+		$this->assertTrue( yotm_job_worker_update( $second_worker, array( 'phase' => 'cohort_materialize' ) ) );
+		$this->assertWPError( yotm_job_worker_delete_status_batch( $second_worker, array( 'queued' ), 1 ) );
+		$this->assertSame( 1, yotm_job_worker_delete_status_batch( $second_worker, array( 'historical_cohort' ), 1 ) );
+		$this->assertSame( 0, yotm_job_count_items_by_status( $job['id'], array( 'historical_cohort' ) ) );
 		yotm_job_release_worker( $second_worker );
 	}
 
@@ -1152,6 +1205,12 @@ class YOTM_Job_Storage_Test extends WP_UnitTestCase {
 		}
 
 		return $query;
+	}
+
+	public function fail_historical_evidence_read( $query ) {
+		return false !== strpos( $query, 'historical_cohort' ) && 0 === stripos( ltrim( $query ), 'SELECT' )
+			? 'SELECT * FROM yotm_missing_historical_evidence_table'
+			: $query;
 	}
 
 	public function force_named_lock_contention( $query ) {

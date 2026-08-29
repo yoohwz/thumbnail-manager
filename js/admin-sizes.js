@@ -27,6 +27,7 @@
     $('.yotm_keep').each(function(){ this.checked = enabled.has(this.value); });
     // Human-approved bridge: enable discovery and stop at immutable review.
     $('#yotm_discover_orphans').prop('checked', true);
+	$('#yotm_discover_historical').prop('checked', false);
     $('#yotm_run').trigger('click');
   });
 

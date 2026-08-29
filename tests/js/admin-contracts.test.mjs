@@ -488,7 +488,8 @@ test('Prune module preserves prepare, manifest review, approval, and delete payl
     nonce: 'nonce-123',
     keep: ['150x150'],
     limit_subpaths: [],
-    discover_orphans: 0
+    discover_orphans: 0,
+    discover_historical: 0
   });
   prepare.deferred.resolve({success: true, data: {token: 'prune-module-token'}});
 
@@ -843,7 +844,9 @@ test('disabled-size cleanup enables reviewed legacy discovery without approving 
   invokeHandler(harness, '#yotm_run');
 
   assert.equal(harness.$('#yotm_discover_orphans').elements[0].checked, true);
+  assert.equal(harness.$('#yotm_discover_historical').elements[0].checked, false);
   assert.equal(actionCalls(harness, 'yotm_prune_prepare')[0].payload.discover_orphans, 1);
+  assert.equal(actionCalls(harness, 'yotm_prune_prepare')[0].payload.discover_historical, 0);
   assert.equal(actionCalls(harness, 'yotm_prune_approve').length, 0);
   assert.equal(actionCalls(harness, 'yotm_prune_delete_batch').length, 0);
   assert.match(sizesSource, /#yotm_run[^\n]+trigger\('click'\)/);

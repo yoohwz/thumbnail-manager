@@ -65,7 +65,7 @@ function yotm_job_get_error_sample( $job_id, $limit = 20 ) {
  * @param array      $job Job row.
  * @param int        $limit Hash batch size.
  * @param array|null $worker Optional worker ownership data.
- * @return array{done:bool,job:array}
+ * @return array{done:bool,job:array}|WP_Error
  */
 function yotm_job_build_manifest_batch( $job, $limit = 1000, $worker = null ) {
 	return yotm_prune_build_manifest_batch( $job, $limit, $worker );

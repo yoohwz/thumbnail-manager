@@ -273,7 +273,7 @@ function yotm_job_get_item_rows_page( $job_id, $page = 1, $per_page = 25, $searc
  *
  * @param int $job_id Job ID.
  * @param int $limit Maximum rows.
- * @return array[]
+ * @return array[]|WP_Error
  */
 function yotm_job_get_failed_item_rows( $job_id, $limit = 20 ) {
 	global $wpdb;
@@ -289,6 +289,10 @@ function yotm_job_get_failed_item_rows( $job_id, $limit = 20 ) {
 		)
 	);
 	// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+	$query_error = yotm_job_last_database_error();
+	if ( is_wp_error( $query_error ) ) {
+		return $query_error;
+	}
 	$out = array();
 
 	foreach ( $rows as $row ) {
@@ -307,7 +311,7 @@ function yotm_job_get_failed_item_rows( $job_id, $limit = 20 ) {
  * @param int    $job_id Job ID.
  * @param string $after Exclusive stable-key cursor.
  * @param int    $limit Maximum rows.
- * @return array[]
+ * @return array[]|WP_Error
  */
 function yotm_job_get_manifest_rows_after( $job_id, $after, $limit ) {
 	global $wpdb;
@@ -318,7 +322,7 @@ function yotm_job_get_manifest_rows_after( $job_id, $after, $limit ) {
 	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Manifest construction must read exact persisted rows uncached.
 	$rows = $wpdb->get_results(
 		$wpdb->prepare(
-			"SELECT item_key,payload FROM {$tables['items']} WHERE job_id = %d AND item_key > %s ORDER BY item_key ASC LIMIT %d",
+			"SELECT item_key,payload FROM {$tables['items']} WHERE job_id = %d AND status = 'queued' AND item_key > %s ORDER BY item_key ASC LIMIT %d",
 			absint( $job_id ),
 			(string) $after,
 			$limit
@@ -336,6 +340,223 @@ function yotm_job_get_manifest_rows_after( $job_id, $after, $limit ) {
 	}
 
 	return $out;
+}
+
+/**
+ * Return one bounded intermediate-evidence page after an item ID cursor.
+ *
+ * @param int    $job_id Job ID.
+ * @param string $status Exact inert item status.
+ * @param int    $after_id Exclusive row ID cursor.
+ * @param int    $limit Maximum rows.
+ * @return array[]
+ */
+function yotm_job_get_status_rows_after_id( $job_id, $status, $after_id, $limit ) {
+	global $wpdb;
+
+	$tables      = yotm_job_table_names();
+	$limit       = max( 1, min( 1000, absint( $limit ) ) );
+	$rows        = $wpdb->get_results(
+		$wpdb->prepare(
+			"SELECT * FROM {$tables['items']} WHERE job_id = %d AND status = %s AND id > %d ORDER BY id ASC LIMIT %d",
+			absint( $job_id ),
+			sanitize_key( $status ),
+			absint( $after_id ),
+			$limit
+		)
+	);
+	$query_error = yotm_job_last_database_error();
+	if ( is_wp_error( $query_error ) ) {
+		return $query_error;
+	}
+	$out = array();
+
+	foreach ( $rows as $row ) {
+		$item = yotm_job_normalize_item_row( $row );
+		if ( $item ) {
+			$out[] = $item;
+		}
+	}
+
+	return $out;
+}
+
+/**
+ * Count exact item statuses for one job without loading payload rows.
+ *
+ * @param int      $job_id Job ID.
+ * @param string[] $statuses Exact statuses.
+ * @return int|WP_Error
+ */
+function yotm_job_count_items_by_status( $job_id, $statuses ) {
+	global $wpdb;
+
+	$statuses = array_values( array_unique( array_filter( array_map( 'sanitize_key', (array) $statuses ) ) ) );
+	if ( empty( $statuses ) ) {
+		return 0;
+	}
+	$tables       = yotm_job_table_names();
+	$placeholders = implode( ',', array_fill( 0, count( $statuses ), '%s' ) );
+	$args         = array_merge( array( absint( $job_id ) ), $statuses );
+
+	// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Plugin-owned table and bounded generated placeholders.
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Exact persistent queue state must be read uncached.
+	$count = $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$tables['items']} WHERE job_id = %d AND status IN ({$placeholders})", ...$args ) );
+	// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
+	$query_error = yotm_job_last_database_error();
+	return is_wp_error( $query_error ) ? $query_error : (int) $count;
+}
+
+/**
+ * Add one inert item behind the exact scanning worker fence.
+ *
+ * @param array  $worker Current worker ownership.
+ * @param string $item_key Stable item key.
+ * @param array  $payload Item payload.
+ * @param string $status Initial inert status.
+ * @param int    $bytes Item byte estimate.
+ * @return bool True only when a new row was inserted by the current worker.
+ */
+function yotm_job_worker_add_item( $worker, $item_key, $payload, $status, $bytes = 0 ) {
+	global $wpdb;
+
+	$status = sanitize_key( $status );
+	if ( 'historical_cohort' !== $status ) {
+		return false;
+	}
+	if ( ! yotm_job_refresh_worker( $worker ) ) {
+		return false;
+	}
+	$tables   = yotm_job_table_names();
+	$now      = gmdate( 'Y-m-d H:i:s' );
+	$item_key = preg_match( '/^[a-f0-9]{64}$/', (string) $item_key ) ? (string) $item_key : hash( 'sha256', (string) $item_key );
+	$sql      = $wpdb->prepare(
+		"INSERT IGNORE INTO {$tables['items']}
+		(job_id,item_key,status,payload,error,bytes,created_at,updated_at)
+		SELECT jobs.id,%s,%s,%s,'',%d,%s,%s FROM {$tables['jobs']} jobs
+		WHERE jobs.id = %d AND jobs.status = 'scanning'
+		AND jobs.phase IN ('cohort_aggregate','cohort_materialize')
+		AND jobs.worker_token = %s AND jobs.worker_generation = %d
+		AND jobs.expires_at >= %s",
+		$item_key,
+		$status,
+		wp_json_encode( is_array( $payload ) ? $payload : array() ),
+		absint( $bytes ),
+		$now,
+		$now,
+		absint( $worker['job_id'] ?? 0 ),
+		sanitize_text_field( $worker['token'] ?? '' ),
+		absint( $worker['generation'] ?? 0 ),
+		$now
+	);
+
+	// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Exact state-fenced insert prepared above.
+	return 1 === $wpdb->query( $sql );
+}
+
+/**
+ * Replace and optionally promote one inert item behind the exact worker fence.
+ *
+ * @param array  $worker Current worker ownership.
+ * @param int    $item_id Item ID.
+ * @param string $from_status Required current status.
+ * @param string $to_status Replacement status.
+ * @param array  $payload Replacement payload.
+ * @param int    $bytes Replacement byte estimate.
+ * @return bool
+ */
+function yotm_job_worker_replace_item( $worker, $item_id, $from_status, $to_status, $payload, $bytes = 0 ) {
+	global $wpdb;
+
+	$from_status = sanitize_key( $from_status );
+	$to_status   = sanitize_key( $to_status );
+	$transition  = $from_status . '>' . $to_status;
+	if ( ! in_array( $transition, array( 'historical_cohort>historical_cohort', 'historical_observation>historical_rejected', 'historical_observation>queued' ), true ) ) {
+		return false;
+	}
+	if ( ! yotm_job_refresh_worker( $worker ) ) {
+		return false;
+	}
+	$tables = yotm_job_table_names();
+	$args   = array(
+		wp_json_encode( is_array( $payload ) ? $payload : array() ),
+		$to_status,
+		absint( $bytes ),
+		gmdate( 'Y-m-d H:i:s' ),
+		absint( $item_id ),
+		absint( $worker['job_id'] ?? 0 ),
+		$from_status,
+		sanitize_text_field( $worker['token'] ?? '' ),
+		absint( $worker['generation'] ?? 0 ),
+		gmdate( 'Y-m-d H:i:s' ),
+	);
+	// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Plugin-owned table names; all values use placeholders.
+	$sql = $wpdb->prepare(
+		"UPDATE {$tables['items']} items
+		INNER JOIN {$tables['jobs']} jobs ON jobs.id = items.job_id
+		SET items.payload = %s, items.status = %s, items.bytes = %d, items.updated_at = %s
+		WHERE items.id = %d AND items.job_id = %d AND items.status = %s
+		AND jobs.status = 'scanning' AND jobs.phase IN ('cohort_aggregate','cohort_materialize')
+		AND jobs.worker_token = %s AND jobs.worker_generation = %d AND jobs.expires_at >= %s",
+		...$args
+	);
+	// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+
+	// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Exact state-fenced mutation prepared above.
+	return 1 === $wpdb->query( $sql );
+}
+
+/**
+ * Delete a bounded set of inert evidence rows behind the exact worker fence.
+ *
+ * @param array    $worker Current worker ownership.
+ * @param string[] $statuses Inert statuses to remove.
+ * @param int      $limit Maximum rows.
+ * @return int|WP_Error Removed rows or storage error.
+ */
+function yotm_job_worker_delete_status_batch( $worker, $statuses, $limit = 500 ) {
+	global $wpdb;
+
+	if ( ! yotm_job_refresh_worker( $worker ) ) {
+		return new WP_Error( 'yotm_job_worker_stale', __( 'This job worker no longer owns the current batch.', 'thumbnail-manager' ) );
+	}
+	$statuses = array_values( array_unique( array_filter( array_map( 'sanitize_key', (array) $statuses ) ) ) );
+	if ( empty( $statuses ) ) {
+		return 0;
+	}
+	$allowed_statuses = array( 'historical_anchor', 'historical_observation', 'historical_cohort', 'historical_rejected' );
+	if ( ! empty( array_diff( $statuses, $allowed_statuses ) ) ) {
+		return new WP_Error( 'yotm_job_evidence_status_invalid', __( 'Only inert historical evidence may be removed by this cleanup.', 'thumbnail-manager' ) );
+	}
+	$tables       = yotm_job_table_names();
+	$limit        = max( 1, min( 1000, absint( $limit ) ) );
+	$placeholders = implode( ',', array_fill( 0, count( $statuses ), '%s' ) );
+	// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Plugin-owned table and bounded generated placeholders.
+	$sql = $wpdb->prepare(
+		"DELETE FROM {$tables['items']}
+		WHERE job_id = %d AND status IN ({$placeholders})
+		AND EXISTS (
+			SELECT 1 FROM {$tables['jobs']} jobs
+			WHERE jobs.id = {$tables['items']}.job_id
+			AND jobs.status = 'scanning' AND jobs.phase = 'cohort_materialize'
+			AND jobs.worker_token = %s AND jobs.worker_generation = %d
+		)
+		ORDER BY id ASC LIMIT %d",
+		...array_merge(
+			array( absint( $worker['job_id'] ?? 0 ) ),
+			$statuses,
+			array(
+				sanitize_text_field( $worker['token'] ?? '' ),
+				absint( $worker['generation'] ?? 0 ),
+				$limit,
+			)
+		)
+	);
+	// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
+
+	// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Exact bounded cleanup prepared above.
+	$deleted = $wpdb->query( $sql );
+	return false === $deleted ? yotm_job_storage_error() : (int) $deleted;
 }
 
 /**

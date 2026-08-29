@@ -186,6 +186,7 @@ class YOTM_Admin_Adapters_Test extends WP_UnitTestCase {
 			"current_user_can( 'manage_options' )",
 			"check_ajax_referer( 'yotm_prune_nonce', 'nonce' )",
 			"! empty( \$_POST['discover_orphans'] )",
+			"! empty( \$_POST['discover_historical'] )",
 			'yotm_prune_prepare_application(',
 			'yotm_prune_scan_application(',
 			'yotm_prune_approve_application(',

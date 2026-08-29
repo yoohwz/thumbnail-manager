@@ -60,7 +60,7 @@
 
   function lockPruneControls(locked) {
 	pruneControlsLocked = !!locked;
-    $('.yotm_keep, #yotm_discover_orphans, input[name="yotm_prune_scope"], #yotm_subpath_search, #yotm_subpath_select_visible, #yotm_subpath_clear').prop('disabled', pruneControlsLocked);
+    $('.yotm_keep, #yotm_discover_orphans, #yotm_discover_historical, input[name="yotm_prune_scope"], #yotm_subpath_search, #yotm_subpath_select_visible, #yotm_subpath_clear').prop('disabled', pruneControlsLocked);
 	refreshSubpathHierarchy();
   }
 
@@ -212,10 +212,11 @@
     const found = summary.found ? Object.keys(summary.found).length : 0;
     const marked = Array.isArray(summary.delete) ? summary.delete.length : 0;
     classCounts = classCounts || {};
-    if (!found && !marked && !summary.unmapped && !summary.skipped_original && !summary.protected_sources && !summary.source_errors && !summary.unverified_sidecars && !summary.ambiguous_siblings && !summary.malformed_preserved && !summary.kept_dimension_preserved && !classCounts.metadata_backed && !classCounts.verified_legacy) {
+    const historicalPreserved = (summary.historical_below_threshold || 0) + (summary.historical_shape_preserved || 0) + (summary.historical_ambiguous || 0);
+    if (!found && !marked && !summary.unmapped && !summary.skipped_original && !summary.protected_sources && !summary.source_errors && !summary.unverified_sidecars && !summary.ambiguous_siblings && !summary.malformed_preserved && !summary.kept_dimension_preserved && !historicalPreserved && !classCounts.metadata_backed && !classCounts.verified_legacy && !classCounts.verified_historical_legacy) {
       return '';
     }
-    return '<div class="notice notice-info inline"><p><strong>' + escapeHtml(t('orphanDiscovery', 'Orphan discovery:')) + '</strong> ' + found + ' ' + escapeHtml(t('distinctDimsFound', 'distinct dimensions found.')) + '<br><strong>' + escapeHtml(t('metadataBackedCandidates', 'Metadata-backed candidates:')) + '</strong> ' + escapeHtml(classCounts.metadata_backed || 0) + '<br><strong>' + escapeHtml(t('verifiedLegacyCandidates', 'Verified legacy disk-only candidates:')) + '</strong> ' + escapeHtml(classCounts.verified_legacy || 0) + '<br><strong>' + escapeHtml(t('metadataOrphanDimsDelete', 'Metadata orphan dimensions marked for deletion:')) + '</strong> ' + marked + '<br><strong>' + escapeHtml(t('originalFilesProtected', 'Original files protected:')) + '</strong> ' + escapeHtml(summary.skipped_original || 0) + '<br><strong>' + escapeHtml(t('protectedSources', 'Authoritative source paths protected:')) + '</strong> ' + escapeHtml(summary.protected_sources || 0) + '<br><strong>' + escapeHtml(t('sourceErrors', 'Indeterminate source checks preserved:')) + '</strong> ' + escapeHtml(summary.source_errors || 0) + '<br><strong>' + escapeHtml(t('unverifiedSidecars', 'Unverified format sidecars preserved:')) + '</strong> ' + escapeHtml(summary.unverified_sidecars || 0) + '<br><strong>' + escapeHtml(t('ambiguousSiblings', 'Ambiguous sibling files preserved:')) + '</strong> ' + escapeHtml(summary.ambiguous_siblings || 0) + '<br><strong>' + escapeHtml(t('malformedPreserved', 'Malformed or mismatched files preserved:')) + '</strong> ' + escapeHtml(summary.malformed_preserved || 0) + '<br><strong>' + escapeHtml(t('keptDimensionPreserved', 'Files matching a kept size preserved:')) + '</strong> ' + escapeHtml(summary.kept_dimension_preserved || 0) + '<br><strong>' + escapeHtml(t('unmappedDiskSkipped', 'Unmapped disk candidates skipped:')) + '</strong> ' + escapeHtml(Math.max(summary.unmapped || 0, summary.unmapped_skipped || 0)) + '</p></div>';
+    return '<div class="notice notice-info inline"><p><strong>' + escapeHtml(t('orphanDiscovery', 'Orphan discovery:')) + '</strong> ' + found + ' ' + escapeHtml(t('distinctDimsFound', 'distinct dimensions found.')) + '<br><strong>' + escapeHtml(t('metadataBackedCandidates', 'Metadata-backed candidates:')) + '</strong> ' + escapeHtml(classCounts.metadata_backed || 0) + '<br><strong>' + escapeHtml(t('verifiedCurrentLegacyCandidates', 'Verified legacy — currently disabled size:')) + '</strong> ' + escapeHtml(classCounts.verified_legacy_current || 0) + '<br><strong>' + escapeHtml(t('verifiedHistoricalCandidates', 'Verified historical legacy — size no longer registered:')) + '</strong> ' + escapeHtml(classCounts.verified_historical_legacy || 0) + '<br><strong>' + escapeHtml(t('historicalPreserved', 'Ambiguous/unverified historical-looking files preserved:')) + '</strong> ' + escapeHtml(historicalPreserved) + '<br><strong>' + escapeHtml(t('metadataOrphanDimsDelete', 'Metadata orphan dimensions marked for deletion:')) + '</strong> ' + marked + '<br><strong>' + escapeHtml(t('originalFilesProtected', 'Original files protected:')) + '</strong> ' + escapeHtml(summary.skipped_original || 0) + '<br><strong>' + escapeHtml(t('protectedSources', 'Authoritative source paths protected:')) + '</strong> ' + escapeHtml(summary.protected_sources || 0) + '<br><strong>' + escapeHtml(t('sourceErrors', 'Indeterminate source checks preserved:')) + '</strong> ' + escapeHtml(summary.source_errors || 0) + '<br><strong>' + escapeHtml(t('unverifiedSidecars', 'Unverified format sidecars preserved:')) + '</strong> ' + escapeHtml(summary.unverified_sidecars || 0) + '<br><strong>' + escapeHtml(t('ambiguousSiblings', 'Ambiguous sibling files preserved:')) + '</strong> ' + escapeHtml(summary.ambiguous_siblings || 0) + '<br><strong>' + escapeHtml(t('malformedPreserved', 'Malformed or mismatched files preserved:')) + '</strong> ' + escapeHtml(summary.malformed_preserved || 0) + '<br><strong>' + escapeHtml(t('keptDimensionPreserved', 'Files matching a kept size preserved:')) + '</strong> ' + escapeHtml(summary.kept_dimension_preserved || 0) + '<br><strong>' + escapeHtml(t('unmappedDiskSkipped', 'Unmapped disk candidates skipped:')) + '</strong> ' + escapeHtml(Math.max(summary.unmapped || 0, summary.unmapped_skipped || 0)) + '</p></div>';
   }
 
   function loadManifest(page) {
@@ -245,7 +246,10 @@
           const attachmentId = proof.attachment_id || item.attachment_id;
           const attachment = attachmentId ? '#' + attachmentId : '—';
           const legacy = item.ownership_schema === 'legacy_generated_v1';
-          const evidence = legacy
+          const historical = item.ownership_schema === 'historical_legacy_generated_v1';
+          const evidence = historical
+            ? [t('verifiedHistoricalEvidence', 'Verified historical legacy / no longer registered'), item.observed_width && item.observed_height ? item.observed_width + '×' + item.observed_height : '', item.observed_mime, item.size].filter(Boolean).join(' / ')
+            : legacy
             ? [t('verifiedLegacyEvidence', 'Verified legacy disk-only evidence'), item.observed_width && item.observed_height ? item.observed_width + '×' + item.observed_height : '', item.observed_mime, Array.isArray(item.matched_remove_sizes) ? item.matched_remove_sizes.join(', ') : ''].filter(Boolean).join(' / ')
             : (attachmentId ? [t('attachmentMetadata', 'Attachment metadata'), '#' + attachmentId, proof.size || item.size, proof.filename].filter(Boolean).join(' / ') : '—');
           $body.append('<tr><td><code>' + escapeHtml(item.path || t('unknownPath', 'Unknown item')) + '</code></td><td>' + escapeHtml(attachment) + '</td><td>' + escapeHtml(evidence) + '</td><td>' + escapeHtml(formatBytes(item.estimated_bytes || item.bytes)) + '</td></tr>');
@@ -308,7 +312,8 @@
     request('yotm_prune_prepare', {
       keep: gatherKeep(),
 	  limit_subpaths: limitSubpaths,
-      discover_orphans: $('#yotm_discover_orphans').is(':checked') ? 1 : 0
+      discover_orphans: $('#yotm_discover_orphans').is(':checked') ? 1 : 0,
+      discover_historical: $('#yotm_discover_historical').is(':checked') ? 1 : 0
     }).done(function(response){
       if (!response || !response.success || !response.data) {
         const resumeToken = response && response.data ? response.data.resume_token : '';

@@ -158,7 +158,7 @@ function yotm_prune_get_items_page( $job_id, $page = 1, $per_page = 25, $search 
  * @param array      $job Job row.
  * @param int        $limit Hash batch size.
  * @param array|null $worker Optional worker ownership data.
- * @return array{done:bool,job:array}
+ * @return array{done:bool,job:array}|WP_Error
  */
 function yotm_prune_build_manifest_batch( $job, $limit = 1000, $worker = null ) {
 	$payload      = $job['payload'];
@@ -167,16 +167,21 @@ function yotm_prune_build_manifest_batch( $job, $limit = 1000, $worker = null ) 
 	$class_counts = is_array( $payload['manifest_class_counts'] ?? null )
 		? $payload['manifest_class_counts']
 		: array(
-			'metadata_backed' => 0,
-			'verified_legacy' => 0,
+			'metadata_backed'            => 0,
+			'verified_legacy'            => 0,
+			'verified_legacy_current'    => 0,
+			'verified_historical_legacy' => 0,
 		);
 	$limit        = max( 10, min( 5000, absint( $limit ) ) );
 	$rows         = yotm_job_get_manifest_rows_after( $job['id'], $after, $limit );
+	if ( is_wp_error( $rows ) ) {
+		return $rows;
+	}
 
 	foreach ( $rows as $row ) {
 		$item_payload = $row['payload'];
 		$item_schema  = (string) ( $item_payload['ownership_schema'] ?? '' );
-		if ( 'prune' === ( $job['type'] ?? '' ) && in_array( $item_schema, array( 'generated_file_v1', 'legacy_generated_v1' ), true ) ) {
+		if ( 'prune' === ( $job['type'] ?? '' ) && in_array( $item_schema, array( 'generated_file_v1', 'legacy_generated_v1', 'historical_legacy_generated_v1' ), true ) ) {
 			$source_fence = yotm_media_source_fence_acquire();
 			if ( is_wp_error( $source_fence ) ) {
 				return array(
@@ -185,9 +190,13 @@ function yotm_prune_build_manifest_batch( $job, $limit = 1000, $worker = null ) 
 				);
 			}
 			try {
-				$reference_check = 'legacy_generated_v1' === $item_schema
-					? yotm_prune_validate_legacy_evidence( $item_payload, $payload )
-					: yotm_prune_validate_live_reference_evidence( $item_payload, $item_payload['path'] ?? '' );
+				if ( 'legacy_generated_v1' === $item_schema ) {
+					$reference_check = yotm_prune_validate_legacy_evidence( $item_payload, $payload );
+				} elseif ( 'historical_legacy_generated_v1' === $item_schema ) {
+					$reference_check = yotm_prune_validate_historical_evidence( $item_payload, $payload );
+				} else {
+					$reference_check = yotm_prune_validate_live_reference_evidence( $item_payload, $item_payload['path'] ?? '' );
+				}
 			} finally {
 				yotm_media_source_fence_release( $source_fence );
 			}
@@ -206,7 +215,11 @@ function yotm_prune_build_manifest_batch( $job, $limit = 1000, $worker = null ) 
 		if ( 'generated_file_v1' === $item_schema ) {
 			$class_counts['metadata_backed'] = absint( $class_counts['metadata_backed'] ?? 0 ) + 1;
 		} elseif ( 'legacy_generated_v1' === $item_schema ) {
-			$class_counts['verified_legacy'] = absint( $class_counts['verified_legacy'] ?? 0 ) + 1;
+			$class_counts['verified_legacy']         = absint( $class_counts['verified_legacy'] ?? 0 ) + 1;
+			$class_counts['verified_legacy_current'] = absint( $class_counts['verified_legacy_current'] ?? 0 ) + 1;
+		} elseif ( 'historical_legacy_generated_v1' === $item_schema ) {
+			$class_counts['verified_legacy']            = absint( $class_counts['verified_legacy'] ?? 0 ) + 1;
+			$class_counts['verified_historical_legacy'] = absint( $class_counts['verified_historical_legacy'] ?? 0 ) + 1;
 		}
 		$digest = yotm_job_manifest_digest_advance( $digest, $row['item_key'], $row['payload_json'] );
 		$after  = $row['item_key'];
@@ -230,15 +243,18 @@ function yotm_prune_build_manifest_batch( $job, $limit = 1000, $worker = null ) 
  *
  * @param string[] $keep Registered image-size names to preserve.
  * @param string[] $limit_subpaths Optional upload-relative scan scopes.
- * @param bool     $discover_orphans Whether to include disk-only discovery.
+ * @param bool     $discover_orphans Whether to include current-disabled disk-only discovery.
+ * @param bool     $discover_historical Whether to include historical-unregistered discovery.
  * @return array Application outcome.
  */
-function yotm_prune_prepare_application( $keep, $limit_subpaths, $discover_orphans ) {
-	$limit_subpaths   = yotm_normalize_upload_subpaths( $limit_subpaths );
-	$discover_orphans = (bool) $discover_orphans;
-	$uploads          = wp_get_upload_dir();
-	$base             = trailingslashit( yotm_normalize_filesystem_path( $uploads['basedir'] ) );
-	$scan_bases       = yotm_resolve_upload_scan_bases( $base, $limit_subpaths );
+function yotm_prune_prepare_application( $keep, $limit_subpaths, $discover_orphans, $discover_historical = false ) {
+	$limit_subpaths      = yotm_normalize_upload_subpaths( $limit_subpaths );
+	$discover_orphans    = (bool) $discover_orphans;
+	$discover_historical = (bool) $discover_historical;
+	$scan_disk           = $discover_orphans || $discover_historical;
+	$uploads             = wp_get_upload_dir();
+	$base                = trailingslashit( yotm_normalize_filesystem_path( $uploads['basedir'] ) );
+	$scan_bases          = yotm_resolve_upload_scan_bases( $base, $limit_subpaths );
 
 	if ( is_wp_error( $scan_bases ) ) {
 		return yotm_prune_application_error( array( 'msg' => $scan_bases->get_error_message() ), 400 );
@@ -288,16 +304,22 @@ function yotm_prune_prepare_application( $keep, $limit_subpaths, $discover_orpha
 		'keep'                     => $keep,
 		'remove'                   => $to_remove,
 		'sizes'                    => $sizes,
-		'discover_orphans'         => $discover_orphans ? 1 : 0,
+		'discover_orphans'         => $scan_disk ? 1 : 0,
+		'discover_current_legacy'  => $discover_orphans ? 1 : 0,
+		'discover_historical'      => $discover_historical ? 1 : 0,
 		'orphan_summary'           => yotm_initial_orphan_summary(),
 		'disk_queue'               => array(),
 		'disk_cursor_version'      => 'dfs_v2',
 		'disk_entries_processed'   => 0,
 	);
 	$job_payload['legacy_policy']         = array(
-		'version' => 1,
-		'enabled' => $discover_orphans ? 1 : 0,
-		'hash'    => '',
+		'version'                         => 2,
+		'enabled'                         => $scan_disk ? 1 : 0,
+		'current_disabled_enabled'        => $discover_orphans ? 1 : 0,
+		'historical_unregistered_enabled' => $discover_historical ? 1 : 0,
+		'constants'                       => yotm_historical_cohort_constants(),
+		'ratio_schema'                    => 'integer_gcd_v1',
+		'hash'                            => '',
 	);
 	$job_payload['legacy_policy']['hash'] = yotm_legacy_policy_hash( $job_payload );
 	$job                                  = yotm_job_create(
@@ -353,7 +375,7 @@ function yotm_prune_scan_application( $token, $batch ) {
 		return yotm_prune_application_error( array( 'msg' => __( 'This prune job is not scannable.', 'thumbnail-manager' ) ), 409 );
 	}
 
-	$worker = yotm_job_acquire_worker( $job['id'], array( 'scanning' ), array( 'source_index', 'selection', 'metadata', 'disk', 'manifest' ) );
+	$worker = yotm_job_acquire_worker( $job['id'], array( 'scanning' ), array( 'source_index', 'selection', 'metadata', 'disk', 'cohort_aggregate', 'cohort_materialize', 'manifest' ) );
 	if ( is_wp_error( $worker ) ) {
 		if ( 'yotm_job_worker_busy' !== $worker->get_error_code() ) {
 			return yotm_prune_application_error( array( 'msg' => $worker->get_error_message() ), 503 );
@@ -419,6 +441,10 @@ function yotm_prune_scan_application( $token, $batch ) {
 			if ( ! empty( $ids ) ) {
 				yotm_prune_store_metadata_candidates( $job, array_values( $ids ), $payload, $selection_meta_ids );
 			}
+			$queued_total = yotm_job_count_items_by_status( $job['id'], array( 'queued' ) );
+			if ( is_wp_error( $queued_total ) ) {
+				return yotm_prune_application_error( array( 'msg' => $queued_total->get_error_message() ), 503 );
+			}
 			$payload['selection_meta_after'] = max( array_map( 'absint', wp_list_pluck( $rows, 'meta_id' ) ) );
 			$payload['selection_scanned']    = (int) ( $payload['selection_scanned'] ?? 0 ) + count( $rows );
 			$payload['selection_matched']    = (int) ( $payload['selection_matched'] ?? 0 ) + count( $ids );
@@ -427,7 +453,7 @@ function yotm_prune_scan_application( $token, $batch ) {
 				$worker,
 				array(
 					'payload' => $payload,
-					'total'   => yotm_job_count_items( $job['id'] ),
+					'total'   => $queued_total,
 				)
 			);
 			return yotm_prune_application_success( yotm_build_prune_scan_response( yotm_job_get_by_id( $job['id'] ), false ) );
@@ -459,7 +485,10 @@ function yotm_prune_scan_application( $token, $batch ) {
 
 			$payload['scan_processed'] = (int) ( $payload['scan_processed'] ?? 0 ) + count( $ids );
 			$cursor                    = max( array_map( 'absint', $ids ) );
-			$total                     = yotm_job_count_items( $job['id'] );
+			$total                     = yotm_job_count_items_by_status( $job['id'], array( 'queued' ) );
+			if ( is_wp_error( $total ) ) {
+				return yotm_prune_application_error( array( 'msg' => $total->get_error_message() ), 503 );
+			}
 			yotm_job_worker_update(
 				$worker,
 				array(
@@ -487,19 +516,60 @@ function yotm_prune_scan_application( $token, $batch ) {
 		}
 
 		$payload               = $job['payload'];
-		$payload['scan_phase'] = 'manifest';
-		yotm_job_worker_update(
+		$historical_enabled    = ! is_wp_error( yotm_historical_policy_validate( $payload ) );
+		$payload['scan_phase'] = $historical_enabled ? 'cohort_aggregate' : 'manifest';
+		if ( $historical_enabled ) {
+			$payload['cohort_aggregate_stage'] = 'anchors';
+			$payload['cohort_anchors_after']   = 0;
+		}
+		if ( ! yotm_job_worker_update(
 			$worker,
 			array(
 				'payload' => $payload,
-				'phase'   => 'manifest',
+				'phase'   => $payload['scan_phase'],
 			)
-		);
+		) ) {
+			return yotm_prune_application_error( array( 'msg' => __( 'The historical cohort transition could not be persisted safely.', 'thumbnail-manager' ) ), 503 );
+		}
 		$job = yotm_job_get_by_id( $job['id'] );
+	}//end if
+
+	if ( 'cohort_aggregate' === ( $job['payload']['scan_phase'] ?? '' ) ) {
+		$cohort = yotm_prune_historical_aggregate_batch( $job, $batch, $worker );
+		if ( is_wp_error( $cohort ) ) {
+			return yotm_prune_application_error( array( 'msg' => $cohort->get_error_message() ), 503 );
+		}
+		$job = $cohort['job'];
+		if ( ! $cohort['done'] ) {
+			return yotm_prune_application_success( yotm_build_prune_scan_response( $job, false ) );
+		}
+	}
+
+	if ( 'cohort_materialize' === ( $job['payload']['scan_phase'] ?? '' ) ) {
+		$cohort = yotm_prune_historical_materialize_batch( $job, $batch, $worker );
+		if ( is_wp_error( $cohort ) ) {
+			return yotm_prune_application_error( array( 'msg' => $cohort->get_error_message() ), 503 );
+		}
+		$job = $cohort['job'];
+		if ( ! $cohort['done'] ) {
+			return yotm_prune_application_success( yotm_build_prune_scan_response( $job, false ) );
+		}
+	}
+
+	$intermediate       = array( 'historical_anchor', 'historical_observation', 'historical_cohort', 'historical_rejected' );
+	$intermediate_count = yotm_job_count_items_by_status( $job['id'], $intermediate );
+	if ( is_wp_error( $intermediate_count ) ) {
+		return yotm_prune_application_error( array( 'msg' => $intermediate_count->get_error_message() ), 503 );
+	}
+	if ( 0 !== $intermediate_count ) {
+		return yotm_prune_application_error( array( 'msg' => __( 'Historical cohort evidence is incomplete and cannot enter the manifest.', 'thumbnail-manager' ) ), 409 );
 	}
 
 	$manifest = yotm_prune_build_manifest_batch( $job, max( 500, $batch * 5 ), $worker );
-	$job      = $manifest['job'];
+	if ( is_wp_error( $manifest ) ) {
+		return yotm_prune_application_error( array( 'msg' => $manifest->get_error_message() ), 503 );
+	}
+	$job = $manifest['job'];
 
 	if ( ! $manifest['done'] ) {
 		return yotm_prune_application_success( yotm_build_prune_scan_response( $job, false ) );
@@ -514,9 +584,12 @@ function yotm_prune_scan_application( $token, $batch ) {
 	$payload['scan_phase']      = 'review';
 	$payload['scan_done']       = 1;
 	$payload['estimated_bytes'] = yotm_job_sum_item_bytes( $job['id'] );
-	$total                      = yotm_job_count_items( $job['id'] );
-	$final_status               = $total > 0 ? 'awaiting_approval' : 'completed';
-	$final_phase                = $total > 0 ? 'review' : 'completed';
+	$total                      = yotm_job_count_items_by_status( $job['id'], array( 'queued' ) );
+	if ( is_wp_error( $total ) ) {
+		return yotm_prune_application_error( array( 'msg' => $total->get_error_message() ), 503 );
+	}
+	$final_status = $total > 0 ? 'awaiting_approval' : 'completed';
+	$final_phase  = $total > 0 ? 'review' : 'completed';
 	yotm_job_worker_update(
 		$worker,
 		array(
@@ -729,10 +802,19 @@ function yotm_prune_store_metadata_candidates( $job, $ids, &$payload, $selection
 		is_array( $payload['keep'] ?? null ) ? $payload['keep'] : array(),
 		is_array( $payload['remove'] ?? null ) ? $payload['remove'] : array(),
 		is_array( $payload['sizes'] ?? null ) ? $payload['sizes'] : array(),
-		! empty( $payload['discover_orphans'] ),
+		! empty( $payload['discover_current_legacy'] ),
 		$candidates,
 		$payload['orphan_summary']
 	);
+	$historical = yotm_collect_historical_metadata_anchors_for_ids( $ids, $payload, $selection_meta_ids );
+	foreach ( $historical['anchors'] as $anchor ) {
+		$item_key = hash( 'sha256', 'historical-anchor-v1:' . (string) ( $anchor['historical_witness_key'] ?? '' ) );
+		if ( yotm_job_add_item( $job['id'], $item_key, $anchor, 'historical_anchor', 0 ) ) {
+			$payload['orphan_summary']['historical_anchors'] = absint( $payload['orphan_summary']['historical_anchors'] ?? 0 ) + 1;
+		}
+	}
+	$payload['orphan_summary']['source_errors']        = absint( $payload['orphan_summary']['source_errors'] ?? 0 ) + absint( $historical['errors'] ?? 0 );
+	$payload['orphan_summary']['historical_ambiguous'] = absint( $payload['orphan_summary']['historical_ambiguous'] ?? 0 ) + absint( $historical['overflow'] ?? 0 );
 
 	foreach ( $candidates as $candidate ) {
 		if ( empty( $candidate['path'] ) ) {
@@ -961,17 +1043,26 @@ function yotm_prune_scan_disk_batch( $job, $limit = 100, $worker = null ) {
 	foreach ( $unmapped_paths as $path ) {
 		$result = $legacy_results[ $path ] ?? new WP_Error( 'yotm_legacy_unclassified', __( 'The disk-only file could not be classified safely.', 'thumbnail-manager' ) );
 		if ( is_array( $result ) ) {
-			$item_key = hash( 'sha256', $path );
-			$inserted = yotm_job_add_item( $job['id'], $item_key, $result, 'queued', absint( $result['estimated_bytes'] ?? 0 ) );
+			$historical_observation = 'historical_observation_v1' === ( $result['ownership_schema'] ?? '' );
+			$item_key               = $historical_observation
+				? hash( 'sha256', 'historical-observation-v1:' . $path )
+				: hash( 'sha256', $path );
+			$item_status            = $historical_observation ? 'historical_observation' : 'queued';
+			$inserted               = yotm_job_add_item( $job['id'], $item_key, $result, $item_status, $historical_observation ? 0 : absint( $result['estimated_bytes'] ?? 0 ) );
 			if ( $inserted ) {
-				$summary['verified_legacy'] = (int) ( $summary['verified_legacy'] ?? 0 ) + 1;
-				if ( count( $payload['sample'] ) < 300 ) {
-					$payload['sample'][] = $path;
+				if ( $historical_observation ) {
+					$summary['historical_observations'] = absint( $summary['historical_observations'] ?? 0 ) + 1;
+				} else {
+					$summary['verified_legacy']         = absint( $summary['verified_legacy'] ?? 0 ) + 1;
+					$summary['verified_legacy_current'] = absint( $summary['verified_legacy_current'] ?? 0 ) + 1;
+					if ( count( $payload['sample'] ) < 300 ) {
+						$payload['sample'][] = $path;
+					}
 				}
 				continue;
 			}
 			$result = new WP_Error( 'yotm_legacy_item_persist_failed', __( 'The verified legacy item could not be persisted safely.', 'thumbnail-manager' ) );
-		}
+		}//end if
 
 		$code = is_wp_error( $result ) ? $result->get_error_code() : 'yotm_legacy_unclassified';
 		if ( 'yotm_legacy_kept_dimension' === $code ) {
@@ -984,6 +1075,10 @@ function yotm_prune_scan_disk_batch( $job, $limit = 100, $worker = null ) {
 			}
 		} elseif ( 'yotm_legacy_path_owned' === $code ) {
 			$summary['protected_sources'] = (int) ( $summary['protected_sources'] ?? 0 ) + 1;
+		} elseif ( 'yotm_historical_shape_unsupported' === $code ) {
+			$summary['historical_shape_preserved'] = absint( $summary['historical_shape_preserved'] ?? 0 ) + 1;
+		} elseif ( 'yotm_historical_current_projection' === $code ) {
+			$summary['historical_ambiguous'] = absint( $summary['historical_ambiguous'] ?? 0 ) + 1;
 		} elseif ( 0 === strpos( $code, 'yotm_media_' ) || 0 === strpos( $code, 'yotm_regenerate_' ) || 0 === strpos( $code, 'yotm_prune_selector_' ) ) {
 			$summary['source_errors'] = (int) ( $summary['source_errors'] ?? 0 ) + 1;
 		}
@@ -1006,6 +1101,296 @@ function yotm_prune_scan_disk_batch( $job, $limit = 100, $worker = null ) {
 
 	return array(
 		'done' => empty( $queue ),
+		'job'  => yotm_job_get_by_id( $job['id'] ),
+	);
+}
+
+/**
+ * Return the stable item key for one cohort row.
+ *
+ * @param string $kind Cohort row kind.
+ * @param string $signature Historical signature.
+ * @param string $size_key Optional historical size key.
+ * @return string
+ */
+function yotm_prune_historical_cohort_item_key( $kind, $signature, $size_key = '' ) {
+	return hash( 'sha256', 'historical-cohort-v1:' . sanitize_key( $kind ) . ':' . (string) $signature . ':' . sanitize_key( $size_key ) );
+}
+
+/**
+ * Merge one deterministic inert cohort state row.
+ *
+ * @param array  $job Job row.
+ * @param array  $worker Current worker.
+ * @param string $item_key Stable cohort row key.
+ * @param array  $incoming Incoming state.
+ * @return array|WP_Error Current merged payload.
+ */
+function yotm_prune_historical_merge_cohort_state( $job, $worker, $item_key, $incoming ) {
+	if ( yotm_job_worker_add_item( $worker, $item_key, $incoming, 'historical_cohort', 0 ) ) {
+		return $incoming;
+	}
+	$item = yotm_job_get_item_by_key( $job['id'], $item_key );
+	if ( ! is_array( $item ) || 'historical_cohort' !== ( $item['status'] ?? '' ) ) {
+		return new WP_Error( 'yotm_historical_cohort_state', __( 'Historical cohort state could not be loaded safely.', 'thumbnail-manager' ) );
+	}
+	$current = is_array( $item['payload'] ?? null ) ? $item['payload'] : array();
+	if ( ! hash_equals( (string) ( $current['evidence_kind'] ?? '' ), (string) ( $incoming['evidence_kind'] ?? '' ) ) ) {
+		return new WP_Error( 'yotm_historical_cohort_collision', __( 'Historical cohort state collided with another evidence class.', 'thumbnail-manager' ) );
+	}
+	if ( 'historical_cohort_key_v1' === ( $incoming['evidence_kind'] ?? '' ) ) {
+		$current['anchors'] = yotm_historical_reduce_witness_pool(
+			array_merge( (array) ( $current['anchors'] ?? array() ), (array) ( $incoming['anchors'] ?? array() ) ),
+			yotm_historical_cohort_constants()['min_metadata_anchors']
+		);
+	} else {
+		$current['observations'] = yotm_historical_reduce_witness_pool(
+			array_merge( (array) ( $current['observations'] ?? array() ), (array) ( $incoming['observations'] ?? array() ) ),
+			yotm_historical_cohort_constants()['min_disk_observations']
+		);
+		$keys                    = array_values( array_unique( array_filter( array_map( 'sanitize_key', array_merge( (array) ( $current['qualifying_keys'] ?? array() ), (array) ( $incoming['qualifying_keys'] ?? array() ) ) ) ) ) );
+		sort( $keys );
+		$current['qualifying_keys'] = array_slice( $keys, 0, 2 );
+	}
+	foreach ( array( 'evidence_kind', 'historical_signature', 'historical_size_key' ) as $field ) {
+		if ( isset( $incoming[ $field ] ) ) {
+			$current[ $field ] = $incoming[ $field ];
+		}
+	}
+	if ( ! yotm_job_worker_replace_item( $worker, $item['id'], 'historical_cohort', 'historical_cohort', $current, 0 ) ) {
+		return new WP_Error( 'yotm_historical_cohort_state', __( 'Historical cohort state could not be persisted safely.', 'thumbnail-manager' ) );
+	}
+	return $current;
+}
+
+/**
+ * Aggregate inert anchors/observations into deterministic bounded cohort rows.
+ *
+ * @param array $job Job row.
+ * @param int   $limit Maximum evidence rows.
+ * @param array $worker Current worker.
+ * @return array{done:bool,job:array}|WP_Error
+ */
+function yotm_prune_historical_aggregate_batch( $job, $limit, $worker ) {
+	$payload = $job['payload'];
+	$limit   = max( 1, min( 500, absint( $limit ) ) );
+	$stage   = (string) ( $payload['cohort_aggregate_stage'] ?? 'anchors' );
+	$status  = 'anchors' === $stage ? 'historical_anchor' : 'historical_observation';
+	$cursor  = absint( $payload[ 'cohort_' . $stage . '_after' ] ?? 0 );
+	$rows    = yotm_job_get_status_rows_after_id( $job['id'], $status, $cursor, $limit );
+	if ( is_wp_error( $rows ) ) {
+		return $rows;
+	}
+
+	foreach ( $rows as $row ) {
+		$evidence  = $row['payload'];
+		$signature = (string) ( $evidence['historical_signature'] ?? '' );
+		if ( '' === $signature ) {
+			return new WP_Error( 'yotm_historical_cohort_state', __( 'Historical evidence lacks a canonical signature.', 'thumbnail-manager' ) );
+		}
+		if ( 'anchors' === $stage ) {
+			$size_key = sanitize_key( $evidence['historical_size_key'] ?? '' );
+			$key      = yotm_prune_historical_cohort_item_key( 'key', $signature, $size_key );
+			$state    = yotm_prune_historical_merge_cohort_state(
+				$job,
+				$worker,
+				$key,
+				array(
+					'evidence_kind'        => 'historical_cohort_key_v1',
+					'historical_signature' => $signature,
+					'historical_size_key'  => $size_key,
+					'anchors'              => array( $evidence ),
+				)
+			);
+			if ( is_wp_error( $state ) ) {
+				return $state;
+			}
+			$families = array_unique( array_column( (array) ( $state['anchors'] ?? array() ), 'historical_family_key' ) );
+			if ( count( array_filter( $families ) ) >= yotm_historical_cohort_constants()['min_metadata_anchors'] ) {
+				$signature_key = yotm_prune_historical_cohort_item_key( 'signature', $signature );
+				$merged        = yotm_prune_historical_merge_cohort_state(
+					$job,
+					$worker,
+					$signature_key,
+					array(
+						'evidence_kind'        => 'historical_cohort_signature_v1',
+						'historical_signature' => $signature,
+						'qualifying_keys'      => array( $size_key ),
+						'observations'         => array(),
+					)
+				);
+				if ( is_wp_error( $merged ) ) {
+					return $merged;
+				}
+			}
+		} else {
+			$key    = yotm_prune_historical_cohort_item_key( 'signature', $signature );
+			$merged = yotm_prune_historical_merge_cohort_state(
+				$job,
+				$worker,
+				$key,
+				array(
+					'evidence_kind'        => 'historical_cohort_signature_v1',
+					'historical_signature' => $signature,
+					'qualifying_keys'      => array(),
+					'observations'         => array( $evidence ),
+				)
+			);
+			if ( is_wp_error( $merged ) ) {
+				return $merged;
+			}
+		}//end if
+		$cursor = max( $cursor, absint( $row['id'] ) );
+	}//end foreach
+	$payload[ 'cohort_' . $stage . '_after' ] = $cursor;
+	if ( count( $rows ) < $limit ) {
+		if ( 'anchors' === $stage ) {
+			$payload['cohort_aggregate_stage'] = 'observations';
+		} else {
+			$payload['scan_phase']               = 'cohort_materialize';
+			$payload['cohort_materialize_stage'] = 'seal';
+			$payload['cohort_seal_after']        = 0;
+		}
+	}
+	$phase = ( $payload['scan_phase'] ?? '' ) === 'cohort_materialize' ? 'cohort_materialize' : 'cohort_aggregate';
+	if ( ! yotm_job_worker_update(
+		$worker,
+		array(
+			'payload' => $payload,
+			'phase'   => $phase,
+		)
+	) ) {
+		return yotm_job_storage_error();
+	}
+	return array(
+		'done' => 'cohort_materialize' === $phase,
+		'job'  => yotm_job_get_by_id( $job['id'] ),
+	);
+}
+
+/**
+ * Seal, promote, and clean historical cohort evidence in bounded phases.
+ *
+ * @param array $job Job row.
+ * @param int   $limit Maximum evidence rows.
+ * @param array $worker Current worker.
+ * @return array{done:bool,job:array}|WP_Error
+ */
+function yotm_prune_historical_materialize_batch( $job, $limit, $worker ) {
+	$payload = $job['payload'];
+	$limit   = max( 1, min( 200, absint( $limit ) ) );
+	$stage   = (string) ( $payload['cohort_materialize_stage'] ?? 'seal' );
+
+	if ( 'seal' === $stage ) {
+		$cursor = absint( $payload['cohort_seal_after'] ?? 0 );
+		$rows   = yotm_job_get_status_rows_after_id( $job['id'], 'historical_cohort', $cursor, $limit );
+		if ( is_wp_error( $rows ) ) {
+			return $rows;
+		}
+		foreach ( $rows as $row ) {
+			$state = $row['payload'];
+			if ( 'historical_cohort_signature_v1' === ( $state['evidence_kind'] ?? '' ) ) {
+				unset( $state['sealed_proof'] );
+				$keys = array_values( array_unique( array_filter( array_map( 'sanitize_key', (array) ( $state['qualifying_keys'] ?? array() ) ) ) ) );
+				if ( 1 === count( $keys ) ) {
+					$anchor_key = yotm_prune_historical_cohort_item_key( 'key', (string) $state['historical_signature'], $keys[0] );
+					$anchor_row = yotm_job_get_item_by_key( $job['id'], $anchor_key );
+					$anchors    = array();
+					foreach ( (array) ( $anchor_row['payload']['anchors'] ?? array() ) as $anchor ) {
+						$current = yotm_revalidate_historical_anchor( $anchor, $payload );
+						if ( ! is_wp_error( $current ) ) {
+							$anchors[] = $current;
+						}
+					}
+					$observations = array();
+					foreach ( (array) ( $state['observations'] ?? array() ) as $observation ) {
+						$current = yotm_revalidate_historical_observation( $observation, $payload );
+						if ( ! is_wp_error( $current ) ) {
+							$observations[] = $current;
+						}
+					}
+					$proof = yotm_historical_seal_cohort( $anchors, $observations, $keys[0], (string) ( $payload['legacy_policy']['hash'] ?? '' ) );
+					if ( ! is_wp_error( $proof ) ) {
+						$state['sealed_proof'] = $proof;
+					}
+				}//end if
+				if ( ! yotm_job_worker_replace_item( $worker, $row['id'], 'historical_cohort', 'historical_cohort', $state, 0 ) ) {
+					return yotm_job_storage_error();
+				}
+			}//end if
+			$cursor = max( $cursor, absint( $row['id'] ) );
+		}//end foreach
+		$payload['cohort_seal_after'] = $cursor;
+		if ( count( $rows ) < $limit ) {
+			$payload['cohort_materialize_stage'] = 'promote';
+			$payload['cohort_promote_after']     = 0;
+		}
+	} elseif ( 'promote' === $stage ) {
+		$cursor = absint( $payload['cohort_promote_after'] ?? 0 );
+		$rows   = yotm_job_get_status_rows_after_id( $job['id'], 'historical_observation', $cursor, $limit );
+		if ( is_wp_error( $rows ) ) {
+			return $rows;
+		}
+		foreach ( $rows as $row ) {
+			$observation = $row['payload'];
+			$signature   = (string) ( $observation['historical_signature'] ?? '' );
+			$cohort_key  = yotm_prune_historical_cohort_item_key( 'signature', $signature );
+			$cohort      = yotm_job_get_item_by_key( $job['id'], $cohort_key );
+			$proof       = is_array( $cohort ) ? ( $cohort['payload']['sealed_proof'] ?? null ) : null;
+			$current     = is_array( $proof ) ? yotm_revalidate_historical_observation( $observation, $payload ) : new WP_Error( 'yotm_historical_cohort_insufficient' );
+			$item        = is_wp_error( $current ) ? $current : yotm_build_historical_legacy_item( $current, $proof );
+			if ( is_wp_error( $item ) ) {
+				if ( ! yotm_job_worker_replace_item( $worker, $row['id'], 'historical_observation', 'historical_rejected', $observation, 0 ) ) {
+					return yotm_job_storage_error();
+				}
+				$payload['orphan_summary']['historical_below_threshold'] = absint( $payload['orphan_summary']['historical_below_threshold'] ?? 0 ) + 1;
+			} else {
+				if ( ! yotm_job_worker_replace_item( $worker, $row['id'], 'historical_observation', 'queued', $item, absint( $item['estimated_bytes'] ?? 0 ) ) ) {
+					return yotm_job_storage_error();
+				}
+				$payload['orphan_summary']['verified_historical'] = absint( $payload['orphan_summary']['verified_historical'] ?? 0 ) + 1;
+				if ( count( $payload['sample'] ) < 300 ) {
+					$payload['sample'][] = (string) ( $item['path'] ?? '' );
+				}
+			}
+			$cursor = max( $cursor, absint( $row['id'] ) );
+		}//end foreach
+		$payload['cohort_promote_after'] = $cursor;
+		if ( count( $rows ) < $limit ) {
+			$payload['cohort_materialize_stage'] = 'cleanup';
+		}
+	} else {
+		$intermediate = array( 'historical_anchor', 'historical_observation', 'historical_cohort', 'historical_rejected' );
+		$deleted      = yotm_job_worker_delete_status_batch( $worker, $intermediate, $limit );
+		if ( is_wp_error( $deleted ) ) {
+			return $deleted;
+		}
+		$remaining = yotm_job_count_items_by_status( $job['id'], $intermediate );
+		if ( is_wp_error( $remaining ) ) {
+			return $remaining;
+		}
+		if ( 0 === $remaining ) {
+			$payload['scan_phase'] = 'manifest';
+			if ( ! yotm_job_worker_update(
+				$worker,
+				array(
+					'payload' => $payload,
+					'phase'   => 'manifest',
+				)
+			) ) {
+				return yotm_job_storage_error();
+			}
+			return array(
+				'done' => true,
+				'job'  => yotm_job_get_by_id( $job['id'] ),
+			);
+		}
+	}//end if
+	if ( ! yotm_job_worker_update( $worker, array( 'payload' => $payload ) ) ) {
+		return yotm_job_storage_error();
+	}
+	return array(
+		'done' => false,
 		'job'  => yotm_job_get_by_id( $job['id'] ),
 	);
 }
@@ -1034,6 +1419,8 @@ function yotm_build_prune_scan_response( $job, $done ) {
 		$percent = min( ! empty( $payload['discover_orphans'] ) ? 90 : 98, ( $processed / $scan_total ) * 90 );
 	} elseif ( 'disk' === $phase ) {
 		$percent = 95;
+	} elseif ( in_array( $phase, array( 'cohort_aggregate', 'cohort_materialize' ), true ) ) {
+		$percent = 97;
 	} else {
 		$percent = 99;
 	}
@@ -1058,8 +1445,10 @@ function yotm_build_prune_scan_response( $job, $done ) {
 		'scan_base'              => (string) ( $payload['scan_base_label'] ?? 'uploads/' ),
 		'orphan_summary'         => is_array( $payload['orphan_summary'] ?? null ) ? $payload['orphan_summary'] : yotm_initial_orphan_summary(),
 		'manifest_class_counts'  => is_array( $payload['manifest_class_counts'] ?? null ) ? $payload['manifest_class_counts'] : array(
-			'metadata_backed' => 0,
-			'verified_legacy' => 0,
+			'metadata_backed'            => 0,
+			'verified_legacy'            => 0,
+			'verified_legacy_current'    => 0,
+			'verified_historical_legacy' => 0,
 		),
 		'manifest_hash'          => $job['manifest_hash'],
 		'expires_at'             => $job['expires_at'],
@@ -1135,7 +1524,6 @@ function yotm_prune_validate_review_job( $job, $manifest_hash, $confirmed ) {
 	if ( empty( $job['total'] ) ) {
 		return new WP_Error( 'yotm_empty_manifest', __( 'There are no files in this manifest.', 'thumbnail-manager' ) );
 	}
-
 	if (
 		'generated_file_v1' !== ( $job['payload']['ownership_schema'] ?? '' )
 		|| empty( $job['payload']['source_index_complete'] )
@@ -1143,10 +1531,25 @@ function yotm_prune_validate_review_job( $job, $manifest_hash, $confirmed ) {
 	) {
 		return new WP_Error( 'yotm_prune_ownership_upgrade_required', __( 'This prune manifest predates the current media-safety rules. Run and review a new scan.', 'thumbnail-manager' ) );
 	}
+	$intermediate_count = empty( $job['id'] )
+		? new WP_Error( 'yotm_historical_cohort_incomplete', __( 'Historical cohort evidence is incomplete. Run and review a new scan.', 'thumbnail-manager' ) )
+		: yotm_job_count_items_by_status( $job['id'], array( 'historical_anchor', 'historical_observation', 'historical_cohort', 'historical_rejected' ) );
+	if ( is_wp_error( $intermediate_count ) ) {
+		return $intermediate_count;
+	}
+	if ( 0 !== $intermediate_count ) {
+		return new WP_Error( 'yotm_historical_cohort_incomplete', __( 'Historical cohort evidence is incomplete. Run and review a new scan.', 'thumbnail-manager' ) );
+	}
 	if ( ! empty( $job['payload']['manifest_class_counts']['verified_legacy'] ) ) {
 		$legacy_policy = yotm_legacy_policy_validate( $job['payload'] );
 		if ( is_wp_error( $legacy_policy ) ) {
 			return $legacy_policy;
+		}
+	}
+	if ( ! empty( $job['payload']['manifest_class_counts']['verified_historical_legacy'] ) ) {
+		$historical_policy = yotm_historical_policy_validate( $job['payload'] );
+		if ( is_wp_error( $historical_policy ) ) {
+			return $historical_policy;
 		}
 	}
 
@@ -1176,7 +1579,6 @@ function yotm_prune_validate_delete_job( $job, $manifest_hash ) {
 	if ( strtotime( $job['expires_at'] . ' UTC' ) < time() ) {
 		return new WP_Error( 'yotm_delete_grant_expired', __( 'The delete approval has expired. Run and review a new scan.', 'thumbnail-manager' ) );
 	}
-
 	if (
 		'generated_file_v1' !== ( $job['payload']['ownership_schema'] ?? '' )
 		|| empty( $job['payload']['source_index_complete'] )
@@ -1184,10 +1586,25 @@ function yotm_prune_validate_delete_job( $job, $manifest_hash ) {
 	) {
 		return new WP_Error( 'yotm_prune_ownership_upgrade_required', __( 'This prune manifest predates the current media-safety rules. Run and review a new scan.', 'thumbnail-manager' ) );
 	}
+	$intermediate_count = empty( $job['id'] )
+		? new WP_Error( 'yotm_historical_cohort_incomplete', __( 'Historical cohort evidence is incomplete. Run and review a new scan.', 'thumbnail-manager' ) )
+		: yotm_job_count_items_by_status( $job['id'], array( 'historical_anchor', 'historical_observation', 'historical_cohort', 'historical_rejected' ) );
+	if ( is_wp_error( $intermediate_count ) ) {
+		return $intermediate_count;
+	}
+	if ( 0 !== $intermediate_count ) {
+		return new WP_Error( 'yotm_historical_cohort_incomplete', __( 'Historical cohort evidence is incomplete. Run and review a new scan.', 'thumbnail-manager' ) );
+	}
 	if ( ! empty( $job['payload']['manifest_class_counts']['verified_legacy'] ) ) {
 		$legacy_policy = yotm_legacy_policy_validate( $job['payload'] );
 		if ( is_wp_error( $legacy_policy ) ) {
 			return $legacy_policy;
+		}
+	}
+	if ( ! empty( $job['payload']['manifest_class_counts']['verified_historical_legacy'] ) ) {
+		$historical_policy = yotm_historical_policy_validate( $job['payload'] );
+		if ( is_wp_error( $historical_policy ) ) {
+			return $historical_policy;
 		}
 	}
 
@@ -1290,11 +1707,17 @@ function yotm_process_claimed_prune_item( $item, $job, $worker, $uploads_base, $
 			}
 
 			$item_schema = (string) ( $item['payload']['ownership_schema'] ?? '' );
-			$references  = $journal_absent
-				? true
-				: ( 'legacy_generated_v1' === $item_schema
-					? yotm_prune_validate_legacy_evidence( $item['payload'] ?? array(), $job['payload'] ?? array() )
-					: yotm_prune_validate_live_reference_evidence( $item['payload'] ?? array(), $path ) );
+			if ( $journal_absent && 'historical_legacy_generated_v1' === $item_schema ) {
+				$references = yotm_prune_validate_historical_absent_recovery( $item['payload'] ?? array(), $job['payload'] ?? array() );
+			} elseif ( $journal_absent ) {
+				$references = true;
+			} elseif ( 'legacy_generated_v1' === $item_schema ) {
+				$references = yotm_prune_validate_legacy_evidence( $item['payload'] ?? array(), $job['payload'] ?? array() );
+			} elseif ( 'historical_legacy_generated_v1' === $item_schema ) {
+				$references = yotm_prune_validate_historical_evidence( $item['payload'] ?? array(), $job['payload'] ?? array() );
+			} else {
+				$references = yotm_prune_validate_live_reference_evidence( $item['payload'] ?? array(), $path );
+			}
 			if ( is_wp_error( $references ) ) {
 				if ( 'yotm_prune_path_protected' === $references->get_error_code() ) {
 					return array(
