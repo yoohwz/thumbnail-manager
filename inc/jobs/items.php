@@ -438,7 +438,6 @@ function yotm_job_worker_add_item( $worker, $item_key, $payload, $status, $bytes
 	$now      = gmdate( 'Y-m-d H:i:s' );
 	$item_key = preg_match( '/^[a-f0-9]{64}$/', (string) $item_key ) ? (string) $item_key : hash( 'sha256', (string) $item_key );
 	// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Plugin-owned table names; every value uses an exact placeholder.
-	// phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- The static analyzer miscounts placeholders across this INSERT...SELECT statement.
 	$sql = $wpdb->prepare(
 		"INSERT IGNORE INTO {$tables['items']}
 		(job_id,item_key,status,payload,error,bytes,created_at,updated_at)
@@ -501,6 +500,7 @@ function yotm_job_worker_replace_item( $worker, $item_id, $from_status, $to_stat
 		gmdate( 'Y-m-d H:i:s' ),
 	);
 	// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Plugin-owned table names; all values use placeholders.
+	// phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- The static analyzer counts the splatted argument array as one replacement.
 	$sql = $wpdb->prepare(
 		"UPDATE {$tables['items']} items
 		INNER JOIN {$tables['jobs']} jobs ON jobs.id = items.job_id
