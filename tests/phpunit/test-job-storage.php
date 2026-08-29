@@ -648,6 +648,8 @@ class YOTM_Job_Storage_Test extends WP_UnitTestCase {
 	}
 
 	public function test_manifest_is_stable_and_cannot_grow_after_review() {
+		global $wpdb;
+
 		$job = yotm_job_create(
 			'prune',
 			array(
@@ -663,6 +665,20 @@ class YOTM_Job_Storage_Test extends WP_UnitTestCase {
 		$this->assertTrue( yotm_job_add_item( $job['id'], 'first', array( 'path' => '/tmp/first.jpg' ) ) );
 		yotm_job_update( $job['id'], array( 'phase' => 'manifest' ) );
 		$this->assertFalse( yotm_job_merge_item_payload( $job['id'], 'first', array( 'metadata_refs' => array() ) ) );
+		$tables = yotm_job_table_names();
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Exact persisted manifest characterization fixture.
+		$persisted_rows = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT item_key,payload FROM {$tables['items']} WHERE job_id = %d ORDER BY item_key ASC",
+				$job['id']
+			)
+		);
+
+		$expected_digest = hash( 'sha256', 'yotm-manifest-v1' );
+		foreach ( $persisted_rows as $persisted_row ) {
+			$expected_digest = hash( 'sha256', $expected_digest . ':' . $persisted_row->item_key . ':' . hash( 'sha256', (string) $persisted_row->payload ) );
+		}
 
 		do {
 			$manifest = yotm_job_build_manifest_batch( yotm_job_get_by_id( $job['id'] ), 10 );
@@ -670,6 +686,8 @@ class YOTM_Job_Storage_Test extends WP_UnitTestCase {
 
 		$job = $manifest['job'];
 		$this->assertMatchesRegularExpression( '/^[a-f0-9]{64}$/', $job['manifest_hash'] );
+		$this->assertSame( $expected_digest, $job['manifest_hash'] );
+		$this->assertSame( $expected_digest, $job['payload']['manifest_digest'] );
 
 		yotm_job_update(
 			$job['id'],
@@ -779,16 +797,24 @@ class YOTM_Job_Storage_Test extends WP_UnitTestCase {
 		$this->assertTrue( yotm_prune_validate_review_job( $job, $job['manifest_hash'], true ) );
 		$this->assertWPError( yotm_prune_validate_review_job( $job, str_repeat( '0', 64 ), true ) );
 
-		yotm_job_update(
-			$job['id'],
-			array(
-				'status' => 'approved',
-				'phase'  => 'delete',
-			)
-		);
+		$mismatch = yotm_prune_approve_application( $job['token'], str_repeat( '0', 64 ), true );
+		$this->assertFalse( $mismatch['success'] );
+		$this->assertSame( 409, $mismatch['status'] );
+		$this->assertSame( 'awaiting_approval', yotm_job_get_by_id( $job['id'] )['status'] );
+
+		$approval = yotm_prune_approve_application( $job['token'], $job['manifest_hash'], true );
+		$this->assertTrue( $approval['success'] );
+		$this->assertSame( $job['manifest_hash'], $approval['data']['manifest_hash'] );
 		$job = yotm_job_get_by_id( $job['id'] );
+		$this->assertSame( 'approved', $job['status'] );
+		$this->assertSame( 'delete', $job['phase'] );
 		$this->assertTrue( yotm_prune_validate_delete_job( $job, $job['manifest_hash'] ) );
 		$this->assertWPError( yotm_prune_validate_delete_job( $job, str_repeat( 'f', 64 ) ) );
+
+		$delete_mismatch = yotm_prune_delete_application( $job['token'], str_repeat( 'f', 64 ), 1 );
+		$this->assertFalse( $delete_mismatch['success'] );
+		$this->assertSame( 409, $delete_mismatch['status'] );
+		$this->assertSame( 'approved', yotm_job_get_by_id( $job['id'] )['status'] );
 	}
 
 	public function test_manifest_delete_can_resume_from_persistent_items() {

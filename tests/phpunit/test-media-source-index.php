@@ -110,6 +110,22 @@ class YOTM_Media_Source_Index_Test extends WP_UnitTestCase {
 		$this->assertSame( $registered_module, wp_normalize_path( $reflection->getFileName() ) );
 	}
 
+	public function test_source_index_coordinator_has_application_owner_and_legacy_delegate() {
+		$expected  = wp_normalize_path( dirname( __DIR__, 2 ) . '/inc/application/media-source-indexing.php' );
+		$canonical = new ReflectionFunction( 'yotm_application_media_source_index_batch' );
+		$legacy    = new ReflectionFunction( 'yotm_prune_source_index_batch' );
+
+		$this->assertSame( $expected, wp_normalize_path( $canonical->getFileName() ) );
+		$this->assertSame( $expected, wp_normalize_path( $legacy->getFileName() ) );
+
+		$source = file_get_contents( $expected );
+		$this->assertIsString( $source );
+		$this->assertDoesNotMatchRegularExpression(
+			'/\$_POST|\bwp_send_json_|\bcurrent_user_can\b|\bcheck_ajax_referer\b/',
+			$source
+		);
+	}
+
 	public function test_source_store_and_mutation_locks_have_media_owners_without_jobs_runtime_calls() {
 		$root         = dirname( __DIR__, 2 );
 		$store_module = wp_normalize_path( $root . '/inc/media/source-store.php' );
