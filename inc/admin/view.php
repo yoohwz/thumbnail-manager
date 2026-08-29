@@ -103,17 +103,25 @@ function yotm_render_admin_view( $view ) {
 				<?php echo esc_html__( 'Recommended after changing thumbnail size settings or after enabling new sizes.', 'thumbnail-manager' ); ?>
 			</p>
 
-			<div class="yo-row">
-				<label for="yotm_regen_scope">
-					<strong><?php echo esc_html__( 'Scope', 'thumbnail-manager' ); ?></strong>
-				</label><br>
-				<select id="yotm_regen_scope">
-					<option value="all"><?php echo esc_html__( 'All media', 'thumbnail-manager' ); ?></option>
-					<option value="year"><?php echo esc_html__( 'Current year only', 'thumbnail-manager' ); ?></option>
-					<option value="subpath"><?php echo esc_html__( 'Specific uploads folder', 'thumbnail-manager' ); ?></option>
-					<option value="ids"><?php echo esc_html__( 'Specific attachment IDs', 'thumbnail-manager' ); ?></option>
-				</select>
-			</div>
+			<fieldset class="yo-row yo-scope-picker" id="yotm_regen_scope_picker">
+				<legend><strong><?php echo esc_html__( 'Scope', 'thumbnail-manager' ); ?></strong></legend>
+				<label class="yo-scope-mode">
+					<input type="radio" name="yotm_regen_scope" value="all" checked>
+					<span><strong><?php echo esc_html__( 'All media', 'thumbnail-manager' ); ?></strong></span>
+				</label>
+				<label class="yo-scope-mode">
+					<input type="radio" name="yotm_regen_scope" value="year">
+					<span><strong><?php echo esc_html__( 'Current year only', 'thumbnail-manager' ); ?></strong></span>
+				</label>
+				<label class="yo-scope-mode">
+					<input type="radio" name="yotm_regen_scope" value="subpath">
+					<span><strong><?php echo esc_html__( 'Specific uploads folder', 'thumbnail-manager' ); ?></strong></span>
+				</label>
+				<label class="yo-scope-mode">
+					<input type="radio" name="yotm_regen_scope" value="ids">
+					<span><strong><?php echo esc_html__( 'Specific attachment IDs', 'thumbnail-manager' ); ?></strong></span>
+				</label>
+			</fieldset>
 
 			<div class="yo-row yo-hidden" id="yotm_regen_subpath_wrap">
 				<label for="yotm_regen_subpath">
