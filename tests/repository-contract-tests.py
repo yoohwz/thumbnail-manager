@@ -223,6 +223,38 @@ for workflow, path in (
     if "persist-credentials: false" not in workflow:
         fail(f"{path} checkouts must not persist credentials")
 
+publisher_svn_jobs = {
+    "preflight": publish_workflow.split("  preflight:", 1)[1].split("  dry-run:", 1)[0],
+    "dry-run": publish_workflow.split("  dry-run:", 1)[1].split("  production-publish:", 1)[0],
+    "production-publish": publish_workflow.split("  production-publish:", 1)[1].split(
+        "  verify-public:", 1
+    )[0],
+    "verify-public": publish_workflow.split("  verify-public:", 1)[1].split(
+        "  github-release:", 1
+    )[0],
+}
+for job_name, job in publisher_svn_jobs.items():
+    for required_setup in (
+        "- name: Ensure Subversion CLI",
+        "sudo apt-get update",
+        "sudo apt-get install --yes subversion",
+        "svn --version --quiet",
+    ):
+        if required_setup not in job:
+            fail(f"publisher {job_name} job is missing explicit Subversion setup: {required_setup}")
+    first_svn_use = min(
+        index
+        for invocation in (
+            "svn checkout",
+            "svn commit",
+            "wporg-release.py stage-svn",
+            "wporg-release.py verify-svn-publication",
+        )
+        if (index := job.find(invocation)) != -1
+    )
+    if job.index("svn --version --quiet") > first_svn_use:
+        fail(f"publisher {job_name} job must verify Subversion before its first SVN operation")
+
 for needle, label in (
     ("ref: ${{ inputs.candidate_sha }}", "candidate SHA as data"),
     ("path: candidate-data", "isolated candidate checkout"),
