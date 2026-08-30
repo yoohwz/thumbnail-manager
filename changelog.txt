@@ -4,6 +4,14 @@ This file contains the complete release history for Thumbnail Manager.
 
 == Changelog ==
 
+= 1.5.1 (Aug 30, 2026) =
+* Fixed regeneration so future uploads, Generate Missing Sizes Only, Force Regenerate, and Save + Regenerate consistently honor the sizes enabled in Thumbnail Sizes
+* Added review-first cleanup for verified disk-only thumbnails from currently disabled sizes, plus a separate conservative opt-in for historical sizes that are no longer registered
+* Fixed WebP/AVIF Force Regenerate cleanup so the exact obsolete metadata-backed JPEG/PNG derivative is removed after a successful replacement while unrelated files and sidecars remain protected
+* Hardened historical Prune resume and replay handling, including partial evidence cleanup and legitimate no-op database updates
+* Improved Prune scan errors so server/application failures are distinguished from network loss while the persistent job remains available to reload and resume
+* Improved the Prune Files size table layout and marked WordPress core image sizes with the WordPress icon
+
 = 1.5.0 (Aug 29, 2026) =
 * Improved regeneration reliability, including safer Force Regenerate recovery and original-source handling
 * Strengthened Prune safety with stricter ownership, source protection, path validation, and reviewed-manifest enforcement
