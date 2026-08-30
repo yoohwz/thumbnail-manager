@@ -333,6 +333,55 @@ class YOTM_Job_Storage_Test extends WP_UnitTestCase {
 		yotm_job_release_worker( $second_worker );
 	}
 
+	public function test_partial_historical_cleanup_advances_without_a_noop_storage_error() {
+		$job = yotm_job_create(
+			'prune',
+			array(
+				'scan_phase'               => 'cohort_materialize',
+				'cohort_materialize_stage' => 'cleanup',
+			),
+			array(
+				'status'       => 'scanning',
+				'phase'        => 'cohort_materialize',
+				'counter_mode' => 'item_v3',
+			)
+		);
+		$this->assertIsArray( $job );
+
+		$worker = yotm_job_acquire_worker( $job['id'], array( 'scanning' ), array( 'cohort_materialize' ) );
+		$this->assertIsArray( $worker );
+
+		for ( $index = 1; $index <= 3; $index++ ) {
+			$this->assertTrue(
+				yotm_job_worker_add_item(
+					$worker,
+					hash( 'sha256', 'partial-cleanup-' . $index ),
+					array( 'evidence' => $index ),
+					'historical_cohort'
+				)
+			);
+		}
+
+		$first = yotm_prune_historical_materialize_batch( yotm_job_get_by_id( $job['id'] ), 1, $worker );
+		$this->assertIsArray( $first );
+		$this->assertFalse( $first['done'] );
+		$this->assertSame( 2, yotm_job_count_items_by_status( $job['id'], array( 'historical_cohort' ) ) );
+		$this->assertSame( 'cohort_materialize', $first['job']['phase'] );
+
+		$second = yotm_prune_historical_materialize_batch( $first['job'], 1, $worker );
+		$this->assertIsArray( $second );
+		$this->assertFalse( $second['done'] );
+		$this->assertSame( 1, yotm_job_count_items_by_status( $job['id'], array( 'historical_cohort' ) ) );
+
+		$final = yotm_prune_historical_materialize_batch( $second['job'], 1, $worker );
+		$this->assertIsArray( $final );
+		$this->assertTrue( $final['done'] );
+		$this->assertSame( 0, yotm_job_count_items_by_status( $job['id'], array( 'historical_cohort' ) ) );
+		$this->assertSame( 'manifest', $final['job']['phase'] );
+
+		yotm_job_release_worker( $worker );
+	}
+
 	public function test_manifest_review_page_reads_fail_closed() {
 		global $wpdb;
 

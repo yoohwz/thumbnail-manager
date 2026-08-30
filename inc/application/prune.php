@@ -1388,6 +1388,12 @@ function yotm_prune_historical_materialize_batch( $job, $limit, $worker ) {
 				'job'  => yotm_job_get_by_id( $job['id'] ),
 			);
 		}
+		// The fenced row deletion is durable progress and already refreshed the worker lease.
+		// Avoid a require-match payload update here because partial cleanup does not change the payload.
+		return array(
+			'done' => false,
+			'job'  => yotm_job_get_by_id( $job['id'] ),
+		);
 	}//end if
 	if ( ! yotm_job_worker_update( $worker, array( 'payload' => $payload ) ) ) {
 		return yotm_job_storage_error();
