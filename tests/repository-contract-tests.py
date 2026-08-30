@@ -499,6 +499,10 @@ for needle, label in (
     if needle not in ci_workflow:
         fail(f"CI workflow is missing {label}")
 
+gate_job = ci_workflow.split("  ci-gate:", 1)[1]
+if "uses: actions/checkout@" not in gate_job or "persist-credentials: false" not in gate_job:
+    fail("aggregate gate must check out the reviewed helper without persisting credentials")
+
 if "actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0" not in ci_workflow:
     fail("CI Composer cache action must remain pinned to its reviewed commit")
 if re.search(r"path:\s*(?:\|\s*)?/tmp/wordpress", ci_workflow):
