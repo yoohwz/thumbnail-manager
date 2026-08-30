@@ -5,6 +5,12 @@ on:
     branches:
       - main
   pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+      - converted_to_draft
   workflow_dispatch:
 
 permissions:
@@ -20,7 +26,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
+      intensity: ${{ steps.classify.outputs.intensity }}
+      full: ${{ steps.classify.outputs.full }}
+      quality: ${{ steps.classify.outputs.quality }}
       integration: ${{ steps.classify.outputs.integration }}
+      plugin_check_applicable: ${{ steps.classify.outputs.plugin_check_applicable }}
       plugin_check: ${{ steps.classify.outputs.plugin_check }}
       javascript: ${{ steps.classify.outputs.javascript }}
       matrix: ${{ steps.classify.outputs.matrix }}
@@ -48,67 +58,18 @@ jobs:
           git diff --name-only "$BASE_SHA...HEAD" > "$RUNNER_TEMP/changed-files.txt"
           cat "$RUNNER_TEMP/changed-files.txt"
 
-          integration=false
-          plugin_check=false
-          javascript=false
-
-          while IFS= read -r path; do
-            case "$path" in
-              thumbnail-manager.php|inc/*|tests/*|bin/*|release/*|composer.json|composer.lock|phpunit.xml.dist|phpcs.xml.dist|.github/workflows/ci.yml|.github/workflows/release-prepare.yml|.github/workflows/publish-wordpress-org.yml)
-                integration=true
-                ;;
-            esac
-
-            case "$path" in
-              thumbnail-manager.php|inc/*|css/*|js/*|languages/*|readme.txt|changelog.txt|license.txt|bin/build-release.sh|bin/validate-release.py|bin/validate-plugin-check.py|release/*|.github/workflows/ci.yml|.github/workflows/release-prepare.yml|.github/workflows/publish-wordpress-org.yml)
-                plugin_check=true
-                ;;
-            esac
-
-            case "$path" in
-              js/*|bin/build-release.sh|bin/validate-release.py|release/payload-manifest.txt|.github/workflows/release-prepare.yml|.github/workflows/publish-wordpress-org.yml)
-                javascript=true
-                ;;
-            esac
-          done < "$RUNNER_TEMP/changed-files.txt"
-
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            integration=true
-            plugin_check=true
-            javascript=true
-          fi
-
           minimum_wp="$(awk -F': ' '/^Requires at least:/ {print $2; exit}' readme.txt)"
           tested_wp="$(awk -F': ' '/^Tested up to:/ {print $2; exit}' readme.txt)"
           test -n "$minimum_wp"
           test -n "$tested_wp"
 
-          matrix="$(python3 - "$minimum_wp" "$tested_wp" <<'PY'
-          import json
-          import sys
-
-          minimum, tested = sys.argv[1:3]
-          requested = [
-              {"wordpress": minimum, "php": "7.4", "label": "minimum"},
-              {"wordpress": minimum, "php": "8.2", "label": "minimum-high-php"},
-              {"wordpress": tested, "php": "7.4", "label": "tested-min-php"},
-              {"wordpress": tested, "php": "8.4", "label": "tested-modern"},
-          ]
-          seen = set()
-          include = []
-          for item in requested:
-              key = (item["wordpress"], item["php"])
-              if key not in seen:
-                  seen.add(key)
-                  include.append(item)
-          print(json.dumps({"include": include}, separators=(",", ":")))
-          PY
-          )"
-
-          echo "integration=$integration" >> "$GITHUB_OUTPUT"
-          echo "plugin_check=$plugin_check" >> "$GITHUB_OUTPUT"
-          echo "javascript=$javascript" >> "$GITHUB_OUTPUT"
-          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          python3 bin/classify-ci.py \
+            --event-name "${{ github.event_name }}" \
+            --pr-draft "${{ github.event.pull_request.draft || false }}" \
+            --changed-files "$RUNNER_TEMP/changed-files.txt" \
+            --minimum-wp "$minimum_wp" \
+            --tested-wp "$tested_wp" \
+            --github-output "$GITHUB_OUTPUT"
 
   repository-contracts:
     name: Repository contracts
@@ -143,7 +104,7 @@ jobs:
     name: Coding standards
     needs:
       - classify
-    if: ${{ needs.classify.outputs.integration == 'true' }}
+    if: ${{ needs.classify.outputs.quality == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -161,6 +122,21 @@ jobs:
 
       - name: Validate Composer metadata
         run: composer validate --strict
+
+      - name: Check PHP syntax
+        shell: bash
+        run: find . -path './vendor' -prune -o -name '*.php' -print0 | xargs -0 -n1 php -l
+
+      - name: Resolve Composer download cache
+        id: composer-cache
+        shell: bash
+        run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Composer downloads
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: composer-download-${{ runner.os }}-php-8.2-${{ hashFiles('composer.lock') }}
 
       - name: Install development dependencies
         run: composer install --no-interaction --prefer-dist
@@ -233,6 +209,17 @@ jobs:
         shell: bash
         run: find . -path './vendor' -prune -o -name '*.php' -print0 | xargs -0 -n1 php -l
 
+      - name: Resolve Composer download cache
+        id: composer-cache
+        shell: bash
+        run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Composer downloads
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: composer-download-${{ runner.os }}-php-${{ matrix.php }}-${{ hashFiles('composer.lock') }}
+
       - name: Install development dependencies
         run: composer install --no-interaction --prefer-dist
 
@@ -296,7 +283,9 @@ jobs:
             --baseline release/plugin-check-baseline.json
 
   ci-gate:
-    name: CI Gate
+    # Only final-mode runs emit the stable branch-protection signal. Draft runs
+    # emit Iteration Gate, so a cheaper draft result cannot satisfy CI Gate.
+    name: ${{ needs.classify.outputs.full == 'true' && 'CI Gate' || 'Iteration Gate' }}
     if: ${{ always() }}
     needs:
       - classify
@@ -311,17 +300,14 @@ jobs:
       - name: Require every applicable validation job
         env:
           CLASSIFY: ${{ needs.classify.result }}
+          QUALITY_REQUIRED: ${{ needs.classify.outputs.quality }}
+          INTEGRATION_REQUIRED: ${{ needs.classify.outputs.integration }}
+          JAVASCRIPT_REQUIRED: ${{ needs.classify.outputs.javascript }}
+          PLUGIN_CHECK_REQUIRED: ${{ needs.classify.outputs.plugin_check }}
           CONTRACTS: ${{ needs.repository-contracts.result }}
           QUALITY: ${{ needs.quality.result }}
           JAVASCRIPT: ${{ needs.javascript.result }}
           PHPUNIT: ${{ needs.phpunit.result }}
           PLUGIN_CHECK: ${{ needs.plugin-check.result }}
         shell: bash
-        run: |
-          set -euo pipefail
-          for result in "$CLASSIFY" "$CONTRACTS" "$QUALITY" "$JAVASCRIPT" "$PHPUNIT" "$PLUGIN_CHECK"; do
-            case "$result" in
-              success|skipped) ;;
-              *) echo "Required validation did not pass: $result" >&2; exit 1 ;;
-            esac
-          done
+        run: bash bin/validate-ci-gate.sh

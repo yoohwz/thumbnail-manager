@@ -11,6 +11,13 @@
 - [ ] Fast
 - [ ] Controlled
 
+## Validation/review profile
+
+- [ ] Structural
+- [ ] Functional
+- [ ] Safety-critical
+- [ ] Release
+
 ## Workflow handoff
 
 - Task / issue:
@@ -23,9 +30,23 @@
 
 -
 
+## Affected invariants
+
+<!-- Name changed/protected invariants, or state Not applicable. -->
+
+-
+
 ## Validation
 
-<!-- List only checks that actually ran. Use `NOT RUN — reason` when unavailable. -->
+<!-- Keep this compact. List only checks that ran; use `NOT RUN — reason` when unavailable. -->
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+|  | PASS / NOT RUN |  |
+
+## Blocking findings and corrections
+
+<!-- Summarize resolved blockers, or state None. Detailed logs belong in CI/runtime artifacts. -->
 
 -
 
