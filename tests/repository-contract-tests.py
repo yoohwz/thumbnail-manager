@@ -138,6 +138,7 @@ for needle, label in (
     ("Draft pull-request heads use **Iteration CI**", "Iteration CI guidance"),
     ("Non-draft pull-request heads", "Final CI guidance"),
     ("Iteration CI emits `Iteration Gate`", "draft gate separation"),
+    ("A Final CI change to the CI control plane", "CI control-plane self-validation"),
     ("a PASS/NOT RUN evidence table", "compact durable evidence"),
 ):
     if needle not in agents:
@@ -241,6 +242,53 @@ main_runtime = classify_ci.classify(
 if not main_runtime["full"] or main_runtime["matrix"] != final_runtime["matrix"]:
     fail("main pushes must retain the same full support-boundary matrix as Final CI")
 
+expected_control_plane_paths = {
+    ".github/workflows/ci.yml",
+    "bin/classify-ci.py",
+    "bin/validate-ci-gate.sh",
+}
+if not expected_control_plane_paths.issubset(classify_ci.CI_CONTROL_PLANE_PATHS):
+    fail("CI classifier is missing a required control-plane path")
+
+draft_control_plane = classify_ci.classify(
+    event_name="pull_request",
+    pr_draft=True,
+    changed_files=[".github/workflows/ci.yml"],
+    minimum_wp=plugin_requires_wp,
+    tested_wp=tested_up_to,
+)
+if not draft_control_plane["control_plane"] or draft_control_plane["full"]:
+    fail("draft CI workflow changes must be identified without masquerading as Final CI")
+if any(
+    draft_control_plane[key]
+    for key in ("quality", "integration", "plugin_check", "javascript")
+):
+    fail("draft CI control-plane changes may retain the cheaper Iteration CI path")
+
+for control_path in sorted(expected_control_plane_paths):
+    final_control_plane = classify_ci.classify(
+        event_name="pull_request",
+        pr_draft=False,
+        changed_files=[control_path],
+        minimum_wp=plugin_requires_wp,
+        tested_wp=tested_up_to,
+    )
+    if not all(
+        final_control_plane[key]
+        for key in (
+            "full",
+            "control_plane",
+            "quality",
+            "integration",
+            "plugin_check_applicable",
+            "plugin_check",
+            "javascript",
+        )
+    ):
+        fail(f"Final CI control-plane change does not force every validation surface: {control_path}")
+    if final_control_plane["matrix"] != final_runtime["matrix"]:
+        fail(f"Final CI control-plane change does not use the full support matrix: {control_path}")
+
 draft_governance = classify_ci.classify(
     event_name="pull_request",
     pr_draft=True,
@@ -253,6 +301,21 @@ if any(
     for key in ("quality", "integration", "plugin_check_applicable", "plugin_check", "javascript")
 ):
     fail("governance-only draft changes must not fan out runtime validation")
+
+final_governance = classify_ci.classify(
+    event_name="pull_request",
+    pr_draft=False,
+    changed_files=["AGENTS.md", ".github/pull_request_template.md"],
+    minimum_wp=plugin_requires_wp,
+    tested_wp=tested_up_to,
+)
+if not final_governance["full"] or final_governance["control_plane"]:
+    fail("ordinary governance changes must use Final CI without becoming control-plane changes")
+if any(
+    final_governance[key]
+    for key in ("quality", "integration", "plugin_check_applicable", "plugin_check", "javascript")
+):
+    fail("ordinary governance-only Final CI must not fan out runtime validation")
 
 manual = classify_ci.classify(
     event_name="workflow_dispatch",
@@ -544,6 +607,33 @@ for result in ("skipped", "failure", "cancelled"):
     )
     if gate.returncode == 0:
         fail(f"CI gate accepted required Plugin Check result: {result}")
+
+control_plane_gate_environment = gate_environment | {
+    "QUALITY_REQUIRED": "true" if final_control_plane["quality"] else "false",
+    "INTEGRATION_REQUIRED": "true" if final_control_plane["integration"] else "false",
+    "JAVASCRIPT_REQUIRED": "true" if final_control_plane["javascript"] else "false",
+    "PLUGIN_CHECK_REQUIRED": "true" if final_control_plane["plugin_check"] else "false",
+    "QUALITY": "success",
+    "JAVASCRIPT": "success",
+    "PHPUNIT": "success",
+    "PLUGIN_CHECK": "success",
+}
+for result_variable, label in (
+    ("QUALITY", "Coding standards"),
+    ("JAVASCRIPT", "JavaScript syntax"),
+    ("PHPUNIT", "WordPress/PHP integration"),
+    ("PLUGIN_CHECK", "WordPress Plugin Check"),
+):
+    adversarial_environment = control_plane_gate_environment | {result_variable: "skipped"}
+    gate = subprocess.run(
+        ["bash", str(ROOT / "bin/validate-ci-gate.sh")],
+        env=adversarial_environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if gate.returncode == 0:
+        fail(f"CI Gate accepted skipped {label} for a Final CI control-plane change")
 
 print(
     "Repository contracts passed: "

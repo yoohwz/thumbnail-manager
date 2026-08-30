@@ -28,6 +28,7 @@ jobs:
     outputs:
       intensity: ${{ steps.classify.outputs.intensity }}
       full: ${{ steps.classify.outputs.full }}
+      control_plane: ${{ steps.classify.outputs.control_plane }}
       quality: ${{ steps.classify.outputs.quality }}
       integration: ${{ steps.classify.outputs.integration }}
       plugin_check_applicable: ${{ steps.classify.outputs.plugin_check_applicable }}

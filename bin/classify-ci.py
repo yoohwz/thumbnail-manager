@@ -8,6 +8,12 @@ import json
 from pathlib import Path
 from typing import Iterable
 
+CI_CONTROL_PLANE_PATHS = {
+    ".github/workflows/ci.yml",
+    "bin/classify-ci.py",
+    "bin/validate-ci-gate.sh",
+}
+
 
 def unique_matrix(items: Iterable[dict[str, str]]) -> dict[str, list[dict[str, str]]]:
     """Return a GitHub Actions include matrix without duplicate WP/PHP pairs."""
@@ -32,6 +38,7 @@ def classify(
     """Return CI decisions for one workflow event and changed-file set."""
     paths = {path.strip() for path in changed_files if path.strip()}
     full = event_name != "pull_request" or not pr_draft
+    control_plane = bool(paths & CI_CONTROL_PLANE_PATHS)
 
     quality = False
     integration = False
@@ -89,7 +96,7 @@ def classify(
         ):
             javascript = True
 
-    if event_name == "workflow_dispatch":
+    if event_name == "workflow_dispatch" or (full and control_plane):
         quality = True
         integration = True
         plugin_check_applicable = True
@@ -126,6 +133,7 @@ def classify(
     return {
         "intensity": "final" if full else "iteration",
         "full": full,
+        "control_plane": control_plane,
         "quality": quality,
         "integration": integration,
         "plugin_check_applicable": plugin_check_applicable,

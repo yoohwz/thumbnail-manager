@@ -263,6 +263,7 @@ A green CI run proves only the checks CI actually executes; it does not replace 
 - A correction pushed after technical review invalidates the target and must again pass applicable Final CI on the new exact head before re-handoff. Converting the PR back to draft is allowed for iteration, but no draft result is merge-ready.
 - The stable required branch-protection signal is the aggregate `CI Gate`; Iteration CI emits `Iteration Gate` instead, so cheaper draft validation cannot satisfy branch protection. Individual conditional jobs may be skipped only when the classifier marks them irrelevant.
 - CI classifiers and `CI Gate` must fail closed: a required job that fails, is cancelled, or is skipped cannot be treated as merge-ready.
+- A Final CI change to the CI control plane (`.github/workflows/ci.yml`, its classifier, or its aggregate-gate helper) must self-test the complete validation graph: quality, all supported WordPress/PHP boundary jobs, Plugin Check, JavaScript contracts, repository contracts, and `CI Gate`. Ordinary governance-only files do not trigger this self-test.
 - Cache only immutable dependency downloads keyed by their lockfile/runtime identity. Do not cache mutable WordPress branch sources or generated state in a way that can hide upstream drift.
 - Do not bypass a failed required gate. Diagnose whether the failure is product code, tests, tooling, or infrastructure.
 - Compatibility canary failures are future-compatibility signals and are not merge approval by themselves.
