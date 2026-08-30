@@ -119,10 +119,13 @@ function yotm_prune_merge_item_payload( $job_id, $item_key, $payload ) {
  * @param int    $page Current page.
  * @param int    $per_page Items per page.
  * @param string $search Optional path/size search.
- * @return array{items:array,total:int,pages:int,page:int}
+ * @return array{items:array,total:int,pages:int,page:int}|WP_Error
  */
 function yotm_prune_get_items_page( $job_id, $page = 1, $per_page = 25, $search = '' ) {
-	$rows  = yotm_job_get_item_rows_page( $job_id, $page, $per_page, $search );
+	$rows = yotm_job_get_item_rows_page( $job_id, $page, $per_page, $search );
+	if ( is_wp_error( $rows ) ) {
+		return $rows;
+	}
 	$items = array();
 
 	foreach ( $rows['items'] as $row ) {

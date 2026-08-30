@@ -25,6 +25,13 @@ class YOTM_Job_Storage_Test extends WP_UnitTestCase {
 	 */
 	private $directories = array();
 
+	/**
+	 * Manifest page query stage to fail.
+	 *
+	 * @var string
+	 */
+	private $manifest_page_failure_stage = '';
+
 	public function setUp(): void {
 		parent::setUp();
 		yotm_install_job_tables();
@@ -42,6 +49,8 @@ class YOTM_Job_Storage_Test extends WP_UnitTestCase {
 		remove_filter( 'query', array( $this, 'fail_named_lock_query' ) );
 		remove_filter( 'query', array( $this, 'fail_worker_cas_query' ) );
 		remove_filter( 'query', array( $this, 'fail_historical_evidence_read' ) );
+		remove_filter( 'query', array( $this, 'fail_manifest_page_read' ) );
+		$this->manifest_page_failure_stage = '';
 		remove_filter( 'query', array( $this, 'force_named_lock_contention' ) );
 		$this->clear_jobs();
 		foreach ( array_unique( $this->files ) as $file ) {
@@ -322,6 +331,37 @@ class YOTM_Job_Storage_Test extends WP_UnitTestCase {
 		$this->assertSame( 1, yotm_job_worker_delete_status_batch( $second_worker, array( 'historical_cohort' ), 1 ) );
 		$this->assertSame( 0, yotm_job_count_items_by_status( $job['id'], array( 'historical_cohort' ) ) );
 		yotm_job_release_worker( $second_worker );
+	}
+
+	public function test_manifest_review_page_reads_fail_closed() {
+		global $wpdb;
+
+		$job = yotm_job_create(
+			'prune',
+			array(),
+			array(
+				'status'       => 'scanning',
+				'phase'        => 'metadata',
+				'counter_mode' => 'item_v3',
+			)
+		);
+		$this->assertIsArray( $job );
+		$this->assertTrue( yotm_job_add_item( $job['id'], 'manifest-page-item', array( 'path' => '/uploads/reviewed.jpg' ), 'queued', 1 ) );
+
+		$suppressing = $wpdb->suppress_errors();
+		add_filter( 'query', array( $this, 'fail_manifest_page_read' ) );
+		try {
+			$this->manifest_page_failure_stage = 'count';
+			$this->assertWPError( yotm_job_get_item_rows_page( $job['id'], 1, 25 ) );
+			$this->assertWPError( yotm_prune_get_items_page( $job['id'], 1, 25 ) );
+			$this->manifest_page_failure_stage = 'list';
+			$this->assertWPError( yotm_job_get_item_rows_page( $job['id'], 1, 25 ) );
+			$this->assertWPError( yotm_prune_get_items_page( $job['id'], 1, 25 ) );
+		} finally {
+			remove_filter( 'query', array( $this, 'fail_manifest_page_read' ) );
+			$this->manifest_page_failure_stage = '';
+			$wpdb->suppress_errors( $suppressing );
+		}
 	}
 
 	public function test_failed_named_lock_query_is_not_reported_as_worker_contention() {
@@ -1213,6 +1253,14 @@ class YOTM_Job_Storage_Test extends WP_UnitTestCase {
 		$is_manifest   = false !== strpos( $query, 'SELECT item_key,payload' ) && false !== strpos( $query, "status = 'queued'" );
 		return ( $is_historical || $is_manifest ) && 0 === stripos( ltrim( $query ), 'SELECT' )
 			? 'SELECT * FROM yotm_missing_historical_evidence_table'
+			: $query;
+	}
+
+	public function fail_manifest_page_read( $query ) {
+		$is_count = 'count' === $this->manifest_page_failure_stage && false !== strpos( $query, 'SELECT COUNT(*)' ) && false === strpos( $query, 'status IN' );
+		$is_list  = 'list' === $this->manifest_page_failure_stage && false !== strpos( $query, 'SELECT *' ) && false !== strpos( $query, 'ORDER BY id ASC LIMIT' );
+		return ( $is_count || $is_list )
+			? 'SELECT * FROM yotm_missing_manifest_page_table'
 			: $query;
 	}
 

@@ -221,7 +221,7 @@ function yotm_job_update_mutable_item_payload( $item_id, $payload ) {
  * @param int    $page Current page.
  * @param int    $per_page Items per page.
  * @param string $search Optional opaque payload search.
- * @return array{items:array,total:int,pages:int,page:int}
+ * @return array{items:array,total:int,pages:int,page:int}|WP_Error
  */
 function yotm_job_get_item_rows_page( $job_id, $page = 1, $per_page = 25, $search = '' ) {
 	global $wpdb;
@@ -242,7 +242,12 @@ function yotm_job_get_item_rows_page( $job_id, $page = 1, $per_page = 25, $searc
 	// phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- Dynamic WHERE contains only the job ID and optional payload-search placeholders.
 	$count_sql = $wpdb->prepare( "SELECT COUNT(*) FROM {$tables['items']} WHERE {$where}", ...$args );
 	// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Prepared above; table name is plugin-owned.
-	$total      = (int) $wpdb->get_var( $count_sql );
+	$total       = $wpdb->get_var( $count_sql );
+	$query_error = yotm_job_last_database_error();
+	if ( is_wp_error( $query_error ) ) {
+		return $query_error;
+	}
+	$total      = (int) $total;
 	$pages      = max( 1, (int) ceil( $total / $per_page ) );
 	$page       = min( $page, $pages );
 	$offset     = ( $page - 1 ) * $per_page;
@@ -250,8 +255,12 @@ function yotm_job_get_item_rows_page( $job_id, $page = 1, $per_page = 25, $searc
 	$list_sql   = $wpdb->prepare( "SELECT * FROM {$tables['items']} WHERE {$where} ORDER BY id ASC LIMIT %d OFFSET %d", ...$query_args );
 	// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
 	// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Prepared above; table name is plugin-owned.
-	$rows = $wpdb->get_results( $list_sql );
-	$out  = array();
+	$rows        = $wpdb->get_results( $list_sql );
+	$query_error = yotm_job_last_database_error();
+	if ( is_wp_error( $query_error ) ) {
+		return $query_error;
+	}
+	$out = array();
 
 	foreach ( $rows as $row ) {
 		$item = yotm_job_normalize_item_row( $row );

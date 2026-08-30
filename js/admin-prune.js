@@ -33,6 +33,7 @@
   let manifestPage = 1;
   let manifestPages = 1;
   let manifestTimer = null;
+  let manifestLoaded = false;
 	let pruneControlsLocked = false;
 
   const $pruneProg = $('#yotm_progress');
@@ -223,6 +224,9 @@
     if (!pruneToken) {
       return;
     }
+    manifestLoaded = false;
+    $('#yotm_review_confirm').prop('checked', false).prop('disabled', true);
+    $pruneApprove.prop('disabled', true);
     $('#yotm_manifest_body').html('<tr><td colspan="4">' + escapeHtml(t('manifestLoading', 'Loading manifest…')) + '</td></tr>');
     request('yotm_job_items', {
       token: pruneToken,
@@ -259,6 +263,8 @@
       $('#yotm_manifest_page').text(formatTemplate(t('pageOf', 'Page %1$s of %2$s'), {'%1$s': manifestPage, '%2$s': manifestPages}));
       $('#yotm_manifest_prev').prop('disabled', manifestPage <= 1);
       $('#yotm_manifest_next').prop('disabled', manifestPage >= manifestPages);
+      manifestLoaded = true;
+      $('#yotm_review_confirm').prop('disabled', false);
     }).fail(function(){
       $('#yotm_manifest_body').html('<tr><td colspan="4">' + escapeHtml(t('manifestLoadFailed', 'Could not load the manifest.')) + '</td></tr>');
     });
@@ -274,7 +280,8 @@
     $('#yotm_review_expiry').text(formatDate(data.expires_at));
     $('#yotm_review_hash').text(pruneManifest);
     $('#yotm_review_orphans').html(renderOrphanSummary(data.orphan_summary || (data.context && data.context.orphan_summary), data.manifest_class_counts || (data.context && data.context.manifest_class_counts)));
-    $('#yotm_review_confirm').prop('checked', false).prop('disabled', false);
+    manifestLoaded = false;
+    $('#yotm_review_confirm').prop('checked', false).prop('disabled', true);
     $pruneApprove.text(String(t('deleteReviewedCount', 'Delete %s reviewed files')).replace('%s', pruneTotal.toLocaleString())).prop('disabled', true).removeClass('yo-hidden');
     $('#yotm_manifest_search').val('').prop('disabled', false);
     $('#yotm_manifest_prev, #yotm_manifest_next').prop('disabled', false);
@@ -290,7 +297,7 @@
     window.clearTimeout(manifestTimer);
     manifestTimer = window.setTimeout(function(){ loadManifest(1); }, 250);
   });
-  $('#yotm_review_confirm').on('change', function(){ $pruneApprove.prop('disabled', !this.checked); });
+  $('#yotm_review_confirm').on('change', function(){ $pruneApprove.prop('disabled', !manifestLoaded || !this.checked); });
 
   function preparePrune() {
     if (pruneRunning || pruneToken) {
@@ -403,7 +410,7 @@
   }
 
   function approvePruneManifest() {
-    if (!pruneToken || !pruneManifest || !$('#yotm_review_confirm').is(':checked')) {
+    if (!pruneToken || !pruneManifest || !manifestLoaded || !$('#yotm_review_confirm').is(':checked')) {
       return;
     }
     $pruneApprove.prop('disabled', true);
@@ -413,8 +420,9 @@
     }).done(function(response){
       if (!response || !response.success) {
         $pruneResults.prepend(htmlNotice('notice-error', t('approvalFailed', 'Delete approval failed:') + ' ' + responseError(response, t('unknownError', 'Unknown error'))));
-        $('#yotm_review_confirm, #yotm_manifest_search, #yotm_manifest_prev, #yotm_manifest_next').prop('disabled', false);
-        $pruneApprove.prop('disabled', false);
+        $('#yotm_review_confirm').prop('disabled', !manifestLoaded);
+        $('#yotm_manifest_search, #yotm_manifest_prev, #yotm_manifest_next').prop('disabled', false);
+        $pruneApprove.prop('disabled', !manifestLoaded || !$('#yotm_review_confirm').is(':checked'));
         return;
       }
       pruneRunning = true;
@@ -424,8 +432,9 @@
       loadRecentJobs();
     }).fail(function(){
       $pruneResults.prepend(htmlNotice('notice-error', t('networkApproval', 'Network error while approving the manifest.')));
-      $('#yotm_review_confirm, #yotm_manifest_search, #yotm_manifest_prev, #yotm_manifest_next').prop('disabled', false);
-      $pruneApprove.prop('disabled', false);
+      $('#yotm_review_confirm').prop('disabled', !manifestLoaded);
+      $('#yotm_manifest_search, #yotm_manifest_prev, #yotm_manifest_next').prop('disabled', false);
+      $pruneApprove.prop('disabled', !manifestLoaded || !$('#yotm_review_confirm').is(':checked'));
     });
   }
 

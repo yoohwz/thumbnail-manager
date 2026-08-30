@@ -524,6 +524,15 @@ test('Prune module preserves prepare, manifest review, approval, and delete payl
   assert.equal(actionCalls(harness, 'yotm_prune_approve').length, 0, 'approval requires explicit confirmation');
   harness.$('#yotm_review_confirm').elements[0].checked = true;
   invokeHandler(harness, '#yotm_approve_delete');
+  assert.equal(actionCalls(harness, 'yotm_prune_approve').length, 0, 'approval remains blocked until the manifest page loads');
+  actionCalls(harness, 'yotm_job_items')[0].deferred.resolve({success: true, data: {
+    items: [{path: '/uploads/reviewed.jpg', attachment_id: 1, ownership_evidence: [], estimated_bytes: 1024}],
+    total: 1,
+    pages: 1,
+    page: 1
+  }});
+  harness.$('#yotm_review_confirm').elements[0].checked = true;
+  invokeHandler(harness, '#yotm_approve_delete');
   const approve = actionCalls(harness, 'yotm_prune_approve')[0];
   assert.deepEqual(approve.payload, {
     action: 'yotm_prune_approve',

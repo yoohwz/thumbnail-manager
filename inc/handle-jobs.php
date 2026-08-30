@@ -53,6 +53,9 @@ function yotm_job_ajax_items() {
 	$per_page = isset( $_POST['per_page'] ) ? absint( wp_unslash( $_POST['per_page'] ) ) : 25;
 	$search   = sanitize_text_field( wp_unslash( $_POST['search'] ?? '' ) );
 	$data     = yotm_prune_get_items_page( $job['id'], $page, $per_page, $search );
+	if ( is_wp_error( $data ) ) {
+		wp_send_json_error( array( 'msg' => $data->get_error_message() ), 503 );
+	}
 
 	wp_send_json_success( $data );
 }

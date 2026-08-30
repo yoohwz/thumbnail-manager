@@ -963,6 +963,14 @@ function yotm_classify_legacy_disk_candidates( $paths, $job_payload ) {
 			$results[ $key ] = new WP_Error( 'yotm_legacy_current_disabled_not_enabled', __( 'Current-disabled legacy discovery is not enabled for this job.', 'thumbnail-manager' ) );
 			continue;
 		}
+		$live_sizes          = yotm_get_registered_sizes();
+		$live_matches        = yotm_legacy_matching_size_names( array_keys( $live_sizes ), $live_sizes, $source_image[0], $source_image[1], $info['width'], $info['height'] );
+		$live_remove_matches = array_values( array_intersect( $matched_remove, $live_matches ) );
+		$live_veto_matches   = array_values( array_diff( $live_matches, $matched_remove ) );
+		if ( empty( $live_remove_matches ) || ! empty( $live_veto_matches ) ) {
+			$results[ $key ] = new WP_Error( 'yotm_legacy_live_projection_changed', __( 'Current registered size projections changed and no longer authorize this legacy candidate.', 'thumbnail-manager' ) );
+			continue;
+		}
 
 		$policy_hash     = (string) ( $job_payload['legacy_policy']['hash'] ?? '' );
 		$proof           = array(
