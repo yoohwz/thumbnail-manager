@@ -89,7 +89,17 @@ For **Fast Lane**, use only the minimum useful brief:
 
 For **Controlled Lane**, also record the affected invariants, implementation constraints, material risks, and unresolved decisions when any exist.
 
+When product semantics could be ambiguous, the Controlled brief/plan must freeze a compact set of user-visible and edge-case scenarios before implementation. Keep the scenario table in the existing issue/plan; do not create another artifact or workflow status. Each row should identify the scenario, expected behavior, and whether it is in scope so distinctions such as current-disabled versus historical-unregistered cleanup are resolved before code changes.
+
+Controlled plans must also state a proportional complexity budget and stop-loss. Record the expected runtime surfaces and whether DDL, a new lock domain, a new recovery coordinator, or another destructive authority is expected. Stop and return through `PLAN_REVIEW_REQUIRED` or `HUMAN_DECISION_REQUIRED` when implementation unexpectedly requires a new persistent schema/migration, lock/transaction/recovery domain, cross-subsystem destructive authority, material scope expansion, or repeated blockers that make the approved architecture poor value for its cost.
+
 Do not create repository planning documents merely to mirror conversation or pull-request history.
+
+## Task and pull request shape
+
+- Use one task = one draft pull request by default. Use logical commits as rollback and review checkpoints rather than mechanical tranche PRs.
+- Split a task only at a real semantic boundary: an independently mergeable schema/migration, a distinct destructive authority, an intentional Human/product decision between parts, a dependency on accepted updated `main`, or a diff too broad for safe semantic review.
+- The one-PR default does not authorize mega-PRs. Reviewability, safety, and the complexity stop-loss remain binding.
 
 ## Risk lanes
 
@@ -142,6 +152,17 @@ At `TECHNICAL_REVIEW_REQUIRED`, ChatGPT reviews the approved plan against the ac
 
 If Fast-Lane discovery reveals a Controlled risk, stop before risky runtime implementation and promote the task to Controlled Lane.
 
+### Validation/review profiles
+
+Profiles tune evidence intensity inside the existing Fast/Controlled lanes; they are not a third risk lane and do not add workflow statuses:
+
+- **Structural** — behavior-preserving move, extraction, or refactor. Prove source/body/API equivalence where practical, characterize dependency boundaries, and run targeted tests.
+- **Functional** — product behavior changes without destructive or safety-critical authority. Exercise the changed behavior and affected integration/browser boundaries.
+- **Safety-critical** — deletion, metadata transaction/reconciliation, persistence/schema, locking/concurrency, authorization/security, crash recovery, or an equivalent irreversible state. Use the strongest relevant integration/runtime evidence and the mandatory fresh independent review rules below.
+- **Release** — package, publisher, SVN, tag, or release-control work. Validate the exact package, Plugin Check, and release contracts without crossing the Human publication gate.
+
+Record the selected profile in the PR evidence. Risk-lane classification remains authoritative if a profile and lane appear to conflict.
+
 ### Review intensity: fresh independent Codex review
 
 A fresh independent Codex review is a **review intensity**, not a separate workflow stage or status. It runs inside the Codex execution cycle before the external ChatGPT handoff.
@@ -159,6 +180,8 @@ A fresh independent Codex review is mandatory for safety-critical Controlled cha
 The independent review must use a fresh context and a separate worktree or clean checkout, bind to the exact PR head, and produce findings that the implementing Codex resolves before posting `TECHNICAL_REVIEW_REQUIRED`. It does not create a new cross-agent status. ChatGPT may require this review during plan review when the change surface warrants it, and the Human may require it at any time.
 
 Other Controlled tasks may use the implementing Codex's own adversarial verification plus strong automated/runtime evidence when a fresh reviewer would add disproportionate overhead.
+
+A pure mechanical Structural change does not require a fresh independent reviewer merely because its source file belongs to a safety-critical subsystem, but only when semantic behavior is explicitly unchanged, exact source/body/API equivalence is mechanically proven where practical, dependency-boundary characterization tests exist, and no lock, persistence, destructive authority, metadata semantics, recovery ordering, authorization, or public/persisted contract changes. If any condition is not met, apply the stronger review intensity.
 
 ## Media safety invariants
 
@@ -202,6 +225,7 @@ Do not add more statuses unless a future workflow demonstrates a real need.
 - The canonical top-level PR comment is the actionable cross-agent handoff; a PR review submission is supporting detail and must not be the only place where a workflow state changes.
 - `Continue` state recovery must inspect both top-level PR conversation comments and PR review submissions. If a newer applicable review submission carries a workflow status that has not yet been mirrored, treat that review as the newest state rather than allowing an older top-level handoff to mask it. If records are genuinely contradictory for the same/newer exact head, report the ambiguity instead of claiming there is no action.
 - `Review` means recover the newest applicable durable handoff and route to plan review, technical review, correction re-review, or Human decision as appropriate.
+- Keep durable PR evidence compact: goal/scope, binding plan or decision, semantic changes, affected invariants, a PASS/NOT RUN evidence table, blocking findings and corrections, and the release boundary. Put detailed command logs in CI/runtime artifacts or linked evidence when practical.
 
 For re-review after corrections, inspect the delta from the previously reviewed SHA first, verify the original blockers and affected invariants, then spot-check the final PR state. Do not repeat a full review from zero unless the change surface materially expanded.
 
@@ -216,11 +240,16 @@ Naming preferences, optional cleanup, and future refactors are advisory. Advisor
 Validation must be proportional to the change:
 
 - documentation/governance: repository contracts and diff hygiene;
+- structural PHP move: source/API equivalence, dependency-boundary characterization, and targeted PHPUnit;
 - PHP/runtime changes: coding standards plus the supported integration matrix;
-- filesystem/destructive changes: integration tests plus targeted media-safety smoke evidence when automated tests alone do not exercise the runtime boundary adequately;
-- AJAX/admin orchestration: targeted WordPress admin/runtime evidence;
+- Jobs persistence: storage, resume, claim, expiry, and replay tests;
+- locking/concurrency: cross-process contention and stale-owner evidence;
+- prune/delete: media-safety, immutable-manifest, containment, and recovery evidence;
+- Force regeneration: metadata/file transaction and real editor evidence where relevant;
+- AJAX/security: capability, nonce, authorization, and transport evidence;
+- JavaScript orchestration: Node contracts plus the changed browser flow;
 - UI/CSS: targeted visual/manual evidence only for the changed surface;
-- release candidate: full repository contracts, Plugin Check, relevant safety smoke tests, and exact package validation.
+- release: repository/release contracts, exact package validation, Plugin Check, and relevant safety smoke tests.
 
 Do not claim a check passed if it did not run. Record unavailable checks as `NOT RUN — reason`.
 
@@ -229,7 +258,13 @@ A green CI run proves only the checks CI actually executes; it does not replace 
 ## Pull requests and CI
 
 - Keep the PR body current with goal, scope, risk lane, changes, validation, runtime evidence/limitations, and release boundary.
-- The stable required branch-protection signal is the aggregate `CI Gate`; individual conditional jobs may be skipped when they are irrelevant to the diff.
+- Draft pull-request heads use **Iteration CI**. It always runs repository contracts and diff hygiene, plus applicable PHP syntax/PHPCS/PHPCompatibility, JavaScript contracts, targeted tests selected by Codex, and one representative WordPress/PHP integration environment for runtime PHP changes. Plugin Check and the full support-boundary matrix may be deferred.
+- Non-draft pull-request heads, `main` pushes, and manual CI dispatches use **Final CI**. Before `TECHNICAL_REVIEW_REQUIRED`, convert the PR to ready-for-review and wait for the exact head's applicable Final CI, including all four supported WordPress/PHP boundary jobs, Plugin Check, coding standards, JavaScript contracts, repository contracts, and aggregate `CI Gate`.
+- A correction pushed after technical review invalidates the target and must again pass applicable Final CI on the new exact head before re-handoff. Converting the PR back to draft is allowed for iteration, but no draft result is merge-ready.
+- The stable required branch-protection signal is the aggregate `CI Gate`; Iteration CI emits `Iteration Gate` instead, so cheaper draft validation cannot satisfy branch protection. Individual conditional jobs may be skipped only when the classifier marks them irrelevant.
+- CI classifiers and `CI Gate` must fail closed: a required job that fails, is cancelled, or is skipped cannot be treated as merge-ready.
+- A Final CI change to the CI control plane (`.github/workflows/ci.yml`, its classifier, or its aggregate-gate helper) must self-test the complete validation graph: quality, all supported WordPress/PHP boundary jobs, Plugin Check, JavaScript contracts, repository contracts, and `CI Gate`. Ordinary governance-only files do not trigger this self-test.
+- Cache only immutable dependency downloads keyed by their lockfile/runtime identity. Do not cache mutable WordPress branch sources or generated state in a way that can hide upstream drift.
 - Do not bypass a failed required gate. Diagnose whether the failure is product code, tests, tooling, or infrastructure.
 - Compatibility canary failures are future-compatibility signals and are not merge approval by themselves.
 
