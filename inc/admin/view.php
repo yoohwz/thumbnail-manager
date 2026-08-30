@@ -356,7 +356,7 @@ function yotm_render_admin_view( $view ) {
 
 				<form id="yotm_form" onsubmit="return false;">
 				<div class="yo-table-scroll">
-					<table class="widefat striped yo-sizes" style="max-width:980px;">
+					<table class="widefat striped yo-sizes">
 					<thead>
 						<tr>
 							<th style="width:4ch;"><?php echo esc_html__( 'Keep', 'thumbnail-manager' ); ?></th>
