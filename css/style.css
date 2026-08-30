@@ -685,6 +685,11 @@ textarea.yo-sample {
 	height: 220px;
 }
 
+table.yo-sizes {
+	width: 100%;
+	max-width: none;
+}
+
 table.yo-sizes td,
 table.yo-sizes th {
 	vertical-align: middle;

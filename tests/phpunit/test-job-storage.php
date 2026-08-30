@@ -333,6 +333,124 @@ class YOTM_Job_Storage_Test extends WP_UnitTestCase {
 		yotm_job_release_worker( $second_worker );
 	}
 
+	public function test_partial_historical_cleanup_advances_without_a_noop_storage_error() {
+		$job = yotm_job_create(
+			'prune',
+			array(
+				'scan_phase'               => 'cohort_materialize',
+				'cohort_materialize_stage' => 'cleanup',
+			),
+			array(
+				'status'       => 'scanning',
+				'phase'        => 'cohort_materialize',
+				'counter_mode' => 'item_v3',
+			)
+		);
+		$this->assertIsArray( $job );
+
+		$worker = yotm_job_acquire_worker( $job['id'], array( 'scanning' ), array( 'cohort_materialize' ) );
+		$this->assertIsArray( $worker );
+
+		for ( $index = 1; $index <= 3; $index++ ) {
+			$this->assertTrue(
+				yotm_job_worker_add_item(
+					$worker,
+					hash( 'sha256', 'partial-cleanup-' . $index ),
+					array( 'evidence' => $index ),
+					'historical_cohort'
+				)
+			);
+		}
+
+		$first = yotm_prune_historical_materialize_batch( yotm_job_get_by_id( $job['id'] ), 1, $worker );
+		$this->assertIsArray( $first );
+		$this->assertFalse( $first['done'] );
+		$this->assertSame( 2, yotm_job_count_items_by_status( $job['id'], array( 'historical_cohort' ) ) );
+		$this->assertSame( 'cohort_materialize', $first['job']['phase'] );
+
+		$second = yotm_prune_historical_materialize_batch( $first['job'], 1, $worker );
+		$this->assertIsArray( $second );
+		$this->assertFalse( $second['done'] );
+		$this->assertSame( 1, yotm_job_count_items_by_status( $job['id'], array( 'historical_cohort' ) ) );
+
+		$final = yotm_prune_historical_materialize_batch( $second['job'], 1, $worker );
+		$this->assertIsArray( $final );
+		$this->assertTrue( $final['done'] );
+		$this->assertSame( 0, yotm_job_count_items_by_status( $job['id'], array( 'historical_cohort' ) ) );
+		$this->assertSame( 'manifest', $final['job']['phase'] );
+
+		yotm_job_release_worker( $worker );
+	}
+
+	public function test_unqualified_historical_seal_advances_without_a_noop_storage_error() {
+		$job = yotm_job_create(
+			'prune',
+			array(
+				'scan_phase'               => 'cohort_materialize',
+				'cohort_materialize_stage' => 'seal',
+				'cohort_seal_after'        => 0,
+			),
+			array(
+				'status'       => 'scanning',
+				'phase'        => 'cohort_materialize',
+				'counter_mode' => 'item_v3',
+			)
+		);
+		$this->assertIsArray( $job );
+
+		$worker = yotm_job_acquire_worker( $job['id'], array( 'scanning' ), array( 'cohort_materialize' ) );
+		$this->assertIsArray( $worker );
+
+		$item_key = hash( 'sha256', 'unqualified-historical-signature' );
+		$state    = array(
+			'evidence_kind'        => 'historical_cohort_signature_v1',
+			'historical_signature' => '137x113:image/jpeg',
+			'qualifying_keys'      => array(),
+			'observations'         => array( array( 'historical_witness_key' => hash( 'sha256', 'unqualified-observation' ) ) ),
+		);
+		$this->assertTrue( yotm_job_worker_add_item( $worker, $item_key, $state, 'historical_cohort' ) );
+		$item = yotm_job_get_item_by_key( $job['id'], $item_key );
+		$this->assertIsArray( $item );
+
+		$sealed = yotm_prune_historical_materialize_batch( yotm_job_get_by_id( $job['id'] ), 100, $worker );
+		$this->assertIsArray( $sealed );
+		$this->assertFalse( $sealed['done'] );
+		$this->assertSame( 'promote', $sealed['job']['payload']['cohort_materialize_stage'] );
+		$this->assertSame( $item['id'], $sealed['job']['payload']['cohort_seal_after'] );
+		$this->assertSame( $state, yotm_job_get_item_by_key( $job['id'], $item_key )['payload'] );
+
+		yotm_job_release_worker( $worker );
+	}
+
+	public function test_identical_historical_cohort_merge_is_replay_safe() {
+		$job = yotm_job_create(
+			'prune',
+			array( 'scan_phase' => 'cohort_aggregate' ),
+			array(
+				'status'       => 'scanning',
+				'phase'        => 'cohort_aggregate',
+				'counter_mode' => 'item_v3',
+			)
+		);
+		$this->assertIsArray( $job );
+
+		$worker = yotm_job_acquire_worker( $job['id'], array( 'scanning' ), array( 'cohort_aggregate' ) );
+		$this->assertIsArray( $worker );
+
+		$item_key = yotm_prune_historical_cohort_item_key( 'signature', '137x113:image/jpeg' );
+		$state    = array(
+			'evidence_kind'        => 'historical_cohort_signature_v1',
+			'historical_signature' => '137x113:image/jpeg',
+			'qualifying_keys'      => array(),
+			'observations'         => array(),
+		);
+		$this->assertSame( $state, yotm_prune_historical_merge_cohort_state( $job, $worker, $item_key, $state ) );
+		$this->assertSame( $state, yotm_prune_historical_merge_cohort_state( $job, $worker, $item_key, $state ) );
+		$this->assertSame( 1, yotm_job_count_items_by_status( $job['id'], array( 'historical_cohort' ) ) );
+
+		yotm_job_release_worker( $worker );
+	}
+
 	public function test_manifest_review_page_reads_fail_closed() {
 		global $wpdb;
 

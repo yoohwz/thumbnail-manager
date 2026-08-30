@@ -255,6 +255,11 @@ test('core loads once, exposes a frozen bounded registry, and sends recent-job n
   assert.equal(typeof harness.window.YOTMAdmin.request, 'function');
   assert.equal(harness.window.YOTMAdmin.isMissingJobStatus({status: 404}), true);
   assert.equal(harness.window.YOTMAdmin.isMissingJobStatus({status: 503}), false);
+  assert.equal(
+    harness.window.YOTMAdmin.responseError({status: 503, responseJSON: {data: {msg: 'Storage unavailable'}}}, 'Unknown error'),
+    'Storage unavailable'
+  );
+  assert.equal(harness.window.YOTMAdmin.responseError({status: 503}, 'Unknown error'), 'Unknown error (HTTP 503)');
   assert.deepEqual(actionCalls(harness, 'yotm_jobs_recent')[0], {
     url: '/wp-admin/admin-ajax.php',
     payload: {action: 'yotm_jobs_recent', nonce: 'nonce-123'}
@@ -610,6 +615,27 @@ test('Prune module preserves empty and network-retry state transitions', () => {
   assert.equal(retry.storage.get('yotm_job_42_prune'), 'prune-retry');
   assert.equal(retry.cache.get('#yotm_run').elements[0].disabled, true);
   assert.match(retry.cache.get('#yotm_results').html(), /Reload this page to resume it/);
+
+  for (const failure of [
+    {status: 503, responseJSON: {success: false, data: {msg: 'Persistent job storage is unavailable.'}}},
+    {status: 409, responseJSON: {success: false, data: {msg: 'Historical cohort evidence is incomplete.'}}},
+    {status: 200}
+  ]) {
+    const serverError = createHarness({
+      responses: {
+        yotm_prune_prepare: {kind: 'done', value: {success: true, data: {token: 'prune-server-error'}}},
+        yotm_prune_scan_batch: {kind: 'fail', value: failure}
+      }
+    });
+    loadAdmin(serverError);
+    serverError.$('input[name="yotm_prune_scope"]:checked').val('all');
+    invokeHandler(serverError, '#yotm_run');
+    const notice = serverError.cache.get('#yotm_results').html();
+    assert.doesNotMatch(notice, /Network error during scan/);
+    assert.match(notice, /Scan failed:/);
+    assert.match(notice, /Reload this page to resume it/);
+    assert.equal(serverError.storage.get('yotm_job_42_prune'), 'prune-server-error');
+  }
 });
 
 test('Prune module rejects an empty selected scope and forwards only canonical parent subpaths', () => {
