@@ -377,6 +377,7 @@ function yotm_render_admin_view( $view ) {
 							$h = 0 === $h ? (int) $m[2] : $h;
 						}
 						$crop = ! empty( $def['crop'] );
+						$core = in_array( $name, array( 'thumbnail', 'medium', 'large', 'medium_large', '1536x1536', '2048x2048' ), true );
 
 							$note = __( 'Deletes only the exact generated filename recorded in attachment metadata; unverified sidecars and siblings are report-only.', 'thumbnail-manager' );
 
@@ -391,7 +392,14 @@ function yotm_render_admin_view( $view ) {
 									<?php checked( in_array( $name, $default_keep, true ) ); ?>
 								>
 							</td>
-							<td><code><?php echo esc_html( $name ); ?></code></td>
+							<td>
+								<code><?php echo esc_html( $name ); ?></code>
+								<?php
+								if ( $core ) {
+									echo '<span class="dashicons dashicons-wordpress-alt" title="' . esc_attr__( 'Core', 'thumbnail-manager' ) . '"></span>';
+								}
+								?>
+							</td>
 							<td><?php echo esc_html( "{$w} × {$h}" ); ?></td>
 							<td><?php echo $crop ? esc_html__( 'Yes', 'thumbnail-manager' ) : esc_html__( 'No', 'thumbnail-manager' ); ?></td>
 							<td><?php echo esc_html( $note ); ?></td>
