@@ -4,7 +4,7 @@ Tags: thumbnails, regenerate thumbnails, media library, image sizes, cleanup
 Requires at least: 6.3
 Tested up to: 7.0
 Requires PHP: 7.4
-Stable tag: 1.5.0
+Stable tag: 1.5.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -36,13 +36,13 @@ Prune Files separates discovery from deletion:
 4. Explicitly approve the reviewed manifest.
 5. Delete only those approved generated files in resumable batches.
 
-Original full-size uploads are protected. Candidate paths are validated inside the WordPress uploads directory, and attachment metadata is updated when a generated size is removed.
+Original full-size uploads are protected. Candidate paths are validated inside the WordPress uploads directory, and attachment metadata is updated only when an exact metadata-backed generated size is removed.
 
-Metadata-backed legacy sizes can be included in the review. Disk-only files that match a `-WIDTHxHEIGHT` pattern but cannot be mapped reliably to attachment metadata are reported and skipped by default.
+Prune Files can optionally include verified disk-only legacy thumbnails for currently disabled sizes. A separate opt-in can also discover conservatively verified historical thumbnails from fixed image sizes that are no longer registered by the current theme or plugins. Unverified, ambiguous, sidecar, backup-like, or otherwise unmapped disk files remain preserved and do not enter the deletion manifest.
 
 = Scope =
 
-Thumbnail Manager controls image-size generation, regeneration, and cleanup. It does not compress images, convert them to WebP or AVIF, configure a CDN, offload media, or unregister a size from the theme or plugin that originally registered it.
+Thumbnail Manager controls image-size generation, regeneration, and cleanup. It does not compress images, configure a CDN, offload media, or unregister a size from the theme or plugin that originally registered it. Force Regenerate can follow WordPress image-editor output-format filters, including WebP or AVIF when supported by the site, while keeping original/full-size sources protected.
 
 Recommendations are an informed starting point, not proof that a size is used or unused. Missing scan evidence leaves the current size setting unchanged. Verify the sizes used by the active theme, plugins, WooCommerce templates, and custom code before disabling generation or approving deletion.
 
@@ -59,7 +59,7 @@ Recommendations are an informed starting point, not proof that a size is used or
 
 = Can I regenerate thumbnails after changing image sizes? =
 
-Yes. **Only Missing** creates absent sub-sizes. **Force Regenerate** rebuilds the selected attachments more comprehensively from an available original image source.
+Yes. **Only Missing** creates absent sub-sizes and honors the sizes currently enabled in **Thumbnail Sizes**. **Force Regenerate** rebuilds the selected attachments more comprehensively from an available original image source and follows the same enabled-size policy.
 
 Regenerate can process all media, current-year images, one uploads folder, or specific image attachments. Choose the narrowest useful scope before starting a large job.
 
@@ -69,7 +69,7 @@ Yes. Prune Files first builds a manifest for review. Nothing is deleted until th
 
 = Will it delete original images? =
 
-No. Original full-size uploads are protected. Cleanup candidates must also pass path and attachment checks.
+No. Original full-size uploads are protected. Cleanup candidates must also pass path, ownership, source, and manifest checks.
 
 = Can I scan several upload folders? =
 
@@ -83,9 +83,9 @@ Yes. Recommendations, regeneration, scanning, manifest creation, and deletion us
 
 The job state remains in the database. Reload the admin page to resume it. Cancelling stops future batches while retaining an audit record.
 
-= Does orphan discovery delete disk-only files? =
+= Can Prune Files delete old disk-only thumbnails? =
 
-No. Unmapped disk-only filename matches are reported and skipped by default. Only approved, validated manifest items are deleted.
+Only when they can be verified conservatively. You can opt in to verified legacy thumbnails for currently disabled sizes, and separately opt in to verified historical thumbnails from sizes that are no longer registered. Unmapped filename matches, ambiguous files, sidecars, edit/backup-like siblings, and other files without sufficient ownership evidence are preserved by default.
 
 = Is it safe for WooCommerce sites? =
 
@@ -93,7 +93,7 @@ The plugin recognizes WooCommerce-related sizes in Recommendations, but storefro
 
 = Does disabling a size unregister it from a theme or plugin? =
 
-No. It changes which registered sizes WordPress generates for future uploads. The original registration remains in place.
+No. It changes which registered sizes WordPress generates for future uploads and regeneration. The original registration remains in place.
 
 = What data remains after deactivation or plugin deletion? =
 
@@ -101,19 +101,22 @@ Deactivation clears Thumbnail Manager's scheduled cleanup task but retains setti
 
 == Changelog ==
 
-= 1.5.0 (Aug 29, 2026) =
+= 1.5.1 (Aug 30, 2026) =
 
-* Improved regeneration reliability, including safer Force Regenerate recovery and original-source handling
-* Strengthened Prune safety with stricter ownership, source protection, path validation, and reviewed-manifest enforcement
-* Improved Recommendations with evidence-based confidence and conservative fail-safe handling
-* Improved large Media Library performance with persistent, bounded jobs and resumable processing
-* Hardened job locking, ownership, cancellation, expiry, and interrupted-work recovery
-* Added a clearer radio-card Scope picker for Regenerate while preserving targeted folder and attachment selection
-* Improved admin accessibility, compatibility checks, workflow feedback, and automated safety coverage
+* Fixed regeneration so future uploads, Generate Missing Sizes Only, Force Regenerate, and Save + Regenerate consistently honor the sizes enabled in Thumbnail Sizes
+* Added review-first cleanup for verified disk-only thumbnails from currently disabled sizes, plus a separate conservative opt-in for historical sizes that are no longer registered
+* Fixed WebP/AVIF Force Regenerate cleanup so the exact obsolete metadata-backed JPEG/PNG derivative is removed after a successful replacement while unrelated files and sidecars remain protected
+* Hardened historical Prune resume and replay handling, including partial evidence cleanup and legitimate no-op database updates
+* Improved Prune scan errors so server/application failures are distinguished from network loss while the persistent job remains available to reload and resume
+* Improved the Prune Files size table layout and marked WordPress core image sizes with the WordPress icon
 
 See `changelog.txt` for the complete release history.
 
 == Upgrade Notice ==
+
+= 1.5.1 =
+
+Fixes enabled-size regeneration, adds conservative reviewed cleanup for legacy and historical thumbnails, improves format-conversion cleanup, and hardens Prune resume behavior.
 
 = 1.5.0 =
 

@@ -3,7 +3,7 @@
  * Plugin Name: Thumbnail Manager
  * Plugin URI:  https://yoohw.com/product/thumbnail-manager/
  * Description: Clean, control, and regenerate thumbnails with precision - remove unused sizes, prevent bloat, and rebuild what matters.
- * Version:     1.5.0
+ * Version:     1.5.1
  * Author:      YoOhw.com
  * Author URI:  https://yoohw.com
  * License:     GPL v2 or later
@@ -21,7 +21,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 if ( ! defined( 'YOTM_VERSION' ) ) {
-	define( 'YOTM_VERSION', '1.5.0' );
+	define( 'YOTM_VERSION', '1.5.1' );
 }
 
 /**

@@ -2,14 +2,14 @@
 # This file is distributed under the GPL v2 or later.
 msgid ""
 msgstr ""
-"Project-Id-Version: Thumbnail Manager 1.5.0\n"
+"Project-Id-Version: Thumbnail Manager 1.5.1\n"
 "Report-Msgid-Bugs-To: https://wordpress.org/support/plugin/thumbnail-manager\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"POT-Creation-Date: 2026-08-28T04:28:10+00:00\n"
+"POT-Creation-Date: 2026-08-30T03:48:16+00:00\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "X-Generator: WP-CLI 2.9.0\n"
 "X-Domain: thumbnail-manager\n"
@@ -34,1705 +34,2065 @@ msgstr ""
 msgid "https://yoohw.com"
 msgstr ""
 
-#: inc/admin-menu.php:59
+#: inc/admin/assets.php:86
 msgid "All sizes are enabled — there are no disabled sizes to prune."
 msgstr ""
 
-#: inc/admin-menu.php:60
+#: inc/admin/assets.php:87
 msgid "Scanning…"
 msgstr ""
 
-#: inc/admin-menu.php:61
+#: inc/admin/assets.php:88
 msgid "Deleting…"
 msgstr ""
 
-#: inc/admin-menu.php:62
+#: inc/admin/assets.php:89
 msgid "Processing…"
 msgstr ""
 
-#: inc/admin-menu.php:63
+#: inc/admin/assets.php:90
 msgid "Scan failed:"
 msgstr ""
 
-#: inc/admin-menu.php:64
+#: inc/admin/assets.php:91
 msgid "Prepare failed:"
 msgstr ""
 
-#: inc/admin-menu.php:65
+#: inc/admin/assets.php:92
 msgid "Delete failed:"
 msgstr ""
 
-#: inc/admin-menu.php:66
+#: inc/admin/assets.php:93
 msgid "Unknown error"
 msgstr ""
 
-#: inc/admin-menu.php:67
+#: inc/admin/assets.php:94
 msgid "Network error during prepare."
 msgstr ""
 
-#: inc/admin-menu.php:68
+#: inc/admin/assets.php:95
 msgid "Network error during scan."
 msgstr ""
 
-#: inc/admin-menu.php:69
+#: inc/admin/assets.php:96
 msgid "Network error during delete."
 msgstr ""
 
-#: inc/admin-menu.php:70
+#: inc/admin/assets.php:97
 msgid "Cancelled."
 msgstr ""
 
-#: inc/admin-menu.php:71
+#: inc/admin/assets.php:98
 msgid "An unfinished job was found. Resuming it now…"
 msgstr ""
 
-#: inc/admin-menu.php:72
+#: inc/admin/assets.php:99
 msgid "The job is still saved. Reload this page to resume it."
 msgstr ""
 
-#: inc/admin-menu.php:73
+#: inc/admin/assets.php:100
 msgid "Scan complete. Review the immutable manifest below; nothing has been deleted."
 msgstr ""
 
-#: inc/admin-menu.php:74
+#: inc/admin/assets.php:101
 msgid "Delete approval failed:"
 msgstr ""
 
-#: inc/admin-menu.php:75
+#: inc/admin/assets.php:102
 msgid "Network error while approving the manifest."
 msgstr ""
 
-#: inc/admin-menu.php:76
+#: inc/admin/assets.php:103
 msgid "Manifest:"
 msgstr ""
 
-#: inc/admin-menu.php:77
+#: inc/admin/assets.php:104
 msgid "Scanning uploads folders…"
 msgstr ""
 
-#: inc/admin-menu.php:78
+#: inc/admin/assets.php:105
 msgid "Indexing authoritative media sources…"
 msgstr ""
 
-#: inc/admin-menu.php:79
+#: inc/admin/assets.php:106
 msgid "Building immutable manifest…"
 msgstr ""
 
-#: inc/admin-menu.php:80
+#: inc/admin/assets.php:107
 msgid "Failed files:"
 msgstr ""
 
-#: inc/admin-menu.php:81
+#: inc/admin/assets.php:108
 msgid "No matching thumbnails found. Try enabling orphan discovery or widen the folder scope."
 msgstr ""
 
 #. translators: 1: deleted file count, 2: formatted bytes freed.
-#: inc/admin-menu.php:83
+#: inc/admin/assets.php:110
 msgid "Done. Deleted %1$s files — Freed %2$s."
 msgstr ""
 
-#: inc/admin-menu.php:84
+#: inc/admin/assets.php:111
 msgid "Regeneration cancelled."
 msgstr ""
 
-#: inc/admin-menu.php:85
+#: inc/admin/assets.php:112
 msgid "Preparing regeneration queue…"
 msgstr ""
 
 #. translators: %s: number of authoritative attachment rows checked.
-#: inc/admin-menu.php:87
+#: inc/admin/assets.php:114
 msgid "Scanning attachment rows… %s checked"
 msgstr ""
 
-#: inc/admin-menu.php:88
+#: inc/admin/assets.php:115
 msgid "Starting…"
 msgstr ""
 
 #. translators: 1: regenerated count, 2: skipped count, 3: failed count.
-#: inc/admin-menu.php:90
+#: inc/admin/assets.php:117
 msgid "Done. Regenerated %1$s attachments, skipped %2$s, failed %3$s."
 msgstr ""
 
-#: inc/admin-menu.php:91
+#: inc/admin/assets.php:118
 msgid "Batch failed:"
 msgstr ""
 
-#: inc/admin-menu.php:92
+#: inc/admin/assets.php:119
 msgid "Network error during regenerate batch."
 msgstr ""
 
-#: inc/admin-menu.php:93
+#: inc/admin/assets.php:120
 msgid "Network error during regenerate prepare."
 msgstr ""
 
-#: inc/admin-menu.php:94
+#: inc/admin/assets.php:121
 msgid "No image attachments found."
 msgstr ""
 
-#: inc/admin-menu.php:95
+#: inc/admin/assets.php:122
 msgid "No items to process."
 msgstr ""
 
-#: inc/admin-menu.php:96
+#: inc/admin/assets.php:123
 msgid "Recommendation scan failed."
 msgstr ""
 
-#: inc/admin-menu.php:97
+#: inc/admin/assets.php:124
 msgid "Network error during recommendation scan."
 msgstr ""
 
-#: inc/admin-menu.php:98
+#: inc/admin/assets.php:125
 msgid "Scan completed."
 msgstr ""
 
-#: inc/admin-menu.php:99
+#: inc/admin/assets.php:126
 msgid "Scan base:"
 msgstr ""
 
-#: inc/admin-menu.php:100
+#: inc/admin/assets.php:127
 msgid "KEEP:"
 msgstr ""
 
-#: inc/admin-menu.php:101
+#: inc/admin/assets.php:128
 msgid "DELETE (not selected):"
 msgstr ""
 
-#: inc/admin-menu.php:102
+#: inc/admin/assets.php:129
 msgid "Matched files:"
 msgstr ""
 
-#: inc/admin-menu.php:103
+#: inc/admin/assets.php:130
 msgid "Orphan discovery:"
 msgstr ""
 
-#: inc/admin-menu.php:104
+#: inc/admin/assets.php:131
 msgid "distinct dims on disk/metadata."
 msgstr ""
 
-#: inc/admin-menu.php:105
+#: inc/admin/assets.php:132
 msgid "Dims kept by selection:"
 msgstr ""
 
-#: inc/admin-menu.php:106
+#: inc/admin/assets.php:133
 msgid "Metadata orphan dims marked for deletion:"
 msgstr ""
 
-#: inc/admin-menu.php:107
+#: inc/admin/assets.php:134
 msgid "Original files protected:"
 msgstr ""
 
-#: inc/admin-menu.php:108
+#: inc/admin/assets.php:135
 msgid "Unmapped disk candidates skipped:"
 msgstr ""
 
-#: inc/admin-menu.php:109
+#: inc/admin/assets.php:136
 msgid "Unverified format sidecars preserved:"
 msgstr ""
 
-#: inc/admin-menu.php:110
+#: inc/admin/assets.php:137
 msgid "Ambiguous sibling files preserved:"
 msgstr ""
 
-#: inc/admin-menu.php:111
+#: inc/admin/assets.php:138
 msgid "Authoritative source paths protected:"
 msgstr ""
 
-#: inc/admin-menu.php:112
+#: inc/admin/assets.php:139
 msgid "Indeterminate source checks preserved:"
 msgstr ""
 
-#: inc/admin-menu.php:113
+#: inc/admin/assets.php:140
+msgid "Metadata-backed candidates:"
+msgstr ""
+
+#: inc/admin/assets.php:141
+msgid "Verified legacy disk-only candidates:"
+msgstr ""
+
+#: inc/admin/assets.php:142
+msgid "Verified legacy — currently disabled size:"
+msgstr ""
+
+#: inc/admin/assets.php:143
+msgid "Verified historical legacy — size no longer registered:"
+msgstr ""
+
+#: inc/admin/assets.php:144
+msgid "Ambiguous/unverified historical-looking files preserved:"
+msgstr ""
+
+#: inc/admin/assets.php:145
+msgid "Malformed or mismatched files preserved:"
+msgstr ""
+
+#: inc/admin/assets.php:146
+msgid "Files matching a kept size preserved:"
+msgstr ""
+
+#: inc/admin/assets.php:147
+msgid "Verified legacy disk-only evidence"
+msgstr ""
+
+#: inc/admin/assets.php:148
+msgid "Verified historical legacy / no longer registered"
+msgstr ""
+
+#: inc/admin/assets.php:149
 msgid "Sample matches"
 msgstr ""
 
-#: inc/admin-menu.php:114
+#: inc/admin/assets.php:150
 msgid "shown"
 msgstr ""
 
-#: inc/admin-menu.php:115
+#: inc/admin/assets.php:151
 msgid "Scope:"
 msgstr ""
 
-#: inc/admin-menu.php:116
+#: inc/admin/assets.php:152
 msgid "Processed:"
 msgstr ""
 
-#: inc/admin-menu.php:117
+#: inc/admin/assets.php:153
 msgid "Regenerated:"
 msgstr ""
 
-#: inc/admin-menu.php:118
+#: inc/admin/assets.php:154
 msgid "Skipped:"
 msgstr ""
 
-#: inc/admin-menu.php:119
+#: inc/admin/assets.php:155
 msgid "Failed:"
 msgstr ""
 
-#: inc/admin-menu.php:120
+#: inc/admin/assets.php:156
 msgid "Attachments found:"
 msgstr ""
 
-#: inc/admin-menu.php:121
+#: inc/admin/assets.php:157
 msgid "Only generate missing:"
 msgstr ""
 
-#: inc/admin-menu.php:122
+#: inc/admin/assets.php:158
 msgid "Force regenerate all:"
 msgstr ""
 
-#: inc/admin-menu.php:123
-#: inc/admin-menu.php:649
-#: inc/admin-menu.php:817
+#: inc/admin/assets.php:159
+#: inc/admin/view.php:404
+#: inc/admin/view.php:582
 msgid "Yes"
 msgstr ""
 
-#: inc/admin-menu.php:124
-#: inc/admin-menu.php:649
-#: inc/admin-menu.php:817
+#: inc/admin/assets.php:160
+#: inc/admin/view.php:404
+#: inc/admin/view.php:582
 msgid "No"
 msgstr ""
 
-#: inc/admin-menu.php:125
+#: inc/admin/assets.php:161
 msgid "No recommendation data found."
 msgstr ""
 
-#: inc/admin-menu.php:126
-#: inc/handle-recommendations.php:613
+#: inc/admin/assets.php:162
+#: inc/application/recommendations.php:635
 msgid "Unknown"
 msgstr ""
 
-#: inc/admin-menu.php:127
+#: inc/admin/assets.php:163
 msgid "Attachment metadata"
 msgstr ""
 
-#: inc/admin-menu.php:128
+#: inc/admin/assets.php:164
 msgid "Size"
 msgstr ""
 
-#: inc/admin-menu.php:129
+#: inc/admin/assets.php:165
 msgid "Dimensions"
 msgstr ""
 
-#: inc/admin-menu.php:130
-#: inc/admin-menu.php:320
-#: inc/admin-menu.php:620
+#: inc/admin/assets.php:166
+#: inc/admin/view.php:59
+#: inc/admin/view.php:367
 msgid "Status"
 msgstr ""
 
-#: inc/admin-menu.php:131
+#: inc/admin/assets.php:167
 msgid "Reason"
 msgstr ""
 
-#: inc/admin-menu.php:132
+#: inc/admin/assets.php:168
 msgid "Recommendation"
 msgstr ""
 
-#: inc/admin-menu.php:133
+#: inc/admin/assets.php:169
 msgid "Keep confidence"
 msgstr ""
 
-#: inc/admin-menu.php:134
+#: inc/admin/assets.php:170
 msgid "High"
 msgstr ""
 
-#: inc/admin-menu.php:135
+#: inc/admin/assets.php:171
 msgid "Medium"
 msgstr ""
 
-#: inc/admin-menu.php:136
+#: inc/admin/assets.php:172
 msgid "Low"
 msgstr ""
 
-#: inc/admin-menu.php:137
+#: inc/admin/assets.php:173
 msgid "Evidence"
 msgstr ""
 
-#: inc/admin-menu.php:138
+#: inc/admin/assets.php:174
 msgid "This result uses an older recommendation format. Run a new scan before applying recommendations."
 msgstr ""
 
-#: inc/admin-menu.php:139
+#: inc/admin/assets.php:175
 msgid "Registered image sizes changed after this scan. Run a new scan before applying recommendations."
 msgstr ""
 
-#: inc/admin-menu.php:140
+#: inc/admin/assets.php:176
 msgid "This recommendation result is incomplete. Run a new scan before applying recommendations."
 msgstr ""
 
-#: inc/admin-menu.php:141
+#: inc/admin/assets.php:177
 msgid "Safe recommendations are ready. Unknown sizes will keep their current setting."
 msgstr ""
 
-#: inc/admin-menu.php:142
+#: inc/admin/assets.php:178
 msgid "Scanning media usage…"
 msgstr ""
 
-#: inc/admin-menu.php:143
+#: inc/admin/assets.php:179
 msgid "Scanning attachment metadata…"
 msgstr ""
 
-#: inc/admin-menu.php:144
+#: inc/admin/assets.php:180
 msgid "Scanning content references…"
 msgstr ""
 
-#: inc/admin-menu.php:145
+#: inc/admin/assets.php:181
 msgid "Job stopped. Completed work was not rolled back, and the audit record was retained."
 msgstr ""
 
-#: inc/admin-menu.php:146
+#: inc/admin/assets.php:182
 msgid "Stopping after the current batch…"
 msgstr ""
 
-#: inc/admin-menu.php:147
-#: inc/admin-menu.php:308
+#: inc/admin/assets.php:183
+#: inc/admin/view.php:47
 msgid "Active job"
 msgstr ""
 
-#: inc/admin-menu.php:148
-#: inc/admin-menu.php:311
+#: inc/admin/assets.php:184
+#: inc/admin/view.php:50
 msgid "View job"
 msgstr ""
 
-#: inc/admin-menu.php:149
+#: inc/admin/assets.php:185
 msgid "No recent jobs."
 msgstr ""
 
-#: inc/admin-menu.php:150
+#: inc/admin/assets.php:186
 msgid "Prune files"
 msgstr ""
 
-#: inc/admin-menu.php:151
-#: inc/admin-menu.php:333
+#: inc/admin/assets.php:187
+#: inc/admin/view.php:72
 msgid "Regenerate"
 msgstr ""
 
-#: inc/admin-menu.php:152
-#: inc/admin-menu.php:336
-#: inc/admin-menu.php:448
+#: inc/admin/assets.php:188
+#: inc/admin/view.php:75
+#: inc/admin/view.php:195
 msgid "Recommendations"
 msgstr ""
 
-#: inc/admin-menu.php:153
+#: inc/admin/assets.php:189
 msgid "Scanning"
 msgstr ""
 
-#: inc/admin-menu.php:154
+#: inc/admin/assets.php:190
 msgid "Running"
 msgstr ""
 
-#: inc/admin-menu.php:155
+#: inc/admin/assets.php:191
 msgid "Awaiting review"
 msgstr ""
 
-#: inc/admin-menu.php:156
+#: inc/admin/assets.php:192
 msgid "Approved"
 msgstr ""
 
-#: inc/admin-menu.php:157
+#: inc/admin/assets.php:193
 msgid "Deleting"
 msgstr ""
 
-#: inc/admin-menu.php:158
+#: inc/admin/assets.php:194
 msgid "Completed"
 msgstr ""
 
-#: inc/admin-menu.php:159
+#: inc/admin/assets.php:195
 msgid "Stopped"
 msgstr ""
 
-#: inc/admin-menu.php:160
+#: inc/admin/assets.php:196
 msgid "Expired"
 msgstr ""
 
-#: inc/admin-menu.php:161
+#: inc/admin/assets.php:197
 msgid "No manifest items match this filter."
 msgstr ""
 
-#: inc/admin-menu.php:162
+#: inc/admin/assets.php:198
 msgid "Loading manifest…"
 msgstr ""
 
-#: inc/admin-menu.php:163
+#: inc/admin/assets.php:199
 msgid "Could not load the manifest."
 msgstr ""
 
 #. translators: 1: current manifest page, 2: total manifest pages.
-#: inc/admin-menu.php:165
+#: inc/admin/assets.php:201
 msgid "Page %1$s of %2$s"
 msgstr ""
 
 #. translators: %s: number of reviewed files.
-#: inc/admin-menu.php:167
+#: inc/admin/assets.php:203
 msgid "Delete %s reviewed files"
 msgstr ""
 
-#: inc/admin-menu.php:168
+#: inc/admin/assets.php:204
 msgid "Error details"
 msgstr ""
 
 #. translators: %s: number of upload directory entries checked.
-#: inc/admin-menu.php:170
+#: inc/admin/assets.php:206
 msgid "Scanning uploads folders… %s entries checked"
 msgstr ""
 
-#: inc/admin-menu.php:171
+#: inc/admin/assets.php:207
 msgid "Approval window: 30 minutes after confirmation"
 msgstr ""
 
-#: inc/admin-menu.php:172
+#: inc/admin/assets.php:208
 msgid "Unknown item"
 msgstr ""
 
-#: inc/admin-menu.php:173
-#: inc/admin-menu.php:543
+#: inc/admin/assets.php:209
+#: inc/admin/view.php:290
 #: inc/upload-subpaths.php:19
 msgid "All uploads"
 msgstr ""
 
-#: inc/admin-menu.php:174
-#: inc/admin-menu.php:372
-#: inc/handle-regenerate.php:35
-#: inc/handle-regenerate.php:773
+#: inc/admin/assets.php:210
+#: inc/admin/view.php:110
+#: inc/application/regenerate.php:67
+#: inc/application/regenerate.php:920
 msgid "All media"
 msgstr ""
 
 #. translators: %s: number of selected uploads folders.
-#: inc/admin-menu.php:176
+#: inc/admin/assets.php:212
 msgid "%s folders selected"
 msgstr ""
 
-#: inc/admin-menu.php:177
+#: inc/admin/assets.php:213
 msgid "1 folder selected"
 msgstr ""
 
-#: inc/admin-menu.php:178
+#: inc/admin/assets.php:214
 msgid "Choose at least one folder or use All uploads."
 msgstr ""
 
-#: inc/admin-menu.php:179
+#: inc/admin/assets.php:215
 msgid "Remove folder"
 msgstr ""
 
-#: inc/admin-menu.php:190
-#: inc/admin-menu.php:191
+#: inc/admin/page.php:17
+#: inc/admin/page.php:18
 msgid "Thumbnails"
 msgstr ""
 
-#: inc/admin-menu.php:204
-msgid "Insufficient permissions."
-msgstr ""
-
 #. translators: 1: number of enabled sizes. 2: number of disabled sizes.
-#: inc/admin-menu.php:226
+#: inc/admin/page.php:104
 msgid "Saved. %1$d size(s) enabled, %2$d disabled. These apply to future uploads."
 msgstr ""
 
-#: inc/admin-menu.php:289
+#: inc/admin/page.php:127
+msgid "Insufficient permissions."
+msgstr ""
+
+#: inc/admin/view.php:28
 msgid "Thumbnail Management"
 msgstr ""
 
-#: inc/admin-menu.php:305
+#: inc/admin/view.php:44
 msgid "Job activity"
 msgstr ""
 
-#: inc/admin-menu.php:314
+#: inc/admin/view.php:53
 msgid "Recent jobs"
 msgstr ""
 
-#: inc/admin-menu.php:319
+#: inc/admin/view.php:58
 msgid "Type"
 msgstr ""
 
-#: inc/admin-menu.php:321
+#: inc/admin/view.php:60
 msgid "Progress"
 msgstr ""
 
-#: inc/admin-menu.php:322
+#: inc/admin/view.php:61
 msgid "Updated"
 msgstr ""
 
-#: inc/admin-menu.php:339
+#: inc/admin/view.php:78
 msgid "Prune Files"
 msgstr ""
 
-#: inc/admin-menu.php:342
+#: inc/admin/view.php:81
 msgid "Thumbnail Sizes"
 msgstr ""
 
-#: inc/admin-menu.php:351
+#: inc/admin/view.php:90
 msgid "Regenerate thumbnails for existing image attachments in your Media Library. This uses the sizes that are currently <strong>enabled</strong> in the <em>Thumbnail Sizes</em> tab."
 msgstr ""
 
-#: inc/admin-menu.php:364
+#: inc/admin/view.php:103
 msgid "Recommended after changing thumbnail size settings or after enabling new sizes."
 msgstr ""
 
-#: inc/admin-menu.php:369
-#: inc/admin-menu.php:712
+#: inc/admin/view.php:107
+#: inc/admin/view.php:477
 msgid "Scope"
 msgstr ""
 
-#: inc/admin-menu.php:373
+#: inc/admin/view.php:114
 msgid "Current year only"
 msgstr ""
 
-#: inc/admin-menu.php:374
+#: inc/admin/view.php:118
 msgid "Specific uploads folder"
 msgstr ""
 
-#: inc/admin-menu.php:375
-#: inc/handle-regenerate.php:85
+#: inc/admin/view.php:122
+#: inc/application/regenerate.php:117
 msgid "Specific attachment IDs"
 msgstr ""
 
-#: inc/admin-menu.php:383
+#: inc/admin/view.php:130
 msgid "Choose subfolder inside <code>uploads/</code>:"
 msgstr ""
 
-#: inc/admin-menu.php:399
+#: inc/admin/view.php:146
 msgid "Attachment IDs"
 msgstr ""
 
-#: inc/admin-menu.php:405
+#: inc/admin/view.php:152
 msgid "Example: 123, 456, 789"
 msgstr ""
 
-#: inc/admin-menu.php:408
+#: inc/admin/view.php:155
 msgid "Enter one or more Media Library attachment IDs separated by commas or spaces."
 msgstr ""
 
-#: inc/admin-menu.php:413
+#: inc/admin/view.php:160
 msgid "Regeneration mode"
 msgstr ""
 
-#: inc/admin-menu.php:416
+#: inc/admin/view.php:163
 msgid "Generate missing sizes only"
 msgstr ""
 
-#: inc/admin-menu.php:416
+#: inc/admin/view.php:163
 msgid "Faster and recommended for routine maintenance."
 msgstr ""
 
-#: inc/admin-menu.php:420
+#: inc/admin/view.php:167
 msgid "Force regenerate all selected images"
 msgstr ""
 
-#: inc/admin-menu.php:420
+#: inc/admin/view.php:167
 msgid "Rebuilds metadata from the original image and removes obsolete generated files."
 msgstr ""
 
-#: inc/admin-menu.php:425
+#: inc/admin/view.php:172
 msgid "Force mode is slower and may replace existing thumbnail files. Originals remain protected."
 msgstr ""
 
-#: inc/admin-menu.php:430
+#: inc/admin/view.php:177
 msgid "Run regenerate"
 msgstr ""
 
-#: inc/admin-menu.php:433
-#: inc/admin-menu.php:460
-#: inc/admin-menu.php:691
+#: inc/admin/view.php:180
+#: inc/admin/view.php:207
+#: inc/admin/view.php:456
 msgid "Stop job"
 msgstr ""
 
-#: inc/admin-menu.php:452
+#: inc/admin/view.php:199
 msgid "These suggestions use policy protections and positive content-reference heuristics to recommend keeping sizes. Missing evidence never proves a size is unused, and recommendations never authorize deletion."
 msgstr ""
 
-#: inc/admin-menu.php:457
+#: inc/admin/view.php:204
 msgid "Scan media usage"
 msgstr ""
 
-#: inc/admin-menu.php:473
+#: inc/admin/view.php:220
 msgid "Protected"
 msgstr ""
 
-#: inc/admin-menu.php:478
+#: inc/admin/view.php:225
 msgid "Detected References"
 msgstr ""
 
-#: inc/admin-menu.php:483
+#: inc/admin/view.php:230
 msgid "Unknown / Review"
 msgstr ""
 
-#: inc/admin-menu.php:488
+#: inc/admin/view.php:235
 msgid "Generated Footprint"
 msgstr ""
 
-#: inc/admin-menu.php:499
+#: inc/admin/view.php:246
 msgid "Apply safe recommendations"
 msgstr ""
 
-#: inc/admin-menu.php:503
+#: inc/admin/view.php:250
 msgid "Review in Prune Files"
 msgstr ""
 
-#: inc/admin-menu.php:509
+#: inc/admin/view.php:256
 msgid "Apply only enables sizes supported by keep evidence. Unknown sizes keep their current setting; saving remains a separate action."
 msgstr ""
 
-#: inc/admin-menu.php:519
+#: inc/admin/view.php:266
 msgid "Choose which registered image sizes to <strong>KEEP</strong>, then scan. The scan only builds a reviewable manifest; deletion requires a separate explicit approval after the scan completes."
 msgstr ""
 
-#: inc/admin-menu.php:531
+#: inc/admin/view.php:278
 msgid "Prune progress"
 msgstr ""
 
-#: inc/admin-menu.php:532
+#: inc/admin/view.php:279
 msgid "Configure"
 msgstr ""
 
-#: inc/admin-menu.php:533
+#: inc/admin/view.php:280
 msgid "Scan"
 msgstr ""
 
-#: inc/admin-menu.php:534
+#: inc/admin/view.php:281
 msgid "Review"
 msgstr ""
 
-#: inc/admin-menu.php:535
+#: inc/admin/view.php:282
 msgid "Delete"
 msgstr ""
 
-#: inc/admin-menu.php:536
+#: inc/admin/view.php:283
 msgid "Complete"
 msgstr ""
 
-#: inc/admin-menu.php:540
+#: inc/admin/view.php:287
 msgid "Uploads scope"
 msgstr ""
 
-#: inc/admin-menu.php:543
+#: inc/admin/view.php:290
 msgid "Scan the complete uploads directory."
 msgstr ""
 
-#: inc/admin-menu.php:547
+#: inc/admin/view.php:294
 msgid "Selected folders"
 msgstr ""
 
-#: inc/admin-menu.php:547
+#: inc/admin/view.php:294
 msgid "Choose multiple years or months to reduce scan time."
 msgstr ""
 
-#: inc/admin-menu.php:552
+#: inc/admin/view.php:299
 msgid "Search uploads folders"
 msgstr ""
 
-#: inc/admin-menu.php:553
+#: inc/admin/view.php:300
 msgid "Search year or folder, e.g. 2024/08…"
 msgstr ""
 
-#: inc/admin-menu.php:555
+#: inc/admin/view.php:302
 msgid "Select visible"
 msgstr ""
 
-#: inc/admin-menu.php:556
+#: inc/admin/view.php:303
 msgid "Clear"
 msgstr ""
 
-#: inc/admin-menu.php:560
+#: inc/admin/view.php:307
 msgid "Available uploads folders"
 msgstr ""
 
 #. translators: %s: localized number of month/subfolder options.
-#: inc/admin-menu.php:579
+#: inc/admin/view.php:326
 msgid "%s folder"
 msgid_plural "%s folders"
 msgstr[0] ""
 msgstr[1] ""
 
-#: inc/admin-menu.php:588
+#: inc/admin/view.php:335
 msgid "Entire folder"
 msgstr ""
 
-#: inc/admin-menu.php:600
+#: inc/admin/view.php:347
 msgid "No folders match this search."
 msgstr ""
 
-#: inc/admin-menu.php:604
+#: inc/admin/view.php:351
 msgid "No folders selected"
 msgstr ""
 
-#: inc/admin-menu.php:615
+#: inc/admin/view.php:362
 msgid "Keep"
 msgstr ""
 
-#: inc/admin-menu.php:616
-#: inc/admin-menu.php:780
+#: inc/admin/view.php:363
+#: inc/admin/view.php:545
 msgid "Size name"
 msgstr ""
 
-#: inc/admin-menu.php:617
-#: inc/admin-menu.php:781
+#: inc/admin/view.php:364
+#: inc/admin/view.php:546
 msgid "Target (WxH)"
 msgstr ""
 
-#: inc/admin-menu.php:618
-#: inc/admin-menu.php:782
+#: inc/admin/view.php:365
+#: inc/admin/view.php:547
 msgid "Crop"
 msgstr ""
 
-#: inc/admin-menu.php:619
+#: inc/admin/view.php:366
 msgid "Deletion evidence"
 msgstr ""
 
-#: inc/admin-menu.php:634
+#: inc/admin/view.php:382
 msgid "Deletes only the exact generated filename recorded in attachment metadata; unverified sidecars and siblings are report-only."
 msgstr ""
 
-#: inc/admin-menu.php:654
-msgid "Disabled for new uploads"
-msgstr ""
-
-#: inc/admin-menu.php:656
-#: inc/admin-menu.php:821
-msgid "Enabled"
-msgstr ""
-
-#: inc/admin-menu.php:671
-msgid "Also include orphan sizes found in attachment metadata and report unmapped disk matches"
-msgstr ""
-
-#: inc/admin-menu.php:682
-msgid "Disk-only orphan reporting scans the selected uploads folder and never deletes unmapped files by default. Choose a smaller folder first on very large sites."
-msgstr ""
-
-#: inc/admin-menu.php:688
-msgid "Scan and review"
-msgstr ""
-
-#: inc/admin-menu.php:703
-msgid "Review deletion manifest"
-msgstr ""
-
-#: inc/admin-menu.php:704
-msgid "This manifest is immutable. Nothing will be deleted until you explicitly approve it below."
-msgstr ""
-
-#: inc/admin-menu.php:706
-msgid "Awaiting approval"
-msgstr ""
-
-#: inc/admin-menu.php:710
-msgid "Files"
-msgstr ""
-
-#: inc/admin-menu.php:711
-#: inc/admin-menu.php:732
-msgid "Estimated size"
-msgstr ""
-
-#: inc/admin-menu.php:713
-msgid "Review expires"
-msgstr ""
-
-#: inc/admin-menu.php:716
-msgid "Manifest hash"
-msgstr ""
-
-#: inc/admin-menu.php:720
-msgid "Filter manifest"
-msgstr ""
-
-#: inc/admin-menu.php:721
-msgid "Filter by path or size…"
-msgstr ""
-
-#: inc/admin-menu.php:729
-msgid "File path"
-msgstr ""
-
-#: inc/admin-menu.php:730
-msgid "Attachment"
-msgstr ""
-
-#: inc/admin-menu.php:731
-msgid "Ownership evidence"
-msgstr ""
-
-#: inc/admin-menu.php:740
-msgid "Previous"
-msgstr ""
-
-#: inc/admin-menu.php:741
-msgid "Page 1 of 1"
-msgstr ""
-
-#: inc/admin-menu.php:742
-msgid "Next"
-msgstr ""
-
-#: inc/admin-menu.php:748
-msgid "I reviewed this manifest and understand that only these files will be permanently deleted."
-msgstr ""
-
-#: inc/admin-menu.php:750
-msgid "Approval is bound to your user, this site, and the manifest hash. It expires 30 minutes after confirmation."
-msgstr ""
-
-#: inc/admin-menu.php:751
-msgid "Delete reviewed files"
-msgstr ""
-
-#: inc/admin-menu.php:761
-msgid "Choose which sizes to <strong>generate for future uploads</strong>. Sizes you uncheck will be disabled at upload time.  To remove files that already exist for disabled sizes, use the <em>Prune Files</em> tab."
-msgstr ""
-
-#: inc/admin-menu.php:779
-msgid "Generate"
-msgstr ""
-
-#: inc/admin-menu.php:783
-msgid "Notes"
-msgstr ""
-
-#: inc/admin-menu.php:812
-#: inc/handle-recommendations.php:618
+#: inc/admin/view.php:399
+#: inc/admin/view.php:577
+#: inc/application/recommendations.php:640
 msgid "Core"
 msgstr ""
 
-#: inc/admin-menu.php:822
+#: inc/admin/view.php:409
+msgid "Disabled for new uploads"
+msgstr ""
+
+#: inc/admin/view.php:411
+#: inc/admin/view.php:586
+msgid "Enabled"
+msgstr ""
+
+#: inc/admin/view.php:426
+msgid "Include verified legacy thumbnails for currently disabled sizes (disk-only)"
+msgstr ""
+
+#: inc/admin/view.php:437
+msgid "Only files bound to one authoritative local attachment source, an explicitly removed registered size, matching decoded dimensions/MIME, and no current reference can enter the review manifest. Ambiguous files and sidecars are preserved. Choose a smaller folder first on very large sites."
+msgstr ""
+
+#: inc/admin/view.php:444
+msgid "Also include verified historical thumbnails from sizes no longer registered"
+msgstr ""
+
+#: inc/admin/view.php:447
+msgid "Historical deletion is separately opt-in. Only conservative metadata-anchored fixed hard-crop cohorts enter review; soft-crop, one-off, unanchored, and ambiguous files are preserved."
+msgstr ""
+
+#: inc/admin/view.php:453
+msgid "Scan and review"
+msgstr ""
+
+#: inc/admin/view.php:468
+msgid "Review deletion manifest"
+msgstr ""
+
+#: inc/admin/view.php:469
+msgid "This manifest is immutable. Nothing will be deleted until you explicitly approve it below."
+msgstr ""
+
+#: inc/admin/view.php:471
+msgid "Awaiting approval"
+msgstr ""
+
+#: inc/admin/view.php:475
+msgid "Files"
+msgstr ""
+
+#: inc/admin/view.php:476
+#: inc/admin/view.php:497
+msgid "Estimated size"
+msgstr ""
+
+#: inc/admin/view.php:478
+msgid "Review expires"
+msgstr ""
+
+#: inc/admin/view.php:481
+msgid "Manifest hash"
+msgstr ""
+
+#: inc/admin/view.php:485
+msgid "Filter manifest"
+msgstr ""
+
+#: inc/admin/view.php:486
+msgid "Filter by path or size…"
+msgstr ""
+
+#: inc/admin/view.php:494
+msgid "File path"
+msgstr ""
+
+#: inc/admin/view.php:495
+msgid "Attachment"
+msgstr ""
+
+#: inc/admin/view.php:496
+msgid "Ownership evidence"
+msgstr ""
+
+#: inc/admin/view.php:505
+msgid "Previous"
+msgstr ""
+
+#: inc/admin/view.php:506
+msgid "Page 1 of 1"
+msgstr ""
+
+#: inc/admin/view.php:507
+msgid "Next"
+msgstr ""
+
+#: inc/admin/view.php:513
+msgid "I reviewed this manifest and understand that only these files will be permanently deleted."
+msgstr ""
+
+#: inc/admin/view.php:515
+msgid "Approval is bound to your user, this site, and the manifest hash. It expires 30 minutes after confirmation."
+msgstr ""
+
+#: inc/admin/view.php:516
+msgid "Delete reviewed files"
+msgstr ""
+
+#: inc/admin/view.php:526
+msgid "Choose which sizes to <strong>generate for future uploads</strong>. Sizes you uncheck will be disabled at upload time.  To remove files that already exist for disabled sizes, use the <em>Prune Files</em> tab."
+msgstr ""
+
+#: inc/admin/view.php:544
+msgid "Generate"
+msgstr ""
+
+#: inc/admin/view.php:548
+msgid "Notes"
+msgstr ""
+
+#: inc/admin/view.php:587
 msgid "Disabled (won’t be generated)"
 msgstr ""
 
-#: inc/admin-menu.php:833
+#: inc/admin/view.php:598
 msgid "Save changes"
 msgstr ""
 
-#: inc/admin-menu.php:836
+#: inc/admin/view.php:601
 msgid "Save changes and run regenerate"
 msgstr ""
 
-#: inc/admin-menu.php:839
+#: inc/admin/view.php:604
 msgid "Enable core only"
 msgstr ""
 
-#: inc/admin-menu.php:842
+#: inc/admin/view.php:607
 msgid "Enable all"
 msgstr ""
 
-#: inc/admin-menu.php:845
+#: inc/admin/view.php:610
 msgid "Disable all"
 msgstr ""
 
-#: inc/admin-menu.php:852
+#: inc/admin/view.php:617
 msgid "Changes above affect <strong>future uploads</strong>. Use the button below to remove existing thumbnails for disabled sizes."
 msgstr ""
 
-#: inc/admin-menu.php:864
+#: inc/admin/view.php:629
 msgid "Danger zone"
 msgstr ""
 
-#: inc/admin-menu.php:868
-msgid "This will delete all thumbnails for sizes that are <em>disabled</em> below. It won’t affect originals."
+#: inc/admin/view.php:633
+msgid "This starts a review-first Prune scan for metadata-backed and verified legacy thumbnails matching sizes that are <em>disabled</em> below. Nothing is deleted until you review and explicitly approve the immutable manifest. Originals remain protected."
 msgstr ""
 
-#: inc/admin-menu.php:879
+#: inc/admin/view.php:644
 msgid "Delete thumbnails of disabled sizes"
 msgstr ""
 
-#: inc/handle-delete.php:20
-#: inc/handle-delete.php:75
-#: inc/handle-prune.php:18
-#: inc/handle-prune.php:122
-#: inc/handle-recommendations.php:24
-#: inc/handle-recommendations.php:91
-#: inc/handle-regenerate.php:20
-#: inc/handle-regenerate.php:163
-#: inc/job-storage.php:2484
-#: inc/job-storage.php:2504
-#: inc/job-storage.php:2533
-#: inc/job-storage.php:2552
-msgid "No permission."
-msgstr ""
-
-#: inc/handle-delete.php:57
-msgid "The prune job changed before approval. Refresh and review its current state."
-msgstr ""
-
-#: inc/handle-delete.php:155
-#: inc/handle-delete.php:156
-msgid "Could not delete the file."
-msgstr ""
-
-#: inc/handle-delete.php:187
-msgid "Prune counters did not match the terminal item audit."
-msgstr ""
-
-#: inc/handle-delete.php:253
-msgid "The prune scan is not ready for approval."
-msgstr ""
-
-#: inc/handle-delete.php:261
-msgid "Explicit delete confirmation is required."
-msgstr ""
-
-#: inc/handle-delete.php:265
-msgid "The reviewed manifest does not match this job. Run the scan again."
-msgstr ""
-
-#: inc/handle-delete.php:269
-msgid "There are no files in this manifest."
-msgstr ""
-
-#: inc/handle-delete.php:277
-#: inc/handle-delete.php:312
-msgid "This prune manifest predates the current media-safety rules. Run and review a new scan."
-msgstr ""
-
-#: inc/handle-delete.php:292
-msgid "This job has not been approved for deletion."
-msgstr ""
-
-#: inc/handle-delete.php:300
-msgid "The delete manifest does not match the reviewed scan."
-msgstr ""
-
-#: inc/handle-delete.php:304
-msgid "The delete approval has expired. Run and review a new scan."
-msgstr ""
-
-#: inc/handle-delete.php:326
-msgid "This token was not prepared for deletion."
-msgstr ""
-
-#: inc/handle-delete.php:330
-msgid "Scan is still running."
-msgstr ""
-
-#: inc/handle-delete.php:371
-#: inc/handle-delete.php:401
-#: inc/job-storage.php:1488
-msgid "This job worker no longer owns the current batch."
-msgstr ""
-
-#: inc/handle-delete.php:415
-msgid "The armed prune path contains a changed filesystem node and requires manual inspection."
-msgstr ""
-
-#: inc/handle-delete.php:480
-#: inc/handle-delete.php:485
-msgid "The prune item is not bound to its exact folder-selection row."
-msgstr ""
-
-#: inc/handle-delete.php:529
-msgid "The prune recovery journal is malformed and requires manual inspection."
-msgstr ""
-
-#: inc/handle-delete.php:553
-msgid "Could not persist the recovered prune outcome."
-msgstr ""
-
-#: inc/handle-delete.php:568
-msgid "The reviewed prune path now contains a different filesystem node and requires manual inspection."
-msgstr ""
-
-#: inc/handle-delete.php:585
-msgid "The reviewed prune file changed after the delete journal was armed."
-msgstr ""
-
-#: inc/handle-delete.php:593
-msgid "Recovery-only processing preserved the intact reviewed prune file."
-msgstr ""
-
-#: inc/handle-delete.php:609
-msgid "The reviewed prune path is not a regular file and could not be journaled."
-msgstr ""
-
-#: inc/handle-delete.php:619
-msgid "The reviewed prune file could not be journaled safely."
-msgstr ""
-
-#: inc/handle-delete.php:633
-msgid "Could not persist the prune operation journal."
-msgstr ""
-
-#: inc/handle-delete.php:650
-msgid "Could not persist the completed prune outcome."
-msgstr ""
-
-#: inc/handle-delete.php:686
-#: inc/handle-delete.php:691
-msgid "The reviewed prune file identity could not be established safely."
-msgstr ""
-
-#: inc/handle-delete.php:712
-msgid "The reviewed prune path could not be inspected safely."
-msgstr ""
-
-#: inc/handle-delete.php:755
-msgid "The file is now a protected attachment source or companion and was preserved."
-msgstr ""
-
-#: inc/handle-delete.php:770
-msgid "A generated-file reference outside the reviewed manifest now owns this path."
-msgstr ""
-
-#: inc/handle-delete.php:786
-#: inc/handle-delete.php:798
-msgid "The prune item lacks exact generated-file ownership evidence."
-msgstr ""
-
-#: inc/handle-delete.php:791
-#: inc/handle-delete.php:847
-msgid "File path is outside uploads."
-msgstr ""
-
-#: inc/handle-delete.php:809
-msgid "The prune item contains malformed ownership evidence."
-msgstr ""
-
-#: inc/handle-delete.php:817
-msgid "The prune item contains a mismatched metadata reference."
-msgstr ""
-
-#: inc/handle-delete.php:825
-msgid "The prune item ownership evidence does not match its metadata references."
-msgstr ""
-
-#: inc/handle-delete.php:861
-msgid "File was already missing; metadata was reconciled."
-msgstr ""
-
-#: inc/handle-delete.php:933
-msgid "File does not exist."
-msgstr ""
-
-#: inc/handle-delete.php:942
-msgid "File is not readable."
-msgstr ""
-
-#: inc/handle-delete.php:955
-msgid "WordPress could not delete the file."
-msgstr ""
-
-#: inc/handle-delete.php:981
-msgid "The file was removed, but raw attachment metadata could not be reconciled safely."
-msgstr ""
-
-#: inc/handle-delete.php:1005
-msgid "The file was removed, but its exact metadata reference could not be reconciled."
-msgstr ""
-
-#: inc/handle-prune.php:136
+#: inc/application/prune.php:370
 msgid "Invalid prune job."
 msgstr ""
 
-#: inc/handle-prune.php:144
+#: inc/application/prune.php:378
 msgid "This prune job is not scannable."
 msgstr ""
 
-#: inc/handle-prune.php:239
+#: inc/application/prune.php:477
 msgid "The authoritative source index is incomplete. Run a new scan."
 msgstr ""
 
-#: inc/handle-recommendations.php:105
+#: inc/application/prune.php:535
+msgid "The historical cohort transition could not be persisted safely."
+msgstr ""
+
+#: inc/application/prune.php:568
+msgid "Historical cohort evidence is incomplete and cannot enter the manifest."
+msgstr ""
+
+#: inc/application/prune.php:649
+msgid "The prune job changed before approval. Refresh and review its current state."
+msgstr ""
+
+#: inc/application/prune.php:744
+#: inc/application/prune.php:745
+msgid "Could not delete the file."
+msgstr ""
+
+#: inc/application/prune.php:776
+msgid "Prune counters did not match the terminal item audit."
+msgstr ""
+
+#: inc/application/prune.php:1026
+msgid "The format sidecar is not exact generated-file ownership evidence."
+msgstr ""
+
+#: inc/application/prune.php:1030
+msgid "The disk file is an ambiguous sibling."
+msgstr ""
+
+#: inc/application/prune.php:1047
+msgid "The disk-only file could not be classified safely."
+msgstr ""
+
+#: inc/application/prune.php:1067
+msgid "The verified legacy item could not be persisted safely."
+msgstr ""
+
+#: inc/application/prune.php:1138
+msgid "Historical cohort state could not be loaded safely."
+msgstr ""
+
+#: inc/application/prune.php:1142
+msgid "Historical cohort state collided with another evidence class."
+msgstr ""
+
+#: inc/application/prune.php:1169
+msgid "Historical cohort state could not be persisted safely."
+msgstr ""
+
+#: inc/application/prune.php:1197
+msgid "Historical evidence lacks a canonical signature."
+msgstr ""
+
+#: inc/application/prune.php:1529
+msgid "The prune scan is not ready for approval."
+msgstr ""
+
+#: inc/application/prune.php:1537
+msgid "Explicit delete confirmation is required."
+msgstr ""
+
+#: inc/application/prune.php:1541
+msgid "The reviewed manifest does not match this job. Run the scan again."
+msgstr ""
+
+#: inc/application/prune.php:1545
+msgid "There are no files in this manifest."
+msgstr ""
+
+#: inc/application/prune.php:1552
+#: inc/application/prune.php:1607
+msgid "This prune manifest predates the current media-safety rules. Run and review a new scan."
+msgstr ""
+
+#: inc/application/prune.php:1555
+#: inc/application/prune.php:1561
+#: inc/application/prune.php:1610
+#: inc/application/prune.php:1616
+msgid "Historical cohort evidence is incomplete. Run and review a new scan."
+msgstr ""
+
+#: inc/application/prune.php:1588
+msgid "This job has not been approved for deletion."
+msgstr ""
+
+#: inc/application/prune.php:1596
+msgid "The delete manifest does not match the reviewed scan."
+msgstr ""
+
+#: inc/application/prune.php:1600
+msgid "The delete approval has expired. Run and review a new scan."
+msgstr ""
+
+#: inc/application/prune.php:1642
+msgid "This token was not prepared for deletion."
+msgstr ""
+
+#: inc/application/prune.php:1646
+msgid "Scan is still running."
+msgstr ""
+
+#: inc/application/prune.php:1668
+#: inc/application/prune.php:1698
+#: inc/jobs/items.php:540
+#: inc/jobs/items.php:704
+msgid "This job worker no longer owns the current batch."
+msgstr ""
+
+#: inc/application/prune.php:1712
+msgid "The armed prune path contains a changed filesystem node and requires manual inspection."
+msgstr ""
+
+#: inc/application/prune.php:1788
+#: inc/application/prune.php:1793
+msgid "The prune item is not bound to its exact folder-selection row."
+msgstr ""
+
+#: inc/application/prune.php:1837
+msgid "The prune recovery journal is malformed and requires manual inspection."
+msgstr ""
+
+#: inc/application/prune.php:1861
+msgid "Could not persist the recovered prune outcome."
+msgstr ""
+
+#: inc/application/prune.php:1876
+msgid "The reviewed prune path now contains a different filesystem node and requires manual inspection."
+msgstr ""
+
+#: inc/application/prune.php:1893
+msgid "The reviewed prune file changed after the delete journal was armed."
+msgstr ""
+
+#: inc/application/prune.php:1901
+msgid "Recovery-only processing preserved the intact reviewed prune file."
+msgstr ""
+
+#: inc/application/prune.php:1917
+msgid "The reviewed prune path is not a regular file and could not be journaled."
+msgstr ""
+
+#: inc/application/prune.php:1927
+msgid "The reviewed prune file could not be journaled safely."
+msgstr ""
+
+#: inc/application/prune.php:1941
+msgid "Could not persist the prune operation journal."
+msgstr ""
+
+#: inc/application/prune.php:1958
+msgid "Could not persist the completed prune outcome."
+msgstr ""
+
+#: inc/application/recommendations.php:127
 msgid "Invalid recommendation job."
 msgstr ""
 
-#: inc/handle-recommendations.php:113
+#: inc/application/recommendations.php:135
 msgid "This recommendation job is not scannable."
 msgstr ""
 
-#: inc/handle-recommendations.php:297
+#: inc/application/recommendations.php:319
 msgid "Could not read the selected post content batch."
 msgstr ""
 
-#: inc/handle-recommendations.php:526
+#: inc/application/recommendations.php:548
 msgid "WordPress Core policy protects this size."
 msgstr ""
 
-#: inc/handle-recommendations.php:532
+#: inc/application/recommendations.php:554
 msgid "WooCommerce naming policy protects this size; runtime use is not asserted."
 msgstr ""
 
 #. translators: %d: number of content references detected.
-#: inc/handle-recommendations.php:543
+#: inc/application/recommendations.php:565
 msgid "%d content reference was detected."
 msgid_plural "%d content references were detected."
 msgstr[0] ""
 msgstr[1] ""
 
-#: inc/handle-recommendations.php:552
+#: inc/application/recommendations.php:574
 msgid "No matching content reference was detected in this bounded scan; dynamic use remains possible."
 msgstr ""
 
 #. translators: 1: generated metadata entry count, 2: formatted readable bytes.
-#: inc/handle-recommendations.php:564
+#: inc/application/recommendations.php:586
 msgid "%1$d generated metadata entry was found using about %2$s."
 msgid_plural "%1$d generated metadata entries were found using about %2$s."
 msgstr[0] ""
 msgstr[1] ""
 
-#: inc/handle-recommendations.php:580
+#: inc/application/recommendations.php:602
 msgid "No generated metadata entry was detected; this does not prove the size is unused."
 msgstr ""
 
-#: inc/handle-recommendations.php:614
+#: inc/application/recommendations.php:636
 msgid "Usage remains unresolved because absence of detected references is not proof that this size is unused."
 msgstr ""
 
-#: inc/handle-recommendations.php:615
+#: inc/application/recommendations.php:637
 msgid "Preserve current setting and review"
 msgstr ""
 
-#: inc/handle-recommendations.php:618
+#: inc/application/recommendations.php:640
 msgid "WooCommerce"
 msgstr ""
 
-#: inc/handle-recommendations.php:619
+#: inc/application/recommendations.php:641
 msgid "Protected by an established Core or integration naming policy."
 msgstr ""
 
-#: inc/handle-recommendations.php:620
-#: inc/handle-recommendations.php:625
+#: inc/application/recommendations.php:642
+#: inc/application/recommendations.php:647
 msgid "Keep enabled"
 msgstr ""
 
-#: inc/handle-recommendations.php:623
+#: inc/application/recommendations.php:645
 msgid "Reference detected"
 msgstr ""
 
-#: inc/handle-recommendations.php:624
+#: inc/application/recommendations.php:646
 msgid "A positive content heuristic supports keeping this size, but does not prove current runtime use."
 msgstr ""
 
-#: inc/handle-regenerate.php:42
+#: inc/application/regenerate.php:74
 msgid "Current year"
 msgstr ""
 
-#: inc/handle-regenerate.php:48
+#: inc/application/regenerate.php:80
 msgid "Please choose an uploads folder."
 msgstr ""
 
-#: inc/handle-regenerate.php:81
+#: inc/application/regenerate.php:113
 msgid "Please enter at least one valid image attachment ID."
 msgstr ""
 
-#: inc/handle-regenerate.php:177
+#: inc/application/regenerate.php:207
 msgid "Invalid regeneration job."
 msgstr ""
 
-#: inc/handle-regenerate.php:185
+#: inc/application/regenerate.php:215
 msgid "This regeneration job is not runnable."
 msgstr ""
 
-#: inc/handle-regenerate.php:238
+#: inc/application/regenerate.php:268
 msgid "The regeneration folder selector is invalid."
 msgstr ""
 
-#: inc/handle-regenerate.php:386
-#: inc/handle-regenerate.php:387
+#: inc/application/regenerate.php:416
+#: inc/application/regenerate.php:417
 msgid "Attachment ID is missing."
 msgstr ""
 
-#: inc/handle-regenerate.php:519
+#: inc/application/regenerate.php:549
 msgid "This legacy Force job predates transactional regeneration. Start a new Force job."
 msgstr ""
 
-#: inc/handle-regenerate.php:591
-msgid "Force regeneration requires a persistent claimed job item."
+#: inc/application/regenerate.php:650
+msgid "The regeneration recovery journal is malformed and requires manual inspection."
 msgstr ""
 
-#: inc/handle-regenerate.php:599
-msgid "Attached image file is missing."
+#: inc/application/regenerate.php:655
+#: inc/application/regenerate.php:667
+msgid "The regeneration recovery paths are invalid and require manual inspection."
 msgstr ""
 
-#: inc/handle-regenerate.php:606
-msgid "Attachment is not a raster image."
+#: inc/application/regenerate.php:696
+msgid "Could not finalize the recovered regeneration journal."
 msgstr ""
 
-#: inc/handle-regenerate.php:616
-msgid "No image sizes are missing."
+#: inc/application/regenerate.php:713
+msgid "Could not clear the rolled-back regeneration journal."
 msgstr ""
 
-#: inc/handle-regenerate.php:643
-msgid "WordPress returned empty image metadata."
+#: inc/application/regenerate.php:717
+msgid "The interrupted regeneration was rolled back and will be retried."
 msgstr ""
 
-#: inc/handle-regenerate.php:658
-msgid "Could not update attachment metadata."
+#: inc/application/regenerate.php:735
+msgid "The regeneration claim is stale."
 msgstr ""
 
-#: inc/helper.php:112
+#: inc/application/regenerate.php:782
+msgid "The acquired destination-lock set does not match the final generated-file map."
+msgstr ""
+
+#: inc/application/regenerate.php:787
+msgid "Attachment state changed during regeneration; no live file was replaced."
+msgstr ""
+
+#: inc/application/regenerate.php:815
+msgid "Could not persist the regeneration journal."
+msgstr ""
+
+#: inc/application/regenerate.php:821
+msgid "A generated destination changed before promotion."
+msgstr ""
+
+#: inc/application/regenerate.php:825
+msgid "Could not persist the next promotion intent."
+msgstr ""
+
+#: inc/application/regenerate.php:829
+msgid "Could not promote all staged generated files."
+msgstr ""
+
+#: inc/application/regenerate.php:833
+msgid "Could not persist promoted-file evidence."
+msgstr ""
+
+#: inc/application/regenerate.php:840
+msgid "Could not persist the promoted-files journal."
+msgstr ""
+
+#: inc/application/regenerate.php:845
+msgid "Metadata commit and automatic rollback were incomplete; journal evidence was retained for manual recovery."
+msgstr ""
+
+#: inc/application/regenerate.php:848
+msgid "Could not commit exact regenerated attachment metadata; the old state was restored."
+msgstr ""
+
+#: inc/application/regenerate.php:852
+msgid "Metadata committed, but its recovery journal could not be advanced."
+msgstr ""
+
+#: inc/application/regenerate.php:864
+msgid "Could not finalize the regeneration journal."
+msgstr ""
+
+#: inc/handle-delete.php:22
+#: inc/handle-delete.php:39
+#: inc/handle-jobs.php:17
+#: inc/handle-jobs.php:37
+#: inc/handle-jobs.php:69
+#: inc/handle-jobs.php:88
+#: inc/handle-prune.php:22
+#: inc/handle-prune.php:47
+#: inc/handle-recommendations.php:22
+#: inc/handle-recommendations.php:34
+#: inc/handle-regenerate.php:20
+#: inc/handle-regenerate.php:39
+msgid "No permission."
+msgstr ""
+
+#: inc/handle-jobs.php:49
+msgid "Manifest items are only available for prune jobs."
+msgstr ""
+
+#. translators: 1: first selected uploads folders, 2: number of additional folders.
+#: inc/helper.php:71
+msgid "%1$s and %2$d more"
+msgstr ""
+
+#: inc/infrastructure/database.php:33
+msgid "Persistent job storage is incomplete. Restore the job database tables before continuing."
+msgstr ""
+
+#: inc/infrastructure/database.php:34
+msgid "Persistent job storage is unavailable. Please try again later or ask an administrator to check the database."
+msgstr ""
+
+#: inc/jobs/engine.php:180
+#: inc/jobs/engine.php:193
+#: inc/jobs/engine.php:241
+msgid "Another request is processing this job. Retrying shortly."
+msgstr ""
+
+#: inc/jobs/engine.php:381
+#: inc/jobs/engine.php:968
+msgid "Job not found."
+msgstr ""
+
+#: inc/jobs/engine.php:403
+msgid "Could not persist the expired recovery-only state."
+msgstr ""
+
+#: inc/jobs/engine.php:460
+msgid "Job not found or it belongs to another user."
+msgstr ""
+
+#: inc/jobs/engine.php:469
+msgid "This job has expired. Please start a new scan."
+msgstr ""
+
+#: inc/jobs/engine.php:537
+msgid "An unfinished job of this type already exists. Resume or cancel it before starting another."
+msgstr ""
+
+#: inc/jobs/engine.php:551
+msgid "Could not acquire the media maintenance lock. Please try again."
+msgstr ""
+
+#: inc/jobs/engine.php:563
+msgid "A media maintenance job is already active. Resume or cancel it before starting another."
+msgstr ""
+
+#: inc/jobs/engine.php:564
+msgid "Another administrator is already running media maintenance on this site."
+msgstr ""
+
+#: inc/jobs/engine.php:962
+msgid "The current attachment transaction is still finishing. Retry stop shortly."
+msgstr ""
+
+#: inc/jobs/engine.php:988
+msgid "Could not persist the cancellation recovery-only state."
+msgstr ""
+
+#: inc/jobs/engine.php:990
+msgid "The current attachment transaction still requires recovery. Resume the job, then retry stop."
+msgstr ""
+
+#: inc/jobs/items.php:548
+msgid "Only inert historical evidence may be removed by this cleanup."
+msgstr ""
+
+#: inc/media-source-index.php:86
+#: inc/media-source-index.php:92
+msgid "The authoritative media source index has an invalid pending state. Run a new prune scan to repair it."
+msgstr ""
+
+#: inc/media-source-index.php:130
+msgid "The authoritative media source index could not record its pending state."
+msgstr ""
+
+#: inc/media-source-index.php:149
+msgid "The authoritative media source index could not identify its pending mutation."
+msgstr ""
+
+#: inc/media-source-index.php:212
+msgid "The authoritative media source index has a pending mutation. Run a new prune scan before destructive work."
+msgstr ""
+
+#: inc/media-source-index.php:226
+#: inc/media-source-index.php:288
+msgid "The media reference index needs a complete site scan before destructive work."
+msgstr ""
+
+#: inc/media-source-index.php:242
+#: inc/media-source-index.php:265
+msgid "The media reference index completeness state is invalid."
+msgstr ""
+
+#: inc/media-source-index.php:274
+msgid "The media reference index completeness state could not be persisted."
+msgstr ""
+
+#: inc/media-source-index.php:310
+#: inc/media-source-index.php:327
+msgid "Attachment source state could not be resolved."
+msgstr ""
+
+#: inc/media-source-index.php:338
+#: inc/media-source-index.php:417
+#: inc/media-source-index.php:456
+#: inc/media-source-index.php:460
+#: inc/media-source-index.php:1797
+#: inc/media-source-index.php:1804
+msgid "Attachment generated-file state could not be resolved."
+msgstr ""
+
+#: inc/media-source-index.php:355
+#: inc/media-source-index.php:377
+#: inc/media-source-index.php:384
+#: inc/media-source-index.php:473
+#: inc/media-source-index.php:477
+#: inc/media/regeneration.php:99
+#: inc/media/regeneration.php:140
+#: inc/media/regeneration.php:147
+msgid "Attachment edit-backup state could not be resolved."
+msgstr ""
+
+#: inc/media-source-index.php:446
+msgid "Attachment companion-file state could not be resolved."
+msgstr ""
+
+#: inc/media-source-index.php:697
+msgid "The media reference baseline is stale and must restart."
+msgstr ""
+
+#: inc/media-source-index.php:735
+msgid "Attachment source metadata contains multiple authoritative rows and cannot be mutated safely."
+msgstr ""
+
+#: inc/media-source-index.php:1100
+msgid "Site-wide deletion of protected attachment metadata is not allowed."
+msgstr ""
+
+#: inc/media-source-index.php:1212
+msgid "A custom by-meta-ID accessor prevents a safe authoritative metadata deletion."
+msgstr ""
+
+#: inc/media-source-index.php:1301
+msgid "A custom by-meta-ID accessor prevents a safe authoritative metadata update."
+msgstr ""
+
+#: inc/media-source-index.php:1734
+msgid "Too many authoritative media aliases matched this path."
+msgstr ""
+
+#: inc/media-source-index.php:1764
+msgid "The media reference index contains an unknown reference kind."
+msgstr ""
+
+#: inc/media-source-index.php:1776
+#: inc/media-source-index.php:1784
+msgid "The media reference index does not match live attachment metadata."
+msgstr ""
+
+#: inc/media/attachments.php:61
+#: inc/media/attachments.php:72
+msgid "The authoritative attached-file path is malformed."
+msgstr ""
+
+#: inc/media/attachments.php:66
+msgid "The authoritative attached-file path is not uploads-relative."
+msgstr ""
+
+#: inc/media/attachments.php:109
+msgid "Could not establish the attachment selector boundary."
+msgstr ""
+
+#: inc/media/attachments.php:153
+msgid "Could not read the attachment selector batch."
+msgstr ""
+
+#: inc/media/attachments.php:189
+msgid "Authoritative attachment metadata could not be identified."
+msgstr ""
+
+#: inc/media/attachments.php:233
+msgid "The authoritative attachment metadata batch is invalid."
+msgstr ""
+
+#: inc/media/attachments.php:327
+msgid "The authoritative attached-file row is missing or ambiguous."
+msgstr ""
+
+#: inc/media/attachments.php:332
+msgid "The authoritative attached-file row changed after folder selection."
+msgstr ""
+
+#: inc/media/attachments.php:340
+msgid "The attachment moved outside the selected uploads folder."
+msgstr ""
+
+#: inc/media/paths.php:77
 msgid "Uploads folder not found."
 msgstr ""
 
-#: inc/helper.php:121
+#: inc/media/paths.php:86
 msgid "Subfolder not found."
 msgstr ""
 
-#: inc/helper.php:127
+#: inc/media/paths.php:92
 msgid "Subfolder must be inside uploads."
 msgstr ""
 
 #. translators: 1: uploads subfolder, 2: validation error.
-#: inc/helper.php:213
+#: inc/media/paths.php:178
 msgid "Could not use uploads/%1$s: %2$s"
 msgstr ""
 
-#: inc/helper.php:307
-#: inc/helper.php:318
-msgid "The authoritative attached-file path is malformed."
-msgstr ""
-
-#: inc/helper.php:312
-msgid "The authoritative attached-file path is not uploads-relative."
-msgstr ""
-
-#: inc/helper.php:355
-msgid "Could not establish the attachment selector boundary."
-msgstr ""
-
-#: inc/helper.php:399
-msgid "Could not read the attachment selector batch."
-msgstr ""
-
-#: inc/helper.php:429
-msgid "The authoritative attached-file row is missing or ambiguous."
-msgstr ""
-
-#: inc/helper.php:434
-msgid "The authoritative attached-file row changed after folder selection."
-msgstr ""
-
-#: inc/helper.php:442
-msgid "The attachment moved outside the selected uploads folder."
-msgstr ""
-
-#. translators: 1: first selected uploads folders, 2: number of additional folders.
-#: inc/helper.php:469
-msgid "%1$s and %2$d more"
-msgstr ""
-
-#: inc/job-storage.php:99
-msgid "Persistent job storage is incomplete. Restore the job database tables before continuing."
-msgstr ""
-
-#: inc/job-storage.php:100
-msgid "Persistent job storage is unavailable. Please try again later or ask an administrator to check the database."
-msgstr ""
-
-#: inc/job-storage.php:526
-#: inc/job-storage.php:539
-#: inc/job-storage.php:587
-msgid "Another request is processing this job. Retrying shortly."
-msgstr ""
-
-#: inc/job-storage.php:727
-#: inc/job-storage.php:2414
-msgid "Job not found."
-msgstr ""
-
-#: inc/job-storage.php:749
-msgid "Could not persist the expired recovery-only state."
-msgstr ""
-
-#: inc/job-storage.php:806
-msgid "Job not found or it belongs to another user."
-msgstr ""
-
-#: inc/job-storage.php:815
-msgid "This job has expired. Please start a new scan."
-msgstr ""
-
-#: inc/job-storage.php:883
-msgid "An unfinished job of this type already exists. Resume or cancel it before starting another."
-msgstr ""
-
-#: inc/job-storage.php:897
-msgid "Could not acquire the media maintenance lock. Please try again."
-msgstr ""
-
-#: inc/job-storage.php:909
-msgid "A media maintenance job is already active. Resume or cancel it before starting another."
-msgstr ""
-
-#: inc/job-storage.php:910
-msgid "Another administrator is already running media maintenance on this site."
-msgstr ""
-
-#: inc/job-storage.php:2408
-msgid "The current attachment transaction is still finishing. Retry stop shortly."
-msgstr ""
-
-#: inc/job-storage.php:2434
-msgid "Could not persist the cancellation recovery-only state."
-msgstr ""
-
-#: inc/job-storage.php:2436
-msgid "The current attachment transaction still requires recovery. Resume the job, then retry stop."
-msgstr ""
-
-#: inc/job-storage.php:2516
-msgid "Manifest items are only available for prune jobs."
-msgstr ""
-
-#: inc/media-source-index.php:85
-msgid "Authoritative attachment metadata could not be identified."
-msgstr ""
-
-#: inc/media-source-index.php:129
-msgid "The authoritative attachment metadata batch is invalid."
-msgstr ""
-
-#: inc/media-source-index.php:222
-#: inc/media-source-index.php:228
-msgid "The authoritative media source index has an invalid pending state. Run a new prune scan to repair it."
-msgstr ""
-
-#: inc/media-source-index.php:266
-msgid "The authoritative media source index could not record its pending state."
-msgstr ""
-
-#: inc/media-source-index.php:285
-msgid "The authoritative media source index could not identify its pending mutation."
-msgstr ""
-
-#: inc/media-source-index.php:348
-msgid "The authoritative media source index has a pending mutation. Run a new prune scan before destructive work."
-msgstr ""
-
-#: inc/media-source-index.php:362
-#: inc/media-source-index.php:424
-msgid "The media reference index needs a complete site scan before destructive work."
-msgstr ""
-
-#: inc/media-source-index.php:378
-#: inc/media-source-index.php:401
-msgid "The media reference index completeness state is invalid."
-msgstr ""
-
-#: inc/media-source-index.php:410
-msgid "The media reference index completeness state could not be persisted."
-msgstr ""
-
-#: inc/media-source-index.php:442
-#: inc/media-source-index.php:459
+#: inc/media/paths.php:240
+#: inc/media/paths.php:257
 msgid "An authoritative media path could not be resolved safely."
 msgstr ""
 
-#: inc/media-source-index.php:452
+#: inc/media/paths.php:250
 msgid "A symbolic-link media path cannot be used for destructive work."
 msgstr ""
 
-#: inc/media-source-index.php:466
+#: inc/media/paths.php:264
 msgid "An authoritative media path is outside uploads."
 msgstr ""
 
-#: inc/media-source-index.php:488
-#: inc/media-source-index.php:505
-msgid "Attachment source state could not be resolved."
+#: inc/media/prune.php:158
+msgid "This prune job does not contain reviewed legacy-cleanup policy evidence."
 msgstr ""
 
-#: inc/media-source-index.php:516
-#: inc/media-source-index.php:595
-#: inc/media-source-index.php:634
-#: inc/media-source-index.php:638
-#: inc/media-source-index.php:2321
-#: inc/media-source-index.php:2328
-msgid "Attachment generated-file state could not be resolved."
+#: inc/media/prune.php:163
+msgid "The persisted legacy-cleanup policy is incomplete or changed."
 msgstr ""
 
-#: inc/media-source-index.php:533
-#: inc/media-source-index.php:555
-#: inc/media-source-index.php:562
-#: inc/media-source-index.php:651
-#: inc/media-source-index.php:655
-#: inc/regenerate-transaction.php:99
-#: inc/regenerate-transaction.php:140
-#: inc/regenerate-transaction.php:147
-msgid "Attachment edit-backup state could not be resolved."
+#: inc/media/prune.php:182
+msgid "This prune job does not contain reviewed historical-cleanup policy evidence."
 msgstr ""
 
-#: inc/media-source-index.php:624
-msgid "Attachment companion-file state could not be resolved."
+#: inc/media/prune.php:185
+msgid "The persisted historical-cleanup constants are incomplete or changed."
 msgstr ""
 
-#: inc/media-source-index.php:955
-msgid "The media reference baseline is stale and must restart."
+#: inc/media/prune.php:220
+msgid "The disk-only path is outside the exact reviewed uploads scope."
 msgstr ""
 
-#: inc/media-source-index.php:1026
-msgid "Media sources are being changed by another request. Retrying shortly."
+#: inc/media/prune.php:224
+msgid "The disk-only path is not a regular non-symlink file."
 msgstr ""
 
-#: inc/media-source-index.php:1083
-msgid "Attachment source state could not be locked."
+#: inc/media/prune.php:229
+msgid "The disk-only filename is not one strict generated-size form."
 msgstr ""
 
-#: inc/media-source-index.php:1105
-msgid "This attachment source is being updated by another request. Retrying shortly."
+#: inc/media/prune.php:236
+msgid "The disk-only filename is an ambiguous edit, scale, rotation, or backup sibling."
 msgstr ""
 
-#: inc/media-source-index.php:1170
-msgid "This media path is being updated by another request. Retrying shortly."
+#: inc/media/prune.php:245
+msgid "The disk-only file dimensions or MIME type do not match its filename."
 msgstr ""
 
-#: inc/media-source-index.php:1253
-msgid "Attachment source metadata contains multiple authoritative rows and cannot be mutated safely."
+#: inc/media/prune.php:249
+msgid "The disk-only file could not be hashed exactly."
 msgstr ""
 
-#: inc/media-source-index.php:1618
-msgid "Site-wide deletion of protected attachment metadata is not allowed."
+#: inc/media/prune.php:341
+msgid "The historical-looking file is not a provable fixed-output hard crop."
 msgstr ""
 
-#: inc/media-source-index.php:1730
-msgid "A custom by-meta-ID accessor prevents a safe authoritative metadata deletion."
+#: inc/media/prune.php:347
+msgid "The historical evidence directory is outside uploads."
 msgstr ""
 
-#: inc/media-source-index.php:1819
-msgid "A custom by-meta-ID accessor prevents a safe authoritative metadata update."
+#: inc/media/prune.php:387
+msgid "The metadata size is still registered and cannot anchor historical evidence."
 msgstr ""
 
-#: inc/media-source-index.php:2258
-msgid "Too many authoritative media aliases matched this path."
+#: inc/media/prune.php:404
+msgid "Raw metadata does not match the historical anchor file."
 msgstr ""
 
-#: inc/media-source-index.php:2288
-msgid "The media reference index contains an unknown reference kind."
+#: inc/media/prune.php:408
+msgid "Raw attachment metadata changed while historical evidence was collected."
 msgstr ""
 
-#: inc/media-source-index.php:2300
-#: inc/media-source-index.php:2308
-msgid "The media reference index does not match live attachment metadata."
+#: inc/media/prune.php:416
+msgid "The historical anchor does not match the authoritative generation-source family."
 msgstr ""
 
-#: inc/regenerate-transaction.php:79
+#: inc/media/prune.php:420
+msgid "The historical anchor does not have one exact metadata owner."
+msgstr ""
+
+#: inc/media/prune.php:428
+msgid "The historical anchor owner does not match raw metadata."
+msgstr ""
+
+#: inc/media/prune.php:443
+msgid "The historical anchor source dimensions are unavailable."
+msgstr ""
+
+#: inc/media/prune.php:454
+msgid "Current registered size evidence vetoes historical classification."
+msgstr ""
+
+#: inc/media/prune.php:463
+#: inc/media/prune.php:911
+msgid "A live registered size projection vetoes historical classification."
+msgstr ""
+
+#: inc/media/prune.php:741
+msgid "The historical cohort does not meet the reviewed confidence threshold."
+msgstr ""
+
+#: inc/media/prune.php:810
+msgid "The disk-only file could not be bound to exactly one authoritative attachment family."
+msgstr ""
+
+#: inc/media/prune.php:830
+msgid "The inferred disk family does not match the authoritative generation source."
+msgstr ""
+
+#: inc/media/prune.php:850
+msgid "The authoritative generation source is not owned by the matched attachment."
+msgstr ""
+
+#: inc/media/prune.php:869
+msgid "The authoritative generation-source dimensions could not be decoded."
+msgstr ""
+
+#: inc/media/prune.php:876
+msgid "The disk-only dimensions also match a size selected to keep."
+msgstr ""
+
+#: inc/media/prune.php:884
+msgid "The disk-only path hash matched a different authoritative path."
+msgstr ""
+
+#: inc/media/prune.php:894
+msgid "The disk-only path now has an authoritative media reference."
+msgstr ""
+
+#: inc/media/prune.php:901
+msgid "The disk-only dimensions do not match a currently registered removed size."
+msgstr ""
+
+#: inc/media/prune.php:963
+msgid "Current-disabled legacy discovery is not enabled for this job."
+msgstr ""
+
+#: inc/media/prune.php:971
+msgid "Current registered size projections changed and no longer authorize this legacy candidate."
+msgstr ""
+
+#: inc/media/prune.php:1030
+#: inc/media/prune.php:1944
+msgid "The legacy prune item lacks exact disk-only evidence."
+msgstr ""
+
+#: inc/media/prune.php:1042
+msgid "The legacy disk-only evidence could not be reproduced."
+msgstr ""
+
+#: inc/media/prune.php:1071
+msgid "The legacy disk-only evidence changed after scanning."
+msgstr ""
+
+#: inc/media/prune.php:1090
+msgid "Raw historical anchor metadata is ambiguous or changed."
+msgstr ""
+
+#: inc/media/prune.php:1094
+msgid "The historical anchor metadata reference no longer exists."
+msgstr ""
+
+#: inc/media/prune.php:1132
+msgid "Historical metadata-anchor evidence changed before sealing."
+msgstr ""
+
+#: inc/media/prune.php:1156
+msgid "The historical disk observation can no longer be reproduced."
+msgstr ""
+
+#: inc/media/prune.php:1182
+msgid "Historical disk evidence changed after scanning."
+msgstr ""
+
+#: inc/media/prune.php:1197
+msgid "The historical cohort proof is missing or unsupported."
+msgstr ""
+
+#: inc/media/prune.php:1206
+msgid "The historical cohort identity is malformed."
+msgstr ""
+
+#: inc/media/prune.php:1209
+msgid "The historical cohort policy changed."
+msgstr ""
+
+#: inc/media/prune.php:1215
+msgid "The sealed historical cohort evidence changed."
+msgstr ""
+
+#: inc/media/prune.php:1232
+msgid "The historical cohort anchor evidence is malformed."
+msgstr ""
+
+#: inc/media/prune.php:1236
+msgid "The historical cohort anchor identity is malformed."
+msgstr ""
+
+#: inc/media/prune.php:1248
+msgid "The historical cohort contains an unknown witness."
+msgstr ""
+
+#: inc/media/prune.php:1264
+msgid "The historical cohort contains malformed witness identity."
+msgstr ""
+
+#: inc/media/prune.php:1291
+msgid "The historical cohort does not meet its immutable threshold."
+msgstr ""
+
+#: inc/media/prune.php:1306
+msgid "The historical cohort lacks exact metadata anchors."
+msgstr ""
+
+#: inc/media/prune.php:1333
+msgid "The historical observation lacks exact disk-only evidence."
+msgstr ""
+
+#: inc/media/prune.php:1337
+msgid "The historical observation does not match the sealed cohort."
+msgstr ""
+
+#: inc/media/prune.php:1382
+msgid "The historical item lacks exact disk-only evidence."
+msgstr ""
+
+#: inc/media/prune.php:1386
+msgid "The historical item policy changed."
+msgstr ""
+
+#: inc/media/prune.php:1401
+msgid "The historical item no longer matches its sealed cohort."
+msgstr ""
+
+#: inc/media/prune.php:1434
+msgid "Historical recovery lacks exact disk-only journal evidence."
+msgstr ""
+
+#: inc/media/prune.php:1438
+msgid "The historical recovery policy changed."
+msgstr ""
+
+#: inc/media/prune.php:1453
+msgid "The historical recovery item does not match its sealed cohort."
+msgstr ""
+
+#: inc/media/prune.php:1465
+msgid "Current registered size evidence vetoes historical recovery."
+msgstr ""
+
+#: inc/media/prune.php:1474
+msgid "A live registered size projection vetoes historical recovery."
+msgstr ""
+
+#: inc/media/prune.php:1829
+#: inc/media/prune.php:1834
+msgid "The reviewed prune file identity could not be established safely."
+msgstr ""
+
+#: inc/media/prune.php:1855
+msgid "The reviewed prune path could not be inspected safely."
+msgstr ""
+
+#: inc/media/prune.php:1898
+msgid "The file is now a protected attachment source or companion and was preserved."
+msgstr ""
+
+#: inc/media/prune.php:1913
+msgid "A generated-file reference outside the reviewed manifest now owns this path."
+msgstr ""
+
+#: inc/media/prune.php:1929
+#: inc/media/prune.php:1964
+#: inc/media/prune.php:1971
+msgid "The prune item lacks exact generated-file ownership evidence."
+msgstr ""
+
+#: inc/media/prune.php:1934
+#: inc/media/prune.php:2020
+msgid "File path is outside uploads."
+msgstr ""
+
+#: inc/media/prune.php:1958
+msgid "The historical prune item lacks exact disk-only cohort evidence."
+msgstr ""
+
+#: inc/media/prune.php:1982
+msgid "The prune item contains malformed ownership evidence."
+msgstr ""
+
+#: inc/media/prune.php:1990
+msgid "The prune item contains a mismatched metadata reference."
+msgstr ""
+
+#: inc/media/prune.php:1998
+msgid "The prune item ownership evidence does not match its metadata references."
+msgstr ""
+
+#: inc/media/prune.php:2036
+msgid "The reviewed legacy file was already missing; no attachment metadata was changed."
+msgstr ""
+
+#: inc/media/prune.php:2037
+msgid "File was already missing; metadata was reconciled."
+msgstr ""
+
+#: inc/media/prune.php:2066
+msgid "A disk-only legacy item attempted to acquire attachment metadata authority."
+msgstr ""
+
+#: inc/media/prune.php:2117
+msgid "File does not exist."
+msgstr ""
+
+#: inc/media/prune.php:2126
+msgid "File is not readable."
+msgstr ""
+
+#: inc/media/prune.php:2139
+msgid "WordPress could not delete the file."
+msgstr ""
+
+#: inc/media/prune.php:2165
+msgid "The file was removed, but raw attachment metadata could not be reconciled safely."
+msgstr ""
+
+#: inc/media/prune.php:2189
+msgid "The file was removed, but its exact metadata reference could not be reconciled."
+msgstr ""
+
+#: inc/media/regeneration.php:79
 msgid "Attachment is not a local raster image."
 msgstr ""
 
-#: inc/regenerate-transaction.php:92
+#: inc/media/regeneration.php:92
 msgid "Force requires exactly one valid raw attached-file row."
 msgstr ""
 
-#: inc/regenerate-transaction.php:95
+#: inc/media/regeneration.php:95
 msgid "Force requires exactly one valid raw attachment-metadata row."
 msgstr ""
 
-#: inc/regenerate-transaction.php:108
+#: inc/media/regeneration.php:108
 msgid "Raw attached-file and metadata full-image paths do not match."
 msgstr ""
 
-#: inc/regenerate-transaction.php:111
+#: inc/media/regeneration.php:111
 msgid "The current full image is missing or unsafe."
 msgstr ""
 
-#: inc/regenerate-transaction.php:125
+#: inc/media/regeneration.php:125
 msgid "A declared attachment companion is malformed."
 msgstr ""
 
-#: inc/regenerate-transaction.php:129
+#: inc/media/regeneration.php:129
 msgid "A declared attachment companion is missing or unsafe."
 msgstr ""
 
-#: inc/regenerate-transaction.php:154
+#: inc/media/regeneration.php:154
 msgid "The selected regeneration source could not be read safely."
 msgstr ""
 
-#: inc/regenerate-transaction.php:212
+#: inc/media/regeneration.php:214
 msgid "Could not create the private regeneration staging directory."
 msgstr ""
 
-#: inc/regenerate-transaction.php:217
+#: inc/media/regeneration.php:219
 msgid "Could not stage the authoritative source image."
 msgstr ""
 
-#: inc/regenerate-transaction.php:235
+#: inc/media/regeneration.php:238
 msgid "The filtered image-size definition is invalid."
 msgstr ""
 
-#: inc/regenerate-transaction.php:247
+#: inc/media/regeneration.php:250
 msgid "The image editor returned an invalid sub-size."
 msgstr ""
 
-#: inc/regenerate-transaction.php:255
+#: inc/media/regeneration.php:258
 msgid "The image editor returned invalid sub-sizes."
 msgstr ""
 
-#: inc/regenerate-transaction.php:266
+#: inc/media/regeneration.php:269
 msgid "A staged sub-size is missing or unsafe."
 msgstr ""
 
-#: inc/regenerate-transaction.php:292
+#: inc/media/regeneration.php:295
 msgid "Current full-image dimensions could not be verified."
 msgstr ""
 
-#: inc/regenerate-transaction.php:308
+#: inc/media/regeneration.php:311
 msgid "A metadata filter returned an invalid result."
 msgstr ""
 
-#: inc/regenerate-transaction.php:314
+#: inc/media/regeneration.php:317
 msgid "A metadata filter changed a protected attachment file declaration."
 msgstr ""
 
-#: inc/regenerate-transaction.php:318
+#: inc/media/regeneration.php:321
 msgid "A metadata filter changed verified current-full properties."
 msgstr ""
 
-#: inc/regenerate-transaction.php:327
+#: inc/media/regeneration.php:330
 msgid "A metadata filter introduced an ungenerated or unsafe sub-size."
 msgstr ""
 
-#: inc/regenerate-transaction.php:333
+#: inc/media/regeneration.php:336
 msgid "A filtered staged-file rename could not be applied safely."
 msgstr ""
 
-#: inc/regenerate-transaction.php:338
+#: inc/media/regeneration.php:341
 msgid "A generated destination collides with protected or duplicate media."
 msgstr ""
 
-#: inc/regenerate-transaction.php:349
+#: inc/media/regeneration.php:352
 msgid "A generated sub-size does not match its filtered metadata."
 msgstr ""
 
-#: inc/regenerate-transaction.php:356
+#: inc/media/regeneration.php:359
 msgid "A generated sub-size could not be read safely."
 msgstr ""
 
-#: inc/regenerate-transaction.php:384
+#: inc/media/regeneration.php:387
 msgid "Existing generated-size metadata is malformed."
 msgstr ""
 
-#: inc/regenerate-transaction.php:412
+#: inc/media/regeneration.php:415
 msgid "A generated destination is protected by attachment source metadata."
 msgstr ""
 
-#: inc/regenerate-transaction.php:420
+#: inc/media/regeneration.php:423
 msgid "Another or unexpected generated-file reference owns this destination."
 msgstr ""
 
-#: inc/regenerate-transaction.php:427
+#: inc/media/regeneration.php:430
 msgid "An existing unreferenced destination was preserved."
 msgstr ""
 
-#: inc/regenerate-transaction.php:439
+#: inc/media/regeneration.php:442
 msgid "A generated destination is not a regular file."
 msgstr ""
 
-#: inc/regenerate-transaction.php:446
+#: inc/media/regeneration.php:449
 msgid "A replaceable generated file could not be read safely."
 msgstr ""
 
-#: inc/regenerate-transaction.php:451
+#: inc/media/regeneration.php:454
 msgid "Could not verify a private backup of the replaceable generated file."
 msgstr ""
 
-#: inc/regenerate-transaction.php:532
-msgid "The regeneration recovery journal is malformed and requires manual inspection."
-msgstr ""
-
-#: inc/regenerate-transaction.php:537
-#: inc/regenerate-transaction.php:549
-msgid "The regeneration recovery paths are invalid and require manual inspection."
-msgstr ""
-
-#: inc/regenerate-transaction.php:564
-#: inc/regenerate-transaction.php:592
+#: inc/media/regeneration.php:525
+#: inc/media/regeneration.php:534
 msgid "Current metadata does not match either journaled transaction state."
 msgstr ""
 
-#: inc/regenerate-transaction.php:582
-msgid "Could not finalize the recovered regeneration journal."
-msgstr ""
-
-#: inc/regenerate-transaction.php:597
+#: inc/media/regeneration.php:549
 msgid "Recovery found a newly protected destination."
 msgstr ""
 
-#: inc/regenerate-transaction.php:607
+#: inc/media/regeneration.php:559
 msgid "Destination ownership changed after the interrupted regeneration."
 msgstr ""
 
-#: inc/regenerate-transaction.php:613
+#: inc/media/regeneration.php:565
 msgid "A promoted artifact changed after the interrupted regeneration."
 msgstr ""
 
-#: inc/regenerate-transaction.php:617
+#: inc/media/regeneration.php:569
 msgid "Could not remove an exact interrupted promoted artifact."
 msgstr ""
 
-#: inc/regenerate-transaction.php:620
+#: inc/media/regeneration.php:572
 msgid "Could not restore an exact interrupted generated-file backup."
 msgstr ""
 
-#: inc/regenerate-transaction.php:623
+#: inc/media/regeneration.php:575
 msgid "A non-promoted destination changed after the interrupted regeneration."
 msgstr ""
 
-#: inc/regenerate-transaction.php:630
-msgid "Could not clear the rolled-back regeneration journal."
-msgstr ""
-
-#: inc/regenerate-transaction.php:634
-msgid "The interrupted regeneration was rolled back and will be retried."
-msgstr ""
-
-#: inc/regenerate-transaction.php:669
-#: inc/regenerate-transaction.php:673
+#: inc/media/regeneration.php:632
+#: inc/media/regeneration.php:636
 msgid "An obsolete generated file could not be deleted safely."
 msgstr ""
 
-#: inc/regenerate-transaction.php:692
-msgid "The regeneration claim is stale."
+#: inc/media/regeneration.php:655
+msgid "Force regeneration requires a persistent claimed job item."
 msgstr ""
 
-#: inc/regenerate-transaction.php:739
-msgid "The acquired destination-lock set does not match the final generated-file map."
+#: inc/media/regeneration.php:663
+msgid "Attached image file is missing."
 msgstr ""
 
-#: inc/regenerate-transaction.php:744
-msgid "Attachment state changed during regeneration; no live file was replaced."
+#: inc/media/regeneration.php:670
+msgid "Attachment is not a raster image."
 msgstr ""
 
-#: inc/regenerate-transaction.php:772
-msgid "Could not persist the regeneration journal."
+#: inc/media/regeneration.php:680
+msgid "No image sizes are missing."
 msgstr ""
 
-#: inc/regenerate-transaction.php:778
-msgid "A generated destination changed before promotion."
+#: inc/media/regeneration.php:707
+msgid "WordPress returned empty image metadata."
 msgstr ""
 
-#: inc/regenerate-transaction.php:782
-msgid "Could not persist the next promotion intent."
+#: inc/media/regeneration.php:722
+msgid "Could not update attachment metadata."
 msgstr ""
 
-#: inc/regenerate-transaction.php:787
-msgid "Could not promote all staged generated files."
+#: inc/media/source-locks.php:66
+msgid "Media sources are being changed by another request. Retrying shortly."
 msgstr ""
 
-#: inc/regenerate-transaction.php:792
-msgid "Could not persist promoted-file evidence."
+#: inc/media/source-locks.php:123
+msgid "Attachment source state could not be locked."
 msgstr ""
 
-#: inc/regenerate-transaction.php:799
-msgid "Could not persist the promoted-files journal."
+#: inc/media/source-locks.php:145
+msgid "This attachment source is being updated by another request. Retrying shortly."
 msgstr ""
 
-#: inc/regenerate-transaction.php:811
-msgid "Metadata commit and automatic rollback were incomplete; journal evidence was retained for manual recovery."
+#: inc/media/source-locks.php:210
+msgid "This media path is being updated by another request. Retrying shortly."
 msgstr ""
 
-#: inc/regenerate-transaction.php:813
-msgid "Could not commit exact regenerated attachment metadata; the old state was restored."
+#: inc/media/source-store.php:184
+msgid "Too many exact media-source paths were requested in one batch."
 msgstr ""
 
-#: inc/regenerate-transaction.php:817
-msgid "Metadata committed, but its recovery journal could not be advanced."
-msgstr ""
-
-#: inc/regenerate-transaction.php:829
-msgid "Could not finalize the regeneration journal."
+#: inc/media/source-store.php:209
+msgid "Too many authoritative media aliases matched one exact path."
 msgstr ""
 
 #. translators: %s: four-digit uploads year.
-#: inc/upload-subpaths.php:44
+#: inc/upload-subpaths.php:43
 msgid "%s (year)"
 msgstr ""
 
 #. translators: %s: year/month uploads path.
-#: inc/upload-subpaths.php:65
+#: inc/upload-subpaths.php:64
 msgid "— %s"
 msgstr ""

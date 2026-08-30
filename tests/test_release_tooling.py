@@ -59,13 +59,13 @@ class ReleasePackageTests(unittest.TestCase):
             "--output-dir",
             str(output),
             "--version",
-            "1.5.0",
+            "1.5.1",
             "--source-sha",
             FULL_SHA,
             "--preparation-run-id",
             "local",
         )
-        return output / "thumbnail-manager-1.5.0.zip", output / "release-manifest.json"
+        return output / "thumbnail-manager-1.5.1.zip", output / "release-manifest.json"
 
     def test_build_is_byte_deterministic_and_exact(self) -> None:
         first_package, first_manifest = self.build(self.temp / "first")
@@ -113,7 +113,7 @@ class ReleasePackageTests(unittest.TestCase):
                 shutil.copytree(ROOT, source, ignore=shutil.ignore_patterns(".git", "vendor", "__pycache__"))
                 target = source / relative
                 target.write_text(
-                    target.read_text(encoding="utf-8").replace("= 1.5.0 (", "= 1.4 (", 1),
+                    target.read_text(encoding="utf-8").replace("= 1.5.1 (", "= 1.4 (", 1),
                     encoding="utf-8",
                 )
                 result = run(
@@ -123,10 +123,26 @@ class ReleasePackageTests(unittest.TestCase):
                     "--source",
                     str(source),
                     "--version",
-                    "1.5.0",
+                    "1.5.1",
                     expect_success=False,
                 )
-                self.assertIn(f"{field} must exactly equal active release version 1.5.0", result.stderr)
+                self.assertIn(f"{field} must exactly equal active release version 1.5.1", result.stderr)
+
+    def test_pot_tracks_current_legacy_cleanup_copy(self) -> None:
+        source = (ROOT / "inc/admin/view.php").read_text(encoding="utf-8")
+        pot = (ROOT / "languages/thumbnail-manager.pot").read_text(encoding="utf-8")
+        current_messages = (
+            "Include verified legacy thumbnails for currently disabled sizes (disk-only)",
+            "Also include verified historical thumbnails from sizes no longer registered",
+        )
+        retired_message = "Also include orphan sizes found in attachment metadata and report unmapped disk matches"
+
+        for message in current_messages:
+            with self.subTest(message=message):
+                self.assertIn(message, source)
+                self.assertIn(f'msgid "{message}"', pot)
+        self.assertNotIn(retired_message, source)
+        self.assertNotIn(f'msgid "{retired_message}"', pot)
 
     def test_package_tampering_fails_closed(self) -> None:
         package, manifest = self.build(self.temp / "tamper")
@@ -156,7 +172,7 @@ class ReleasePackageTests(unittest.TestCase):
             "--output-dir",
             str(self.temp / "symlink-output"),
             "--version",
-            "1.5.0",
+            "1.5.1",
             "--source-sha",
             FULL_SHA,
             expect_success=False,
@@ -263,10 +279,10 @@ class ReleasePackageTests(unittest.TestCase):
         source = self.temp / "future-candidate"
         shutil.copytree(ROOT, source, ignore=shutil.ignore_patterns(".git", "vendor", "__pycache__"))
         replacements = {
-            "thumbnail-manager.php": [("1.5.0", "1.6.0"), ("1.5.0", "1.6.0")],
-            "readme.txt": [("Stable tag: 1.5.0", "Stable tag: 1.6.0"), ("= 1.5.0 =", "= 1.6.0 ="), ("= 1.5.0 (", "= 1.5 (")],
-            "changelog.txt": [("= 1.5.0 (", "= 1.5 (")],
-            "languages/thumbnail-manager.pot": [("Thumbnail Manager 1.5.0", "Thumbnail Manager 1.6.0")],
+            "thumbnail-manager.php": [("1.5.1", "1.5.2"), ("1.5.1", "1.5.2")],
+            "readme.txt": [("Stable tag: 1.5.1", "Stable tag: 1.5.2"), ("= 1.5.1 =", "= 1.5.2 ="), ("= 1.5.1 (", "= 1.5 (")],
+            "changelog.txt": [("= 1.5.1 (", "= 1.5 (")],
+            "languages/thumbnail-manager.pot": [("Thumbnail Manager 1.5.1", "Thumbnail Manager 1.5.2")],
         }
         for relative, changes in replacements.items():
             target = source / relative
@@ -282,14 +298,14 @@ class ReleasePackageTests(unittest.TestCase):
             "--output-dir",
             str(self.temp / "future-mismatch"),
             "--version",
-            "1.6.0",
+            "1.5.2",
             "--source-sha",
             FULL_SHA,
             expect_success=False,
         )
         for relative in ("readme.txt", "changelog.txt"):
             target = source / relative
-            target.write_text(target.read_text(encoding="utf-8").replace("= 1.5 (", "= 1.6.0 (", 1), encoding="utf-8")
+            target.write_text(target.read_text(encoding="utf-8").replace("= 1.5 (", "= 1.5.2 (", 1), encoding="utf-8")
         run(
             "bash",
             "bin/build-release.sh",
@@ -298,13 +314,13 @@ class ReleasePackageTests(unittest.TestCase):
             "--output-dir",
             str(self.temp / "future-exact"),
             "--version",
-            "1.6.0",
+            "1.5.2",
             "--source-sha",
             FULL_SHA,
         )
         readme = source / "readme.txt"
         exact_readme = readme.read_text(encoding="utf-8")
-        readme.write_text(exact_readme.replace("= 1.6.0 =", "= 1.5 =", 1), encoding="utf-8")
+        readme.write_text(exact_readme.replace("= 1.5.2 =", "= 1.5 =", 1), encoding="utf-8")
         run(
             "bash",
             "bin/build-release.sh",
@@ -313,7 +329,7 @@ class ReleasePackageTests(unittest.TestCase):
             "--output-dir",
             str(self.temp / "future-upgrade-mismatch"),
             "--version",
-            "1.6.0",
+            "1.5.2",
             "--source-sha",
             FULL_SHA,
             expect_success=False,
@@ -321,7 +337,7 @@ class ReleasePackageTests(unittest.TestCase):
         readme.write_text(exact_readme, encoding="utf-8")
         pot = source / "languages/thumbnail-manager.pot"
         exact_pot = pot.read_text(encoding="utf-8")
-        pot.write_text(exact_pot.replace("Thumbnail Manager 1.6.0", "Thumbnail Manager 1.5", 1), encoding="utf-8")
+        pot.write_text(exact_pot.replace("Thumbnail Manager 1.5.2", "Thumbnail Manager 1.5", 1), encoding="utf-8")
         run(
             "bash",
             "bin/build-release.sh",
@@ -330,7 +346,7 @@ class ReleasePackageTests(unittest.TestCase):
             "--output-dir",
             str(self.temp / "future-pot-mismatch"),
             "--version",
-            "1.6.0",
+            "1.5.2",
             "--source-sha",
             FULL_SHA,
             expect_success=False,
@@ -376,7 +392,7 @@ class LocalSvnStateTests(unittest.TestCase):
             "--output-dir",
             str(self.build),
             "--version",
-            "1.5.0",
+            "1.5.1",
             "--source-sha",
             FULL_SHA,
         )
@@ -395,18 +411,18 @@ class LocalSvnStateTests(unittest.TestCase):
             "--policy",
             str(self.policy),
             "--version",
-            "1.5.0",
+            "1.5.1",
             "--package",
-            str(self.build / "thumbnail-manager-1.5.0.zip"),
+            str(self.build / "thumbnail-manager-1.5.1.zip"),
             "--manifest",
             str(self.build / "release-manifest.json"),
             "--output",
             str(preflight),
         )
-        self.assertFalse((self.temp / "remote-check" / "tags" / "1.5.0").exists())
+        self.assertFalse((self.temp / "remote-check" / "tags" / "1.5.1").exists())
         remote_check = self.temp / "remote-check"
         run("svn", "checkout", "--quiet", self.svn_url, str(remote_check))
-        self.assertFalse((remote_check / "tags" / "1.5.0").exists(), "local staging must not mutate remote SVN")
+        self.assertFalse((remote_check / "tags" / "1.5.1").exists(), "local staging must not mutate remote SVN")
         run(
             "python3",
             "bin/wporg-release.py",
@@ -416,7 +432,7 @@ class LocalSvnStateTests(unittest.TestCase):
             "--policy",
             str(self.policy),
             "--version",
-            "1.5.0",
+            "1.5.1",
             "--snapshot",
             str(preflight),
         )
@@ -434,7 +450,7 @@ class LocalSvnStateTests(unittest.TestCase):
             "--policy",
             str(self.policy),
             "--version",
-            "1.5.0",
+            "1.5.1",
             "--snapshot",
             str(preflight),
             expect_success=False,
@@ -451,9 +467,9 @@ class LocalSvnStateTests(unittest.TestCase):
             "--policy",
             str(self.policy),
             "--version",
-            "1.5.0",
+            "1.5.1",
             "--package",
-            str(self.build / "thumbnail-manager-1.5.0.zip"),
+            str(self.build / "thumbnail-manager-1.5.1.zip"),
             "--manifest",
             str(self.build / "release-manifest.json"),
             "--output",
@@ -462,7 +478,7 @@ class LocalSvnStateTests(unittest.TestCase):
         manifest = json.loads((self.build / "release-manifest.json").read_text(encoding="utf-8"))
         publish_run_id = "12345"
         message = (
-            f"Release 1.5.0 from Git {FULL_SHA}; manifest {manifest['manifest_sha256']}; "
+            f"Release 1.5.1 from Git {FULL_SHA}; manifest {manifest['manifest_sha256']}; "
             f"GitHub run https://github.com/yoohwz/thumbnail-manager/actions/runs/{publish_run_id}"
         )
         run(
@@ -470,7 +486,7 @@ class LocalSvnStateTests(unittest.TestCase):
             "commit",
             "--quiet",
             str(self.working_copy / "trunk"),
-            str(self.working_copy / "tags" / "1.5.0"),
+            str(self.working_copy / "tags" / "1.5.1"),
             "-m",
             message,
         )
@@ -486,7 +502,7 @@ class LocalSvnStateTests(unittest.TestCase):
             "--policy",
             str(self.policy),
             "--version",
-            "1.5.0",
+            "1.5.1",
             "--candidate-sha",
             FULL_SHA,
             "--publish-run-id",
@@ -510,7 +526,7 @@ class LocalSvnStateTests(unittest.TestCase):
             "--policy",
             str(self.policy),
             "--version",
-            "1.5.0",
+            "1.5.1",
             "--candidate-sha",
             FULL_SHA,
             "--publish-run-id",
