@@ -19,7 +19,12 @@
   }
 
   function responseError(response, fallback) {
-    return response && response.data && response.data.msg ? response.data.msg : fallback;
+    const payload = response && response.responseJSON ? response.responseJSON : response;
+    if (payload && payload.data && payload.data.msg) {
+      return payload.data.msg;
+    }
+    const status = parseInt(response && response.status || 0, 10);
+    return status ? fallback + ' (HTTP ' + status + ')' : fallback;
   }
 
   function htmlNotice(cls, message) {
