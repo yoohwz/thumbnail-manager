@@ -413,11 +413,15 @@
       $pruneCancel.removeClass('yo-hidden');
       renderPruneReview(data);
       loadRecentJobs();
-    }).fail(function(){
+    }).fail(function(request){
       if (token !== pruneToken) {
         return;
       }
-      $pruneResults.prepend(htmlNotice('notice-error', t('networkScan', 'Network error during scan.') + ' ' + t('resumeAfterNetworkError', 'Reload this page to resume it.')));
+      const status = parseInt(request && request.status || 0, 10);
+      const message = status
+        ? t('scanFailed', 'Scan failed:') + ' ' + responseError(request, t('unknownError', 'Unknown error'))
+        : t('networkScan', 'Network error during scan.');
+      $pruneResults.prepend(htmlNotice('notice-error', message + ' ' + t('resumeAfterNetworkError', 'Reload this page to resume it.')));
       clearPruneJob({keepResults: true, preserveJob: true});
     });
   }
