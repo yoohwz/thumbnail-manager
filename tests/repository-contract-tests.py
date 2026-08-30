@@ -3,12 +3,23 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
+import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+
+classifier_spec = importlib.util.spec_from_file_location(
+    "classify_ci", ROOT / "bin/classify-ci.py"
+)
+if classifier_spec is None or classifier_spec.loader is None:
+    raise RuntimeError("could not load bin/classify-ci.py")
+classify_ci = importlib.util.module_from_spec(classifier_spec)
+classifier_spec.loader.exec_module(classify_ci)
 
 
 def fail(message: str) -> None:
@@ -115,6 +126,45 @@ for needle, label in (
         fail(f"AGENTS.md is missing {label}")
 
 for needle, label in (
+    ("freeze a compact set of user-visible and edge-case scenarios", "scenario freeze"),
+    ("complexity budget and stop-loss", "complexity budget and stop-loss"),
+    ("one task = one draft pull request by default", "one-task/one-PR default"),
+    ("### Validation/review profiles", "validation/review profiles"),
+    ("**Structural**", "Structural profile"),
+    ("**Functional**", "Functional profile"),
+    ("**Safety-critical**", "Safety-critical profile"),
+    ("**Release**", "Release profile"),
+    ("pure mechanical Structural change", "structural-review exception"),
+    ("Draft pull-request heads use **Iteration CI**", "Iteration CI guidance"),
+    ("Non-draft pull-request heads", "Final CI guidance"),
+    ("Iteration CI emits `Iteration Gate`", "draft gate separation"),
+    ("A Final CI change to the CI control plane", "CI control-plane self-validation"),
+    ("a PASS/NOT RUN evidence table", "compact durable evidence"),
+):
+    if needle not in agents:
+        fail(f"AGENTS.md is missing {label}")
+
+if agents.count("Use only `Fast` and `Controlled`.") != 1:
+    fail("workflow must retain exactly the Fast and Controlled risk lanes")
+
+status_section = agents.split("## Status protocol", 1)[1].split(
+    "## Durable handoffs and review routing", 1
+)[0]
+expected_statuses = {
+    "PLAN_REVIEW_REQUIRED",
+    "TECHNICAL_REVIEW_REQUIRED",
+    "TECHNICAL_CHANGES_REQUIRED",
+    "HUMAN_DECISION_REQUIRED",
+    "READY_FOR_HUMAN_MERGE",
+}
+actual_statuses = set(re.findall(r"^- `([A-Z_]+)`$", status_section, re.MULTILINE))
+if actual_statuses != expected_statuses:
+    fail(
+        "workflow statuses differ: "
+        f"expected={sorted(expected_statuses)}, actual={sorted(actual_statuses)}"
+    )
+
+for needle, label in (
     ("Review-first prune lifecycle", "review-first lifecycle"),
     ("Filesystem containment", "filesystem containment"),
     ("Destructive-operation concurrency", "destructive concurrency"),
@@ -122,9 +172,160 @@ for needle, label in (
     if needle not in safety:
         fail(f"media safety contract is missing {label}")
 
-for heading in ("## Goal", "## Risk lane", "## Validation", "## Release boundary"):
+for heading in (
+    "## Goal",
+    "## Risk lane",
+    "## Validation/review profile",
+    "## Affected invariants",
+    "## Validation",
+    "## Blocking findings and corrections",
+    "## Release boundary",
+):
     if heading not in pr_template:
         fail(f"pull request template is missing {heading}")
+if "| Check | Result | Evidence |" not in pr_template or "PASS / NOT RUN" not in pr_template:
+    fail("pull request template must use a compact PASS/NOT RUN evidence table")
+
+draft_runtime = classify_ci.classify(
+    event_name="pull_request",
+    pr_draft=True,
+    changed_files=["inc/jobs.php"],
+    minimum_wp=plugin_requires_wp,
+    tested_wp=tested_up_to,
+)
+if draft_runtime["intensity"] != "iteration" or draft_runtime["full"]:
+    fail("draft pull requests must use Iteration CI")
+if not draft_runtime["quality"] or not draft_runtime["integration"]:
+    fail("draft runtime PHP changes must keep quality and representative integration checks")
+if not draft_runtime["plugin_check_applicable"] or draft_runtime["plugin_check"]:
+    fail("draft runtime changes must defer, not erase, applicable Plugin Check")
+draft_matrix = draft_runtime["matrix"]["include"]
+if draft_matrix != [
+    {"wordpress": tested_up_to, "php": "8.2", "label": "iteration"}
+]:
+    fail(f"Iteration CI must use one representative integration environment: {draft_matrix}")
+
+final_runtime = classify_ci.classify(
+    event_name="pull_request",
+    pr_draft=False,
+    changed_files=["inc/jobs.php"],
+    minimum_wp=plugin_requires_wp,
+    tested_wp=tested_up_to,
+)
+if final_runtime["intensity"] != "final" or not final_runtime["full"]:
+    fail("non-draft pull requests must use Final CI")
+if not final_runtime["plugin_check"]:
+    fail("Final CI must run applicable Plugin Check")
+expected_matrix = {
+    (plugin_requires_wp, "7.4", "minimum"),
+    (plugin_requires_wp, "8.2", "minimum-high-php"),
+    (tested_up_to, "7.4", "tested-min-php"),
+    (tested_up_to, "8.4", "tested-modern"),
+}
+actual_matrix = {
+    (item["wordpress"], item["php"], item["label"])
+    for item in final_runtime["matrix"]["include"]
+}
+if actual_matrix != expected_matrix:
+    fail(
+        "Final CI support-boundary matrix differs: "
+        f"expected={sorted(expected_matrix)}, actual={sorted(actual_matrix)}"
+    )
+
+main_runtime = classify_ci.classify(
+    event_name="push",
+    pr_draft=False,
+    changed_files=["inc/jobs.php"],
+    minimum_wp=plugin_requires_wp,
+    tested_wp=tested_up_to,
+)
+if not main_runtime["full"] or main_runtime["matrix"] != final_runtime["matrix"]:
+    fail("main pushes must retain the same full support-boundary matrix as Final CI")
+
+expected_control_plane_paths = {
+    ".github/workflows/ci.yml",
+    "bin/classify-ci.py",
+    "bin/validate-ci-gate.sh",
+}
+if not expected_control_plane_paths.issubset(classify_ci.CI_CONTROL_PLANE_PATHS):
+    fail("CI classifier is missing a required control-plane path")
+
+draft_control_plane = classify_ci.classify(
+    event_name="pull_request",
+    pr_draft=True,
+    changed_files=[".github/workflows/ci.yml"],
+    minimum_wp=plugin_requires_wp,
+    tested_wp=tested_up_to,
+)
+if not draft_control_plane["control_plane"] or draft_control_plane["full"]:
+    fail("draft CI workflow changes must be identified without masquerading as Final CI")
+if any(
+    draft_control_plane[key]
+    for key in ("quality", "integration", "plugin_check", "javascript")
+):
+    fail("draft CI control-plane changes may retain the cheaper Iteration CI path")
+
+for control_path in sorted(expected_control_plane_paths):
+    final_control_plane = classify_ci.classify(
+        event_name="pull_request",
+        pr_draft=False,
+        changed_files=[control_path],
+        minimum_wp=plugin_requires_wp,
+        tested_wp=tested_up_to,
+    )
+    if not all(
+        final_control_plane[key]
+        for key in (
+            "full",
+            "control_plane",
+            "quality",
+            "integration",
+            "plugin_check_applicable",
+            "plugin_check",
+            "javascript",
+        )
+    ):
+        fail(f"Final CI control-plane change does not force every validation surface: {control_path}")
+    if final_control_plane["matrix"] != final_runtime["matrix"]:
+        fail(f"Final CI control-plane change does not use the full support matrix: {control_path}")
+
+draft_governance = classify_ci.classify(
+    event_name="pull_request",
+    pr_draft=True,
+    changed_files=["AGENTS.md", ".github/workflows/ci.yml"],
+    minimum_wp=plugin_requires_wp,
+    tested_wp=tested_up_to,
+)
+if any(
+    draft_governance[key]
+    for key in ("quality", "integration", "plugin_check_applicable", "plugin_check", "javascript")
+):
+    fail("governance-only draft changes must not fan out runtime validation")
+
+final_governance = classify_ci.classify(
+    event_name="pull_request",
+    pr_draft=False,
+    changed_files=["AGENTS.md", ".github/pull_request_template.md"],
+    minimum_wp=plugin_requires_wp,
+    tested_wp=tested_up_to,
+)
+if not final_governance["full"] or final_governance["control_plane"]:
+    fail("ordinary governance changes must use Final CI without becoming control-plane changes")
+if any(
+    final_governance[key]
+    for key in ("quality", "integration", "plugin_check_applicable", "plugin_check", "javascript")
+):
+    fail("ordinary governance-only Final CI must not fan out runtime validation")
+
+manual = classify_ci.classify(
+    event_name="workflow_dispatch",
+    pr_draft=False,
+    changed_files=["AGENTS.md"],
+    minimum_wp=plugin_requires_wp,
+    tested_wp=tested_up_to,
+)
+if not all(manual[key] for key in ("full", "quality", "integration", "plugin_check", "javascript")):
+    fail("manual CI dispatch must force every final validation surface")
 
 expected_payload_entries = {
     "css/**",
@@ -349,9 +550,90 @@ if "must exactly equal active release version" not in release_validator:
 for needle, label in (
     ("bash bin/build-release.sh", "shared deterministic builder"),
     ("bin/validate-plugin-check.py", "reviewed Plugin Check baseline enforcement"),
+    ("ready_for_review", "ready-for-review Final CI trigger"),
+    ("converted_to_draft", "draft-conversion Iteration CI trigger"),
+    ("github.event.pull_request.draft || false", "PR draft-state classifier input"),
+    ("python3 bin/classify-ci.py", "executable CI classifier"),
+    ("'CI Gate' || 'Iteration Gate'", "separate final and iteration aggregate signals"),
+    ("needs.classify.outputs.plugin_check == 'true'", "classified Plugin Check condition"),
+    ("bash bin/validate-ci-gate.sh", "fail-closed aggregate gate helper"),
+    ("hashFiles('composer.lock')", "lockfile-bound Composer cache"),
 ):
     if needle not in ci_workflow:
         fail(f"CI workflow is missing {label}")
+
+gate_job = ci_workflow.split("  ci-gate:", 1)[1]
+if "uses: actions/checkout@" not in gate_job or "persist-credentials: false" not in gate_job:
+    fail("aggregate gate must check out the reviewed helper without persisting credentials")
+
+if "actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0" not in ci_workflow:
+    fail("CI Composer cache action must remain pinned to its reviewed commit")
+if re.search(r"path:\s*(?:\|\s*)?/tmp/wordpress", ci_workflow):
+    fail("CI must not cache mutable WordPress branch sources")
+
+gate_environment = os.environ | {
+    "CLASSIFY": "success",
+    "CONTRACTS": "success",
+    "QUALITY_REQUIRED": "false",
+    "INTEGRATION_REQUIRED": "false",
+    "JAVASCRIPT_REQUIRED": "false",
+    "PLUGIN_CHECK_REQUIRED": "false",
+    "QUALITY": "skipped",
+    "JAVASCRIPT": "skipped",
+    "PHPUNIT": "skipped",
+    "PLUGIN_CHECK": "skipped",
+}
+gate = subprocess.run(
+    ["bash", str(ROOT / "bin/validate-ci-gate.sh")],
+    env=gate_environment,
+    capture_output=True,
+    text=True,
+    check=False,
+)
+if gate.returncode != 0:
+    fail(f"CI gate rejected legitimate irrelevant skips: {gate.stderr.strip()}")
+
+for result in ("skipped", "failure", "cancelled"):
+    adversarial_environment = gate_environment | {
+        "PLUGIN_CHECK_REQUIRED": "true",
+        "PLUGIN_CHECK": result,
+    }
+    gate = subprocess.run(
+        ["bash", str(ROOT / "bin/validate-ci-gate.sh")],
+        env=adversarial_environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if gate.returncode == 0:
+        fail(f"CI gate accepted required Plugin Check result: {result}")
+
+control_plane_gate_environment = gate_environment | {
+    "QUALITY_REQUIRED": "true" if final_control_plane["quality"] else "false",
+    "INTEGRATION_REQUIRED": "true" if final_control_plane["integration"] else "false",
+    "JAVASCRIPT_REQUIRED": "true" if final_control_plane["javascript"] else "false",
+    "PLUGIN_CHECK_REQUIRED": "true" if final_control_plane["plugin_check"] else "false",
+    "QUALITY": "success",
+    "JAVASCRIPT": "success",
+    "PHPUNIT": "success",
+    "PLUGIN_CHECK": "success",
+}
+for result_variable, label in (
+    ("QUALITY", "Coding standards"),
+    ("JAVASCRIPT", "JavaScript syntax"),
+    ("PHPUNIT", "WordPress/PHP integration"),
+    ("PLUGIN_CHECK", "WordPress Plugin Check"),
+):
+    adversarial_environment = control_plane_gate_environment | {result_variable: "skipped"}
+    gate = subprocess.run(
+        ["bash", str(ROOT / "bin/validate-ci-gate.sh")],
+        env=adversarial_environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if gate.returncode == 0:
+        fail(f"CI Gate accepted skipped {label} for a Final CI control-plane change")
 
 print(
     "Repository contracts passed: "
