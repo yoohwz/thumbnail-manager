@@ -1160,7 +1160,12 @@ function yotm_prune_historical_merge_cohort_state( $job, $worker, $item_key, $in
 			$current[ $field ] = $incoming[ $field ];
 		}
 	}
-	if ( ! yotm_job_worker_replace_item( $worker, $item['id'], 'historical_cohort', 'historical_cohort', $current, 0 ) ) {
+	// Identical persisted state is a replay success.
+	// The caller advances its cursor through the worker-fenced job update.
+	if (
+		$current !== $item['payload']
+		&& ! yotm_job_worker_replace_item( $worker, $item['id'], 'historical_cohort', 'historical_cohort', $current, 0 )
+	) {
 		return new WP_Error( 'yotm_historical_cohort_state', __( 'Historical cohort state could not be persisted safely.', 'thumbnail-manager' ) );
 	}
 	return $current;
@@ -1291,7 +1296,8 @@ function yotm_prune_historical_materialize_batch( $job, $limit, $worker ) {
 			return $rows;
 		}
 		foreach ( $rows as $row ) {
-			$state = $row['payload'];
+			$stored_state = $row['payload'];
+			$state        = $stored_state;
 			if ( 'historical_cohort_signature_v1' === ( $state['evidence_kind'] ?? '' ) ) {
 				unset( $state['sealed_proof'] );
 				$keys = array_values( array_unique( array_filter( array_map( 'sanitize_key', (array) ( $state['qualifying_keys'] ?? array() ) ) ) ) );
@@ -1317,7 +1323,12 @@ function yotm_prune_historical_materialize_batch( $job, $limit, $worker ) {
 						$state['sealed_proof'] = $proof;
 					}
 				}//end if
-				if ( ! yotm_job_worker_replace_item( $worker, $row['id'], 'historical_cohort', 'historical_cohort', $state, 0 ) ) {
+				// An unqualified or already-sealed cohort may be unchanged.
+				// Cursor persistence below remains worker-fenced.
+				if (
+					$state !== $stored_state
+					&& ! yotm_job_worker_replace_item( $worker, $row['id'], 'historical_cohort', 'historical_cohort', $state, 0 )
+				) {
 					return yotm_job_storage_error();
 				}
 			}//end if
