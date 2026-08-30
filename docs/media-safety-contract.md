@@ -44,9 +44,33 @@ If containment cannot be established confidently, deletion fails closed.
 
 Metadata-backed generated files may be considered for deletion when the corresponding attachment/size relationship is established and all other safety checks pass.
 
-Disk-only files discovered by thumbnail-style filename patterns are informational by default when they cannot be mapped safely to attachment metadata. They must not silently become destructive candidates because of a broader scan, refactor, or recommendation change.
+Disk-only files discovered by thumbnail-style filename patterns are informational by default when they cannot be mapped safely to one authoritative attachment family. They must not silently become destructive candidates because of a broader scan, refactor, or recommendation change.
 
-Any future design that makes currently unmapped disk-only files deletable is a product/safety contract change and requires explicit Human approval through Controlled Lane.
+The first reviewed exception is a `legacy_generated_v1` item produced under an explicit, versioned job policy for a currently registered size selected for removal. It must prove all of the following from raw authoritative state at scan, manifest, and delete time:
+
+- the candidate is a regular non-symlink file inside uploads and its decoded dimensions and MIME agree exactly with its filename extension and strict terminal `-WxH` suffix;
+- exactly one authoritative attachment family owns the current generation source stem and directory, with no source ambiguity or index dirtiness;
+- the observed dimensions are projected by at least one currently registered explicitly removed size and by no kept size; a kept-size match is an unconditional veto;
+- no metadata-generated owner or protected/source reference owns the candidate path;
+- folder-scoped jobs remain bound to the frozen authoritative attached-file meta ID; and
+- immutable source/candidate hashes and node fingerprints still match.
+
+Legacy authority is job-local and cannot be inferred for an older job that lacks the exact policy version and policy hash. The job-level compatibility marker may remain `generated_file_v1`; item-level `ownership_schema` is the authority discriminator. A legacy item never authorizes attachment-metadata reconciliation, including when its file is already absent.
+
+The second reviewed exception is a `historical_legacy_generated_v1` item produced only by policy version 2 when the separate historical-discovery option was explicitly enabled. This tier applies to a fixed-output hard crop whose historical metadata size key is no longer registered. It is fail-closed and must prove all of the following:
+
+- at least two exact raw-metadata anchors and at least three exact disk-only observations share one decoded output width, height, and MIME signature;
+- the selected five witnesses represent five distinct attachment/source families, five distinct attachment IDs, source path hashes, and source file hashes, at least three exact reduced-integer source-ratio buckets, and at least two uploads directories;
+- every metadata anchor has one exact raw metadata owner and remains bound to its exact raw metadata row and folder-selection row;
+- soft/proportional outputs, unanchored output signatures, signatures with multiple qualifying historical size keys, and any output currently projected by a live registered size remain non-destructive;
+- the source/candidate path, content hash, dimensions, MIME, node fingerprint, selector binding, and zero metadata authority are revalidated at cohort sealing, manifest construction, and deletion; and
+- the cohort proof, fixed thresholds, integer-ratio schema, and policy hash are immutable and digest-bound.
+
+The sealed proof retains the two selected full raw-metadata anchors, not only aggregate counters or hashes, so anchor row/path/source evidence can be rebuilt from current authoritative state at manifest and delete time. A changed or missing anchor revokes every item authorized by that cohort.
+
+Version 1 jobs can never acquire historical authority. Historical evidence rows are inert until deterministic cohort sealing promotes an individually revalidated observation. Ambiguous, insufficient, changed, or unverified historical-looking files remain preserved by default.
+
+Any broader design that makes other unmapped disk-only files deletable is a product/safety contract change and requires explicit Human approval through Controlled Lane.
 
 ## 4. Review-first prune lifecycle
 
@@ -55,6 +79,10 @@ The prune lifecycle remains separated into discovery and deletion:
 `scan -> manifest -> review -> explicit approval -> bounded deletion`
 
 The item set must become immutable before review. Late scan batches or other requests must not append or mutate candidate payloads after manifest finalization begins.
+
+Historical anchor, observation, cohort, and rejected statuses are intermediate evidence only. They must be removed before manifest construction and must never enter review, approval, claim, or deletion paths. Cohort aggregation and materialization remain worker-token/generation fenced so a late or replayed batch cannot promote authority.
+
+The disabled-size cleanup bridge may enable legacy discovery and start the scan, but it must stop at this immutable review boundary. It must never approve a manifest or begin deletion automatically.
 
 The persisted manifest hash identifies the reviewed candidate set. Approval and deletion must require the same hash; a missing or mismatched hash fails closed and requires a new review cycle.
 
@@ -94,6 +122,8 @@ Finishing, cancelling, or expiring a job must eventually release the logical des
 
 When a generated file is successfully removed, attachment metadata may be updated only for the references represented by that approved candidate.
 
+`legacy_generated_v1` and `historical_legacy_generated_v1` are intentionally disk-only evidence. Their candidate payloads must carry no metadata-removal instruction or generated metadata references, and every reconciliation path must reject any such payload that attempts to introduce either.
+
 If the file is already absent, reconciliation may remove a stale matching metadata reference when the candidate contains enough evidence to identify it safely.
 
 A deletion failure must not cause broad metadata cleanup unrelated to the exact candidate.
@@ -109,6 +139,8 @@ Large scans, manifest construction, regeneration, and deletion must remain bound
 Persistent cursors/queues must allow page reloads or network interruption without restarting destructive work from an ambiguous point.
 
 Batch retry must be idempotent or otherwise protected from repeating already-completed destructive work.
+
+Historical cohort witness reduction, aggregation, sealing, and promotion must be deterministic under batching order, duplicate delivery, and replay. Bounded witness pools use stable evidence keys; rerunning the same immutable evidence must produce the same cohort proof and must not lower any confidence threshold.
 
 Folder-scoped `attached_meta_v2` jobs freeze the maximum authoritative `_wp_attached_file.meta_id` at prepare time and scan that range by raw meta-ID keyset. A materialized regeneration item remains bound to the exact selected meta ID. A deleted/reinserted row, duplicate row, malformed value, database ambiguity, or raw path outside the literal selected subpath fails closed even if a filterable accessor reports an in-scope path. During selection the exact attachment total is unknown; API/UI state must distinguish that condition from a completed zero-result scan.
 
@@ -162,6 +194,9 @@ A Controlled change touching this contract must preserve or deliberately update 
 - job ownership;
 - destructive-job locking;
 - manifest immutability and hash matching;
+- strict legacy filename/dimension/MIME proof, kept-size veto, one-family source ownership, policy/hash compatibility, and zero metadata reconciliation;
+- historical policy-version isolation, exact 2-anchor/3-observation/5-family/3-ratio/2-directory thresholds, deterministic replay/order behavior, live registered-size veto, raw metadata anchors, proof tamper rejection, and zero metadata reconciliation;
+- scaled/original source-basename divergence and folder meta-ID replacement rejection for legacy candidates;
 - cancellation/audit retention;
 - resumable deletion and persisted cursors.
 - raw meta-ID folder snapshots, execution-time scope drift, and delete/reinsert replacement rejection;

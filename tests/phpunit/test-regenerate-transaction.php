@@ -24,6 +24,9 @@ class YOTM_Regenerate_Transaction_Test extends WP_UnitTestCase {
 	/** @var array */
 	private $filtered_commit_metadata = array();
 
+	/** @var string */
+	private $target_output_mime = '';
+
 	public function setUp(): void {
 		parent::setUp();
 		unset( $GLOBALS['yotm_job_storage_readiness'], $GLOBALS['yotm_media_source_last_error'] );
@@ -39,6 +42,7 @@ class YOTM_Regenerate_Transaction_Test extends WP_UnitTestCase {
 		update_option( 'thumbnail_size_w', 100 );
 		update_option( 'thumbnail_size_h', 100 );
 		update_option( 'thumbnail_crop', 1 );
+		delete_option( 'yotm_disabled_sizes' );
 		delete_option( YOTM_MEDIA_SOURCE_DIRTY_OPTION );
 		update_option( 'thumbnail_size_w', $this->thumbnail_options['w'] );
 		update_option( 'thumbnail_size_h', $this->thumbnail_options['h'] );
@@ -58,6 +62,8 @@ class YOTM_Regenerate_Transaction_Test extends WP_UnitTestCase {
 		remove_filter( 'wp_update_attachment_metadata', array( $this, 'arm_filtered_commit_lie' ), PHP_INT_MAX );
 		remove_filter( 'get_post_metadata', array( $this, 'lie_about_committed_metadata' ), 10 );
 		remove_filter( 'update_post_metadata', array( $this, 'short_circuit_metadata_commit' ), 10 );
+		remove_filter( 'image_editor_output_format', array( $this, 'convert_jpeg_output' ), 10 );
+		remove_image_size( 'yotm_missing_enabled' );
 		if ( $this->attachment_id ) {
 			wp_delete_attachment( $this->attachment_id, true );
 		}
@@ -72,6 +78,7 @@ class YOTM_Regenerate_Transaction_Test extends WP_UnitTestCase {
 		}
 		delete_option( YOTM_MEDIA_REFERENCE_STATE_OPTION );
 		delete_option( YOTM_MEDIA_SOURCE_DIRTY_OPTION );
+		delete_option( 'yotm_disabled_sizes' );
 		wp_set_current_user( 0 );
 		parent::tearDown();
 	}
@@ -155,13 +162,88 @@ class YOTM_Regenerate_Transaction_Test extends WP_UnitTestCase {
 		$thumbnail = trailingslashit( dirname( $full ) ) . $metadata['sizes']['thumbnail']['file'];
 		$this->assertFileExists( $thumbnail );
 		$full_hash = hash_file( 'sha256', $full );
+		remove_filter( 'intermediate_image_sizes_advanced', array( $this, 'only_thumbnail' ), PHP_INT_MAX );
+		add_image_size( 'yotm_missing_enabled', 120, 120, true );
+		yotm_update_disabled_sizes_option( array( 'medium' ) );
 
 		$result = yotm_regenerate_attachment( $this->attachment_id, true, false );
 
 		$this->assertSame( 'regenerated', $result['status'], $result['message'] );
 		$this->assertSame( $full_hash, hash_file( 'sha256', $full ) );
 		$this->assertFileExists( $thumbnail );
-		$this->assertGreaterThan( count( $metadata['sizes'] ), count( wp_get_attachment_metadata( $this->attachment_id )['sizes'] ) );
+		$updated = wp_get_attachment_metadata( $this->attachment_id );
+		$this->assertGreaterThan( count( $metadata['sizes'] ), count( $updated['sizes'] ) );
+		$this->assertArrayNotHasKey( 'medium', $updated['sizes'] );
+		$this->assertArrayHasKey( 'yotm_missing_enabled', $updated['sizes'] );
+	}
+
+	/**
+	 * @dataProvider converted_output_formats
+	 */
+	public function test_force_format_conversion_replaces_only_exact_old_generated_file( $target_mime, $extension ) {
+		$this->require_decodable_output_format( $target_mime, $extension );
+
+		add_filter( 'intermediate_image_sizes_advanced', array( $this, 'only_thumbnail' ), PHP_INT_MAX );
+		$full                = $this->test_dir . '/format-source.jpg';
+		$this->attachment_id = $this->create_image_attachment( $full );
+		$metadata            = wp_generate_attachment_metadata( $this->attachment_id, $full );
+		$this->assertIsArray( $metadata );
+		$this->assertArrayHasKey( 'thumbnail', $metadata['sizes'] );
+		wp_update_attachment_metadata( $this->attachment_id, $metadata );
+		$this->assertSame( $metadata, get_metadata_raw( 'post', $this->attachment_id, '_wp_attachment_metadata', true ) );
+		$this->assertTrue( yotm_media_source_sync_attachment( $this->attachment_id, null, true ) );
+		$old_thumbnail = trailingslashit( dirname( $full ) ) . $metadata['sizes']['thumbnail']['file'];
+		$this->assertFileExists( $old_thumbnail );
+		$sidecar   = $old_thumbnail . '.webp';
+		$disk_only = trailingslashit( dirname( $full ) ) . 'format-source-77x77.jpg';
+		$unrelated = trailingslashit( dirname( $full ) ) . 'unrelated-file.txt';
+		file_put_contents( $sidecar, 'preserve-sidecar' );
+		file_put_contents( $disk_only, 'preserve-disk-only' );
+		file_put_contents( $unrelated, 'preserve-unrelated' );
+
+		$job = yotm_job_create(
+			'regenerate',
+			array(
+				'force_all'      => 1,
+				'only_missing'   => 0,
+				'discovery_done' => 1,
+			),
+			array(
+				'status'       => 'running',
+				'phase'        => 'regenerate',
+				'counter_mode' => 'item_v2',
+			)
+		);
+		$this->assertIsArray( $job );
+		$this->assertTrue( yotm_job_add_item( $job['id'], 'format:' . $this->attachment_id, array( 'attachment_id' => $this->attachment_id ) ) );
+		$worker = yotm_job_acquire_worker( $job['id'], array( 'running' ), array( 'regenerate' ) );
+		$this->assertIsArray( $worker );
+		$item                     = yotm_job_claim_items( $worker, 1 )[0];
+		$this->target_output_mime = $target_mime;
+		add_filter( 'image_editor_output_format', array( $this, 'convert_jpeg_output' ), 10 );
+
+		$result = yotm_regenerate_force_attachment( $this->attachment_id, $item, $worker );
+
+		remove_filter( 'image_editor_output_format', array( $this, 'convert_jpeg_output' ), 10 );
+		$this->assertSame( 'regenerated', $result['status'], $result['message'] );
+		$stored = get_metadata_raw( 'post', $this->attachment_id, '_wp_attachment_metadata', true );
+		$this->assertSame( $target_mime, $stored['sizes']['thumbnail']['mime-type'] );
+		$this->assertStringEndsWith( '.' . $extension, $stored['sizes']['thumbnail']['file'] );
+		$new_thumbnail = trailingslashit( dirname( $full ) ) . $stored['sizes']['thumbnail']['file'];
+		$this->assertFileExists( $new_thumbnail );
+		$this->assertFileDoesNotExist( $old_thumbnail );
+		$this->assertFileExists( $full );
+		$this->assertFileExists( $sidecar );
+		$this->assertFileExists( $disk_only );
+		$this->assertFileExists( $unrelated );
+		yotm_job_release_worker( $worker );
+	}
+
+	public function converted_output_formats() {
+		return array(
+			'WebP' => array( 'image/webp', 'webp' ),
+			'AVIF' => array( 'image/avif', 'avif' ),
+		);
 	}
 
 	public function test_interrupted_promotion_recovery_rolls_back_exact_artifact_and_clears_journal() {
@@ -351,6 +433,30 @@ class YOTM_Regenerate_Transaction_Test extends WP_UnitTestCase {
 
 	public function only_thumbnail( $sizes ) {
 		return isset( $sizes['thumbnail'] ) ? array( 'thumbnail' => $sizes['thumbnail'] ) : array();
+	}
+
+	public function convert_jpeg_output( $formats ) {
+		$formats['image/jpeg'] = $this->target_output_mime;
+		return $formats;
+	}
+
+	private function require_decodable_output_format( $target_mime, $extension ) {
+		if ( ! wp_image_editor_supports( array( 'mime_type' => $target_mime ) ) ) {
+			$this->markTestSkipped( 'The active WordPress image editor does not report encoding support for ' . $target_mime . '.' );
+		}
+		$editor = wp_get_image_editor( DIR_TESTDATA . '/images/2004-07-22-DSC_0007.jpg' );
+		if ( is_wp_error( $editor ) ) {
+			$this->markTestSkipped( 'The active WordPress image editor could not open the JPEG conversion fixture for ' . $target_mime . '.' );
+		}
+		$probe_path = trailingslashit( $this->test_dir ) . 'format-probe.' . $extension;
+		$probe      = $editor->save( $probe_path, $target_mime );
+		$decoded    = ! is_wp_error( $probe ) && is_file( $probe_path ) ? @getimagesize( $probe_path ) : false;
+		if ( is_file( $probe_path ) ) {
+			wp_delete_file( $probe_path );
+		}
+		if ( is_wp_error( $probe ) || ! is_array( $decoded ) || sanitize_mime_type( $decoded['mime'] ?? '' ) !== $target_mime ) {
+			$this->markTestSkipped( 'The active WordPress image editor cannot produce a decodable ' . $target_mime . ' fixture.' );
+		}
 	}
 
 	public function count_update_filter( $metadata ) {

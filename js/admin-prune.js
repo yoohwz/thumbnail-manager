@@ -33,6 +33,8 @@
   let manifestPage = 1;
   let manifestPages = 1;
   let manifestTimer = null;
+  let manifestLoaded = false;
+  let manifestRequestGeneration = 0;
 	let pruneControlsLocked = false;
 
   const $pruneProg = $('#yotm_progress');
@@ -60,7 +62,7 @@
 
   function lockPruneControls(locked) {
 	pruneControlsLocked = !!locked;
-    $('.yotm_keep, #yotm_discover_orphans, input[name="yotm_prune_scope"], #yotm_subpath_search, #yotm_subpath_select_visible, #yotm_subpath_clear').prop('disabled', pruneControlsLocked);
+    $('.yotm_keep, #yotm_discover_orphans, #yotm_discover_historical, input[name="yotm_prune_scope"], #yotm_subpath_search, #yotm_subpath_select_visible, #yotm_subpath_clear').prop('disabled', pruneControlsLocked);
 	refreshSubpathHierarchy();
   }
 
@@ -75,6 +77,10 @@
   function clearPruneJob(options) {
     const opts = options || {};
     pruneRunning = false;
+    manifestRequestGeneration += 1;
+    manifestLoaded = false;
+    $('#yotm_review_confirm').prop('checked', false).prop('disabled', true);
+    $pruneApprove.prop('disabled', true);
     if (!opts.preserveJob) {
       pruneToken = '';
       pruneManifest = '';
@@ -205,29 +211,39 @@
 		updateSubpathSelection();
 	});
 
-  function renderOrphanSummary(summary) {
+  function renderOrphanSummary(summary, classCounts) {
     if (!summary) {
       return '';
     }
     const found = summary.found ? Object.keys(summary.found).length : 0;
     const marked = Array.isArray(summary.delete) ? summary.delete.length : 0;
-    if (!found && !marked && !summary.unmapped && !summary.skipped_original && !summary.protected_sources && !summary.source_errors && !summary.unverified_sidecars && !summary.ambiguous_siblings) {
+    classCounts = classCounts || {};
+    const historicalPreserved = (summary.historical_below_threshold || 0) + (summary.historical_shape_preserved || 0) + (summary.historical_ambiguous || 0);
+    if (!found && !marked && !summary.unmapped && !summary.skipped_original && !summary.protected_sources && !summary.source_errors && !summary.unverified_sidecars && !summary.ambiguous_siblings && !summary.malformed_preserved && !summary.kept_dimension_preserved && !historicalPreserved && !classCounts.metadata_backed && !classCounts.verified_legacy && !classCounts.verified_historical_legacy) {
       return '';
     }
-    return '<div class="notice notice-info inline"><p><strong>' + escapeHtml(t('orphanDiscovery', 'Orphan discovery:')) + '</strong> ' + found + ' ' + escapeHtml(t('distinctDimsFound', 'distinct dimensions found.')) + '<br><strong>' + escapeHtml(t('metadataOrphanDimsDelete', 'Metadata orphan dimensions marked for deletion:')) + '</strong> ' + marked + '<br><strong>' + escapeHtml(t('originalFilesProtected', 'Original files protected:')) + '</strong> ' + escapeHtml(summary.skipped_original || 0) + '<br><strong>' + escapeHtml(t('protectedSources', 'Authoritative source paths protected:')) + '</strong> ' + escapeHtml(summary.protected_sources || 0) + '<br><strong>' + escapeHtml(t('sourceErrors', 'Indeterminate source checks preserved:')) + '</strong> ' + escapeHtml(summary.source_errors || 0) + '<br><strong>' + escapeHtml(t('unverifiedSidecars', 'Unverified format sidecars preserved:')) + '</strong> ' + escapeHtml(summary.unverified_sidecars || 0) + '<br><strong>' + escapeHtml(t('ambiguousSiblings', 'Ambiguous sibling files preserved:')) + '</strong> ' + escapeHtml(summary.ambiguous_siblings || 0) + '<br><strong>' + escapeHtml(t('unmappedDiskSkipped', 'Unmapped disk candidates skipped:')) + '</strong> ' + escapeHtml(Math.max(summary.unmapped || 0, summary.unmapped_skipped || 0)) + '</p></div>';
+    return '<div class="notice notice-info inline"><p><strong>' + escapeHtml(t('orphanDiscovery', 'Orphan discovery:')) + '</strong> ' + found + ' ' + escapeHtml(t('distinctDimsFound', 'distinct dimensions found.')) + '<br><strong>' + escapeHtml(t('metadataBackedCandidates', 'Metadata-backed candidates:')) + '</strong> ' + escapeHtml(classCounts.metadata_backed || 0) + '<br><strong>' + escapeHtml(t('verifiedCurrentLegacyCandidates', 'Verified legacy — currently disabled size:')) + '</strong> ' + escapeHtml(classCounts.verified_legacy_current || 0) + '<br><strong>' + escapeHtml(t('verifiedHistoricalCandidates', 'Verified historical legacy — size no longer registered:')) + '</strong> ' + escapeHtml(classCounts.verified_historical_legacy || 0) + '<br><strong>' + escapeHtml(t('historicalPreserved', 'Ambiguous/unverified historical-looking files preserved:')) + '</strong> ' + escapeHtml(historicalPreserved) + '<br><strong>' + escapeHtml(t('metadataOrphanDimsDelete', 'Metadata orphan dimensions marked for deletion:')) + '</strong> ' + marked + '<br><strong>' + escapeHtml(t('originalFilesProtected', 'Original files protected:')) + '</strong> ' + escapeHtml(summary.skipped_original || 0) + '<br><strong>' + escapeHtml(t('protectedSources', 'Authoritative source paths protected:')) + '</strong> ' + escapeHtml(summary.protected_sources || 0) + '<br><strong>' + escapeHtml(t('sourceErrors', 'Indeterminate source checks preserved:')) + '</strong> ' + escapeHtml(summary.source_errors || 0) + '<br><strong>' + escapeHtml(t('unverifiedSidecars', 'Unverified format sidecars preserved:')) + '</strong> ' + escapeHtml(summary.unverified_sidecars || 0) + '<br><strong>' + escapeHtml(t('ambiguousSiblings', 'Ambiguous sibling files preserved:')) + '</strong> ' + escapeHtml(summary.ambiguous_siblings || 0) + '<br><strong>' + escapeHtml(t('malformedPreserved', 'Malformed or mismatched files preserved:')) + '</strong> ' + escapeHtml(summary.malformed_preserved || 0) + '<br><strong>' + escapeHtml(t('keptDimensionPreserved', 'Files matching a kept size preserved:')) + '</strong> ' + escapeHtml(summary.kept_dimension_preserved || 0) + '<br><strong>' + escapeHtml(t('unmappedDiskSkipped', 'Unmapped disk candidates skipped:')) + '</strong> ' + escapeHtml(Math.max(summary.unmapped || 0, summary.unmapped_skipped || 0)) + '</p></div>';
   }
 
   function loadManifest(page) {
     if (!pruneToken) {
       return;
     }
+    const requestToken = pruneToken;
+    const requestGeneration = ++manifestRequestGeneration;
+    manifestLoaded = false;
+    $('#yotm_review_confirm').prop('checked', false).prop('disabled', true);
+    $pruneApprove.prop('disabled', true);
     $('#yotm_manifest_body').html('<tr><td colspan="4">' + escapeHtml(t('manifestLoading', 'Loading manifest…')) + '</td></tr>');
     request('yotm_job_items', {
-      token: pruneToken,
+      token: requestToken,
       page: page || 1,
       per_page: 25,
       search: $('#yotm_manifest_search').val() || ''
     }).done(function(response){
+      if (requestGeneration !== manifestRequestGeneration || requestToken !== pruneToken) {
+        return;
+      }
       if (!response || !response.success || !response.data) {
         $('#yotm_manifest_body').html('<tr><td colspan="4">' + escapeHtml(t('manifestLoadFailed', 'Could not load the manifest.')) + '</td></tr>');
         return;
@@ -243,7 +259,13 @@
           const proof = Array.isArray(item.ownership_evidence) && item.ownership_evidence.length ? item.ownership_evidence[0] : {};
           const attachmentId = proof.attachment_id || item.attachment_id;
           const attachment = attachmentId ? '#' + attachmentId : '—';
-          const evidence = attachmentId ? [t('attachmentMetadata', 'Attachment metadata'), '#' + attachmentId, proof.size || item.size, proof.filename].filter(Boolean).join(' / ') : '—';
+          const legacy = item.ownership_schema === 'legacy_generated_v1';
+          const historical = item.ownership_schema === 'historical_legacy_generated_v1';
+          const evidence = historical
+            ? [t('verifiedHistoricalEvidence', 'Verified historical legacy / no longer registered'), item.observed_width && item.observed_height ? item.observed_width + '×' + item.observed_height : '', item.observed_mime, item.size].filter(Boolean).join(' / ')
+            : legacy
+            ? [t('verifiedLegacyEvidence', 'Verified legacy disk-only evidence'), item.observed_width && item.observed_height ? item.observed_width + '×' + item.observed_height : '', item.observed_mime, Array.isArray(item.matched_remove_sizes) ? item.matched_remove_sizes.join(', ') : ''].filter(Boolean).join(' / ')
+            : (attachmentId ? [t('attachmentMetadata', 'Attachment metadata'), '#' + attachmentId, proof.size || item.size, proof.filename].filter(Boolean).join(' / ') : '—');
           $body.append('<tr><td><code>' + escapeHtml(item.path || t('unknownPath', 'Unknown item')) + '</code></td><td>' + escapeHtml(attachment) + '</td><td>' + escapeHtml(evidence) + '</td><td>' + escapeHtml(formatBytes(item.estimated_bytes || item.bytes)) + '</td></tr>');
         });
       }
@@ -251,7 +273,12 @@
       $('#yotm_manifest_page').text(formatTemplate(t('pageOf', 'Page %1$s of %2$s'), {'%1$s': manifestPage, '%2$s': manifestPages}));
       $('#yotm_manifest_prev').prop('disabled', manifestPage <= 1);
       $('#yotm_manifest_next').prop('disabled', manifestPage >= manifestPages);
+      manifestLoaded = true;
+      $('#yotm_review_confirm').prop('disabled', false);
     }).fail(function(){
+      if (requestGeneration !== manifestRequestGeneration || requestToken !== pruneToken) {
+        return;
+      }
       $('#yotm_manifest_body').html('<tr><td colspan="4">' + escapeHtml(t('manifestLoadFailed', 'Could not load the manifest.')) + '</td></tr>');
     });
   }
@@ -265,8 +292,9 @@
     $('#yotm_review_scope').text(data.scan_base || (data.context && data.context.scan_base_label) || 'uploads/');
     $('#yotm_review_expiry').text(formatDate(data.expires_at));
     $('#yotm_review_hash').text(pruneManifest);
-    $('#yotm_review_orphans').html(renderOrphanSummary(data.orphan_summary || (data.context && data.context.orphan_summary)));
-    $('#yotm_review_confirm').prop('checked', false).prop('disabled', false);
+    $('#yotm_review_orphans').html(renderOrphanSummary(data.orphan_summary || (data.context && data.context.orphan_summary), data.manifest_class_counts || (data.context && data.context.manifest_class_counts)));
+    manifestLoaded = false;
+    $('#yotm_review_confirm').prop('checked', false).prop('disabled', true);
     $pruneApprove.text(String(t('deleteReviewedCount', 'Delete %s reviewed files')).replace('%s', pruneTotal.toLocaleString())).prop('disabled', true).removeClass('yo-hidden');
     $('#yotm_manifest_search').val('').prop('disabled', false);
     $('#yotm_manifest_prev, #yotm_manifest_next').prop('disabled', false);
@@ -282,7 +310,7 @@
     window.clearTimeout(manifestTimer);
     manifestTimer = window.setTimeout(function(){ loadManifest(1); }, 250);
   });
-  $('#yotm_review_confirm').on('change', function(){ $pruneApprove.prop('disabled', !this.checked); });
+  $('#yotm_review_confirm').on('change', function(){ $pruneApprove.prop('disabled', !manifestLoaded || !this.checked); });
 
   function preparePrune() {
     if (pruneRunning || pruneToken) {
@@ -304,7 +332,8 @@
     request('yotm_prune_prepare', {
       keep: gatherKeep(),
 	  limit_subpaths: limitSubpaths,
-      discover_orphans: $('#yotm_discover_orphans').is(':checked') ? 1 : 0
+      discover_orphans: $('#yotm_discover_orphans').is(':checked') ? 1 : 0,
+      discover_historical: $('#yotm_discover_historical').is(':checked') ? 1 : 0
     }).done(function(response){
       if (!response || !response.success || !response.data) {
         const resumeToken = response && response.data ? response.data.resume_token : '';
@@ -394,7 +423,7 @@
   }
 
   function approvePruneManifest() {
-    if (!pruneToken || !pruneManifest || !$('#yotm_review_confirm').is(':checked')) {
+    if (!pruneToken || !pruneManifest || !manifestLoaded || !$('#yotm_review_confirm').is(':checked')) {
       return;
     }
     $pruneApprove.prop('disabled', true);
@@ -404,8 +433,9 @@
     }).done(function(response){
       if (!response || !response.success) {
         $pruneResults.prepend(htmlNotice('notice-error', t('approvalFailed', 'Delete approval failed:') + ' ' + responseError(response, t('unknownError', 'Unknown error'))));
-        $('#yotm_review_confirm, #yotm_manifest_search, #yotm_manifest_prev, #yotm_manifest_next').prop('disabled', false);
-        $pruneApprove.prop('disabled', false);
+        $('#yotm_review_confirm').prop('disabled', !manifestLoaded);
+        $('#yotm_manifest_search, #yotm_manifest_prev, #yotm_manifest_next').prop('disabled', false);
+        $pruneApprove.prop('disabled', !manifestLoaded || !$('#yotm_review_confirm').is(':checked'));
         return;
       }
       pruneRunning = true;
@@ -415,8 +445,9 @@
       loadRecentJobs();
     }).fail(function(){
       $pruneResults.prepend(htmlNotice('notice-error', t('networkApproval', 'Network error while approving the manifest.')));
-      $('#yotm_review_confirm, #yotm_manifest_search, #yotm_manifest_prev, #yotm_manifest_next').prop('disabled', false);
-      $pruneApprove.prop('disabled', false);
+      $('#yotm_review_confirm').prop('disabled', !manifestLoaded);
+      $('#yotm_manifest_search, #yotm_manifest_prev, #yotm_manifest_next').prop('disabled', false);
+      $pruneApprove.prop('disabled', !manifestLoaded || !$('#yotm_review_confirm').is(':checked'));
     });
   }
 

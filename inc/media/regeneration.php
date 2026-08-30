@@ -155,15 +155,17 @@ function yotm_regenerate_preflight( $attachment_id ) {
 	}
 
 	return array(
-		'attachment_id' => $attachment_id,
-		'attached_raw'  => $attached_values[0],
-		'metadata'      => $metadata,
-		'backups'       => array_values( $backup_values ),
-		'full'          => $full,
-		'source'        => $source,
-		'protected'     => $protected,
-		'metadata_hash' => yotm_regenerate_metadata_hash( $metadata ),
-		'source_hash'   => $source_hash,
+		'attachment_id'    => $attachment_id,
+		'attached_meta_id' => absint( $attached_rows[0]['meta_id'] ?? 0 ),
+		'metadata_meta_id' => absint( $metadata_rows[0]['meta_id'] ?? 0 ),
+		'attached_raw'     => $attached_values[0],
+		'metadata'         => $metadata,
+		'backups'          => array_values( $backup_values ),
+		'full'             => $full,
+		'source'           => $source,
+		'protected'        => $protected,
+		'metadata_hash'    => yotm_regenerate_metadata_hash( $metadata ),
+		'source_hash'      => $source_hash,
 	);
 }
 
@@ -230,6 +232,7 @@ function yotm_regenerate_stage_outputs( $snapshot ) {
 	$sizes = wp_get_registered_image_subsizes();
 	// phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Core-compatible generation surface.
 	$sizes = apply_filters( 'intermediate_image_sizes_advanced', $sizes, $snapshot['metadata'], $snapshot['attachment_id'] );
+	$sizes = yotm_apply_enabled_size_policy( $sizes );
 	if ( ! is_array( $sizes ) ) {
 		yotm_regenerate_remove_stage( $stage, $parent );
 		return new WP_Error( 'yotm_regenerate_sizes_invalid', __( 'The filtered image-size definition is invalid.', 'thumbnail-manager' ) );
@@ -669,7 +672,7 @@ function yotm_regenerate_attachment( $attachment_id, $only_missing, $force_all )
 	}
 
 	if ( $only_missing && ! $force_all && function_exists( 'wp_get_missing_image_subsizes' ) && function_exists( 'wp_update_image_subsizes' ) ) {
-		$missing = wp_get_missing_image_subsizes( $attachment_id );
+		$missing = yotm_apply_enabled_size_policy( wp_get_missing_image_subsizes( $attachment_id ) );
 
 		if ( empty( $missing ) ) {
 			return array(

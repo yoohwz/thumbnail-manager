@@ -157,3 +157,59 @@ function yotm_media_source_store_path_rows( $path_hash, $limit ) {
 
 	return $rows;
 }
+
+/**
+ * Return indexed rows for a bounded set of exact path hashes.
+ *
+ * This deliberately remains an exact-hash lookup. It must not become a path
+ * prefix or directory scan because the source table is an authority index, not
+ * a generic media-family catalogue.
+ *
+ * @param string[] $path_hashes Exact SHA-256 path hashes.
+ * @param int      $per_hash_limit Maximum rows accepted for one hash.
+ * @return array<string,object[]>|WP_Error Rows grouped by path hash.
+ */
+function yotm_media_source_store_paths_rows( $path_hashes, $per_hash_limit = 100 ) {
+	global $wpdb;
+
+	$hashes = array();
+	foreach ( (array) $path_hashes as $path_hash ) {
+		$path_hash = strtolower( (string) $path_hash );
+		if ( preg_match( '/^[a-f0-9]{64}$/', $path_hash ) ) {
+			$hashes[ $path_hash ] = $path_hash;
+		}
+	}
+	$hashes = array_values( $hashes );
+	if ( count( $hashes ) > 4000 ) {
+		return new WP_Error( 'yotm_media_source_bulk_limit', __( 'Too many exact media-source paths were requested in one batch.', 'thumbnail-manager' ) );
+	}
+	if ( empty( $hashes ) ) {
+		return array();
+	}
+
+	$table          = yotm_media_source_table_name();
+	$per_hash_limit = max( 1, absint( $per_hash_limit ) );
+	$grouped        = array();
+	foreach ( array_chunk( $hashes, 200 ) as $chunk ) {
+		$placeholders = implode( ',', array_fill( 0, count( $chunk ), '%s' ) );
+		$row_limit    = count( $chunk ) * $per_hash_limit + 1;
+		$args         = array_merge( $chunk, array( $row_limit ) );
+		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Exact bounded hashes use placeholders; table is plugin-owned.
+		$rows = $wpdb->get_results( $wpdb->prepare( "SELECT attachment_id,source_kind,path_hash,path FROM {$table} WHERE path_hash IN ({$placeholders}) ORDER BY path_hash ASC,attachment_id ASC,source_kind ASC LIMIT %d", $args ) );
+		if ( '' !== (string) $wpdb->last_error ) {
+			return yotm_media_source_storage_error( (string) $wpdb->last_error );
+		}
+		foreach ( $rows as $row ) {
+			$hash = strtolower( (string) $row->path_hash );
+			if ( ! isset( $grouped[ $hash ] ) ) {
+				$grouped[ $hash ] = array();
+			}
+			$grouped[ $hash ][] = $row;
+			if ( count( $grouped[ $hash ] ) > $per_hash_limit ) {
+				return new WP_Error( 'yotm_media_source_fanout', __( 'Too many authoritative media aliases matched one exact path.', 'thumbnail-manager' ) );
+			}
+		}
+	}
+
+	return $grouped;
+}

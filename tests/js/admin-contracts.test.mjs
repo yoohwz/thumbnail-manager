@@ -215,7 +215,8 @@ function createHarness(options = {}) {
     setTimeout(callback, delay) {
       timers.push({callback, delay});
       return timers.length;
-    }
+    },
+    clearTimeout() {}
   };
 
   const context = vm.createContext({
@@ -488,7 +489,8 @@ test('Prune module preserves prepare, manifest review, approval, and delete payl
     nonce: 'nonce-123',
     keep: ['150x150'],
     limit_subpaths: [],
-    discover_orphans: 0
+    discover_orphans: 0,
+    discover_historical: 0
   });
   prepare.deferred.resolve({success: true, data: {token: 'prune-module-token'}});
 
@@ -521,6 +523,36 @@ test('Prune module preserves prepare, manifest review, approval, and delete payl
 
   invokeHandler(harness, '#yotm_approve_delete');
   assert.equal(actionCalls(harness, 'yotm_prune_approve').length, 0, 'approval requires explicit confirmation');
+  harness.$('#yotm_review_confirm').elements[0].checked = true;
+  invokeHandler(harness, '#yotm_approve_delete');
+  assert.equal(actionCalls(harness, 'yotm_prune_approve').length, 0, 'approval remains blocked until the manifest page loads');
+
+  harness.$('#yotm_manifest_search').val('newest');
+  invokeHandler(harness, '#yotm_manifest_search', 'input');
+  harness.timers.at(-1).callback();
+  const manifestCalls = actionCalls(harness, 'yotm_job_items');
+  assert.equal(manifestCalls.length, 2);
+  manifestCalls[1].deferred.reject({status: 503});
+  manifestCalls[0].deferred.resolve({success: true, data: {
+    items: [{path: '/uploads/stale.jpg', attachment_id: 1, ownership_evidence: [], estimated_bytes: 1024}],
+    total: 1,
+    pages: 1,
+    page: 1
+  }});
+  harness.$('#yotm_review_confirm').elements[0].checked = true;
+  invokeHandler(harness, '#yotm_approve_delete');
+  assert.equal(actionCalls(harness, 'yotm_prune_approve').length, 0, 'a stale manifest success cannot unlock approval after the newest request fails');
+  assert.match(harness.cache.get('#yotm_manifest_body').html(), /Could not load the manifest/);
+
+  harness.$('#yotm_manifest_search').val('final');
+  invokeHandler(harness, '#yotm_manifest_search', 'input');
+  harness.timers.at(-1).callback();
+  actionCalls(harness, 'yotm_job_items').at(-1).deferred.resolve({success: true, data: {
+    items: [{path: '/uploads/reviewed.jpg', attachment_id: 1, ownership_evidence: [], estimated_bytes: 1024}],
+    total: 1,
+    pages: 1,
+    page: 1
+  }});
   harness.$('#yotm_review_confirm').elements[0].checked = true;
   invokeHandler(harness, '#yotm_approve_delete');
   const approve = actionCalls(harness, 'yotm_prune_approve')[0];
@@ -830,6 +862,25 @@ test('sizes module registers moved handlers against the shared core', () => {
   ]) {
     assert.ok(selectors.includes(selector), 'missing moved Size handler: ' + selector);
   }
+});
+
+test('disabled-size cleanup enables reviewed legacy discovery without approving or deleting', () => {
+  const harness = createHarness();
+  loadAdmin(harness);
+  harness.$('input[name="yotm_enable_sizes[]"]:checked').elements.splice(0, 1, {value: 'thumbnail'});
+  harness.$('.yotm_keep').elements.splice(0, 1, {value: 'thumbnail'}, {value: 'medium'});
+  vm.runInContext(sizesSource, harness.context, {filename: 'js/admin-sizes.js'});
+
+  invokeHandler(harness, '#yotm_sizes_prune_disabled');
+  invokeHandler(harness, '#yotm_run');
+
+  assert.equal(harness.$('#yotm_discover_orphans').elements[0].checked, true);
+  assert.equal(harness.$('#yotm_discover_historical').elements[0].checked, false);
+  assert.equal(actionCalls(harness, 'yotm_prune_prepare')[0].payload.discover_orphans, 1);
+  assert.equal(actionCalls(harness, 'yotm_prune_prepare')[0].payload.discover_historical, 0);
+  assert.equal(actionCalls(harness, 'yotm_prune_approve').length, 0);
+  assert.equal(actionCalls(harness, 'yotm_prune_delete_batch').length, 0);
+  assert.match(sizesSource, /#yotm_run[^\n]+trigger\('click'\)/);
 });
 
 test('all localized keys consumed by bundled admin modules are discovered in PHP', () => {

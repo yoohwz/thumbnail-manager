@@ -27,7 +27,12 @@ function yotm_prune_prepare() {
 	if ( empty( $limit_subpaths ) && isset( $_POST['limit_subpath'] ) ) {
 		$limit_subpaths = array( sanitize_text_field( wp_unslash( $_POST['limit_subpath'] ) ) );
 	}
-	$result = yotm_prune_prepare_application( $keep, $limit_subpaths, ! empty( $_POST['discover_orphans'] ) );
+	$result = yotm_prune_prepare_application(
+		$keep,
+		$limit_subpaths,
+		! empty( $_POST['discover_orphans'] ),
+		! empty( $_POST['discover_historical'] )
+	);
 	if ( empty( $result['success'] ) ) {
 		wp_send_json_error( $result['data'], $result['status'] );
 	}

@@ -32,7 +32,7 @@ function yotm_job_merge_item_payload( $job_id, $item_key, $payload ) {
  * @param int    $page Current page.
  * @param int    $per_page Items per page.
  * @param string $search Optional path/size search.
- * @return array{items:array,total:int,pages:int,page:int}
+ * @return array{items:array,total:int,pages:int,page:int}|WP_Error
  */
 function yotm_job_get_items_page( $job_id, $page = 1, $per_page = 25, $search = '' ) {
 	return yotm_prune_get_items_page( $job_id, $page, $per_page, $search );
@@ -65,7 +65,7 @@ function yotm_job_get_error_sample( $job_id, $limit = 20 ) {
  * @param array      $job Job row.
  * @param int        $limit Hash batch size.
  * @param array|null $worker Optional worker ownership data.
- * @return array{done:bool,job:array}
+ * @return array{done:bool,job:array}|WP_Error
  */
 function yotm_job_build_manifest_batch( $job, $limit = 1000, $worker = null ) {
 	return yotm_prune_build_manifest_batch( $job, $limit, $worker );
@@ -109,6 +109,7 @@ function yotm_job_public_data( $job ) {
 		'scan_base_labels',
 		'scan_subpaths',
 		'orphan_summary',
+		'manifest_class_counts',
 		'result',
 		'scan_phase',
 		'estimated_bytes',
