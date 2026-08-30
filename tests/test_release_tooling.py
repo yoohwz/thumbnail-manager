@@ -128,6 +128,22 @@ class ReleasePackageTests(unittest.TestCase):
                 )
                 self.assertIn(f"{field} must exactly equal active release version 1.5.1", result.stderr)
 
+    def test_pot_tracks_current_legacy_cleanup_copy(self) -> None:
+        source = (ROOT / "inc/admin/view.php").read_text(encoding="utf-8")
+        pot = (ROOT / "languages/thumbnail-manager.pot").read_text(encoding="utf-8")
+        current_messages = (
+            "Include verified legacy thumbnails for currently disabled sizes (disk-only)",
+            "Also include verified historical thumbnails from sizes no longer registered",
+        )
+        retired_message = "Also include orphan sizes found in attachment metadata and report unmapped disk matches"
+
+        for message in current_messages:
+            with self.subTest(message=message):
+                self.assertIn(message, source)
+                self.assertIn(f'msgid "{message}"', pot)
+        self.assertNotIn(retired_message, source)
+        self.assertNotIn(f'msgid "{retired_message}"', pot)
+
     def test_package_tampering_fails_closed(self) -> None:
         package, manifest = self.build(self.temp / "tamper")
         with package.open("ab") as handle:
