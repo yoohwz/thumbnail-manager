@@ -34,6 +34,7 @@
   let manifestPages = 1;
   let manifestTimer = null;
   let manifestLoaded = false;
+  let manifestRequestGeneration = 0;
 	let pruneControlsLocked = false;
 
   const $pruneProg = $('#yotm_progress');
@@ -76,6 +77,10 @@
   function clearPruneJob(options) {
     const opts = options || {};
     pruneRunning = false;
+    manifestRequestGeneration += 1;
+    manifestLoaded = false;
+    $('#yotm_review_confirm').prop('checked', false).prop('disabled', true);
+    $pruneApprove.prop('disabled', true);
     if (!opts.preserveJob) {
       pruneToken = '';
       pruneManifest = '';
@@ -224,16 +229,21 @@
     if (!pruneToken) {
       return;
     }
+    const requestToken = pruneToken;
+    const requestGeneration = ++manifestRequestGeneration;
     manifestLoaded = false;
     $('#yotm_review_confirm').prop('checked', false).prop('disabled', true);
     $pruneApprove.prop('disabled', true);
     $('#yotm_manifest_body').html('<tr><td colspan="4">' + escapeHtml(t('manifestLoading', 'Loading manifest…')) + '</td></tr>');
     request('yotm_job_items', {
-      token: pruneToken,
+      token: requestToken,
       page: page || 1,
       per_page: 25,
       search: $('#yotm_manifest_search').val() || ''
     }).done(function(response){
+      if (requestGeneration !== manifestRequestGeneration || requestToken !== pruneToken) {
+        return;
+      }
       if (!response || !response.success || !response.data) {
         $('#yotm_manifest_body').html('<tr><td colspan="4">' + escapeHtml(t('manifestLoadFailed', 'Could not load the manifest.')) + '</td></tr>');
         return;
@@ -266,6 +276,9 @@
       manifestLoaded = true;
       $('#yotm_review_confirm').prop('disabled', false);
     }).fail(function(){
+      if (requestGeneration !== manifestRequestGeneration || requestToken !== pruneToken) {
+        return;
+      }
       $('#yotm_manifest_body').html('<tr><td colspan="4">' + escapeHtml(t('manifestLoadFailed', 'Could not load the manifest.')) + '</td></tr>');
     });
   }

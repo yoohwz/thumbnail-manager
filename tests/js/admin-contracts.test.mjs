@@ -215,7 +215,8 @@ function createHarness(options = {}) {
     setTimeout(callback, delay) {
       timers.push({callback, delay});
       return timers.length;
-    }
+    },
+    clearTimeout() {}
   };
 
   const context = vm.createContext({
@@ -525,7 +526,28 @@ test('Prune module preserves prepare, manifest review, approval, and delete payl
   harness.$('#yotm_review_confirm').elements[0].checked = true;
   invokeHandler(harness, '#yotm_approve_delete');
   assert.equal(actionCalls(harness, 'yotm_prune_approve').length, 0, 'approval remains blocked until the manifest page loads');
-  actionCalls(harness, 'yotm_job_items')[0].deferred.resolve({success: true, data: {
+
+  harness.$('#yotm_manifest_search').val('newest');
+  invokeHandler(harness, '#yotm_manifest_search', 'input');
+  harness.timers.at(-1).callback();
+  const manifestCalls = actionCalls(harness, 'yotm_job_items');
+  assert.equal(manifestCalls.length, 2);
+  manifestCalls[1].deferred.reject({status: 503});
+  manifestCalls[0].deferred.resolve({success: true, data: {
+    items: [{path: '/uploads/stale.jpg', attachment_id: 1, ownership_evidence: [], estimated_bytes: 1024}],
+    total: 1,
+    pages: 1,
+    page: 1
+  }});
+  harness.$('#yotm_review_confirm').elements[0].checked = true;
+  invokeHandler(harness, '#yotm_approve_delete');
+  assert.equal(actionCalls(harness, 'yotm_prune_approve').length, 0, 'a stale manifest success cannot unlock approval after the newest request fails');
+  assert.match(harness.cache.get('#yotm_manifest_body').html(), /Could not load the manifest/);
+
+  harness.$('#yotm_manifest_search').val('final');
+  invokeHandler(harness, '#yotm_manifest_search', 'input');
+  harness.timers.at(-1).callback();
+  actionCalls(harness, 'yotm_job_items').at(-1).deferred.resolve({success: true, data: {
     items: [{path: '/uploads/reviewed.jpg', attachment_id: 1, ownership_evidence: [], estimated_bytes: 1024}],
     total: 1,
     pages: 1,
