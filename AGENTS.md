@@ -186,6 +186,15 @@ The following invariants are non-negotiable unless the Human explicitly approves
 - Concurrent implementation tasks use separate worktrees or clean checkouts. Avoid overlapping file ownership; integrate changes deliberately and validate the final head.
 - Separate plan critique from implementation verification. Re-review corrections as a delta unless the scope materially expands. Do not add serial review rounds for advisory-only findings.
 
+### Autonomous model and effort selection
+
+- Human authorizes the lead Codex to proactively spawn and assign subagents using **GPT-6.1 Sol** (`gpt-6.1-sol`) or **GPT-6 Astra** (`gpt-6-astra`), and to choose or revise each subtask's model and supported reasoning effort without asking for approval. This authority covers subagents; it does not require changing the main agent's model.
+- Choose per work item using observed complexity, ambiguity, risk, context needs, evidence quality, and progress. Prefer Sol for well-scoped discovery, implementation, and routine verification; consider Astra for difficult architecture, ambiguous cross-subsystem problems, persistent blockers, or demanding independent review. These are defaults, not mandatory model assignments by role.
+- Use low/medium effort for straightforward bounded work and high or higher supported effort when deeper reasoning is justified. Increase or decrease model/effort as evidence changes; do not default every subtask to the highest setting or create extra agents for trivial work.
+- Apply model/effort changes through the available agent controls. If an active agent cannot be reconfigured, stop or finish its bounded work and reassign the remaining work with the chosen settings. Preserve relevant findings and avoid concurrent duplicate implementation; never claim an unavailable runtime switch occurred.
+- When explicit model/effort overrides require a fresh context (such as `fork_turns="none"`), provide the objective, scope, repository/worktree, binding decisions, and expected evidence explicitly. Independent review must still meet the fresh-context, separate-checkout, and exact-head requirements above.
+- Model/effort choice does not change scope, safety invariants, validation obligations, or Human authority. Record material delegation changes only when they explain the result, a blocker, or evidence limitations; no additional approval gate or per-agent reporting ceremony is required.
+
 ## Status protocol
 
 Use only these statuses when handing work back to Human:
