@@ -144,6 +144,28 @@ for needle, label in (
     if needle not in agents:
         fail(f"AGENTS.md is missing {label}")
 
+# Historical migration records remain readable, but must not become active gates.
+active_agents = re.sub(r"^Legacy `PLAN_REVIEW_REQUIRED`[^\n]*\n", "", agents, flags=re.MULTILINE)
+for path, guidance in (
+    ("AGENTS.md", active_agents),
+    (".github/pull_request_template.md", pr_template),
+    ("docs/media-safety-contract.md", safety),
+    ("docs/releasing.md", read("docs/releasing.md")),
+):
+    if re.search(r"PLAN_REVIEW_REQUIRED|TECHNICAL_REVIEW_REQUIRED|TECHNICAL_CHANGES_REQUIRED", guidance):
+        fail(f"{path} reintroduces a retired workflow gate")
+    if re.search(r"Next:\s*ChatGPT\b", guidance, re.IGNORECASE):
+        fail(f"{path} routes required work to ChatGPT")
+
+for needle in (
+    "ChatGPT is not a required participant",
+    "Human retains product acceptance",
+    "gpt-6.1-sol",
+    "gpt-6-astra",
+):
+    if needle not in agents:
+        fail(f"AGENTS.md is missing autonomous workflow guidance: {needle}")
+
 if agents.count("Use only `Fast` and `Controlled`.") != 1:
     fail("workflow must retain exactly the Fast and Controlled risk lanes")
 
