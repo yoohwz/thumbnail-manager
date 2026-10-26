@@ -27,6 +27,8 @@ These instructions apply to the entire `thumbnail-manager` repository.
 - **Subagents** perform bounded discovery, implementation, testing, or independent review delegated by the lead Codex. They report evidence and findings to the lead; they do not replace Human authority or create another approval stage.
 - **GitHub** is the durable record for plans, commits, pull requests, CI, review evidence, and Human decisions.
 
+For this repository, these roles and workflow take precedence over generic role descriptions in global guidance. ChatGPT is not a required participant: task framing, planning, implementation, review, and acceptance evidence must not depend on a ChatGPT handoff or approval. Human retains product acceptance and all Human-owned decisions.
+
 Human can give a goal directly to Codex. Codex resolves technical choices within the authorized scope and continues through validation and PR preparation without an external agent handoff. Ask Human only for missing information that blocks safe progress or a decision reserved to Human.
 
 ## Human command shorthand and routing
@@ -246,7 +248,7 @@ A green CI run proves only the checks CI actually executes; it does not replace 
 - Keep the PR body current with goal, scope, risk lane, changes, validation, runtime evidence/limitations, and release boundary.
 - Draft pull-request heads use **Iteration CI**. It always runs repository contracts and diff hygiene, plus applicable PHP syntax/PHPCS/PHPCompatibility, JavaScript contracts, targeted tests selected by Codex, and one representative WordPress/PHP integration environment for runtime PHP changes. Plugin Check and the full support-boundary matrix may be deferred.
 - Non-draft pull-request heads, `main` pushes, and manual CI dispatches use **Final CI**. Before `READY_FOR_HUMAN_MERGE`, convert the PR to ready-for-review and wait for the exact head's applicable Final CI, including all four supported WordPress/PHP boundary jobs, Plugin Check, coding standards, JavaScript contracts, repository contracts, and aggregate `CI Gate`.
-- A correction pushed after technical review invalidates the target and must again pass applicable Final CI on the new exact head before re-handoff. Converting the PR back to draft is allowed for iteration, but no draft result is merge-ready.
+- A correction pushed after verification or a merge-ready handoff invalidates the target and must again pass applicable Final CI on the new exact head before re-handoff. Converting the PR back to draft is allowed for iteration, but no draft result is merge-ready.
 - The stable required branch-protection signal is the aggregate `CI Gate`; Iteration CI emits `Iteration Gate` instead, so cheaper draft validation cannot satisfy branch protection. Individual conditional jobs may be skipped only when the classifier marks them irrelevant.
 - CI classifiers and `CI Gate` must fail closed: a required job that fails, is cancelled, or is skipped cannot be treated as merge-ready.
 - A Final CI change to the CI control plane (`.github/workflows/ci.yml`, its classifier, or its aggregate-gate helper) must self-test the complete validation graph: quality, all supported WordPress/PHP boundary jobs, Plugin Check, JavaScript contracts, repository contracts, and `CI Gate`. Ordinary governance-only files do not trigger this self-test.
