@@ -519,7 +519,7 @@ function yotm_regenerate_rollback( $journal ) {
 		if ( empty( $entry['promoted'] ) ) {
 			continue;
 		}
-		if ( ! yotm_regenerate_file_hash_matches( $path, (string) ( $entry['promoted_hash'] ?? '' ) ) ) {
+		if ( ( 'repair' === ( $journal['mode'] ?? '' ) && ! yotm_thumbnail_health_owns_output( $entry ) ) || ! yotm_regenerate_file_hash_matches( $path, (string) ( $entry['promoted_hash'] ?? '' ) ) ) {
 			$complete = false;
 			continue;
 		}

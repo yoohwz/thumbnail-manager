@@ -166,3 +166,94 @@ function yotm_thumbnail_health_inspect( $attachment_id ) {
 	}
 	return $result;
 }
+
+/**
+ * Verify missing-only journal destinations, including no-op metadata recovery.
+ *
+ * @param array $journal Persisted transaction.
+ * @return bool|WP_Error True only when every exact output is present.
+ */
+function yotm_thumbnail_health_recovery_postcondition( $journal ) {
+	if ( empty( $journal['destinations'] ) || ! in_array( $journal['phase'] ?? '', array( 'prepared', 'files_promoted', 'metadata_committed', 'cleanup_complete' ), true ) ) {
+		return new WP_Error( 'yotm_health_journal_invalid', __( 'The repair recovery record is incomplete. Inspect the retained recovery record before retrying.', 'thumbnail-manager' ) );
+	}
+	$complete = true;
+	foreach ( $journal['destinations'] as $entry ) {
+		if ( empty( $entry['old_absent'] ) || ! in_array( $entry['mode'] ?? '', array( 'expected_absent', 'replaceable_old_generated' ), true ) || ! empty( $entry['backup'] ) ) {
+			return new WP_Error( 'yotm_health_journal_overwrite', __( 'The repair recovery record does not prove an absent destination.', 'thumbnail-manager' ) );
+		}
+		$complete = yotm_thumbnail_health_owns_output( $entry ) && yotm_regenerate_file_hash_matches( $entry['destination'], $entry['promoted_hash'] ?? '' ) && $complete;
+	}
+	return $complete;
+}
+
+/**
+ * Normalize an interrupted absent-destination intent for rollback only.
+ *
+ * @param array $journal Exact repair journal.
+ * @return array|WP_Error Validated rollback journal or ownership failure.
+ */
+function yotm_thumbnail_health_rollback_journal( $journal ) {
+	foreach ( $journal['destinations'] as $slug => &$entry ) {
+		// phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- Absence means the recorded promotion intent never ran or was already rolled back.
+		if ( false === @lstat( $entry['destination'] ) ) {
+			$entry['promoted'] = false;
+			if ( (string) $slug === (string) $journal['promotion_slug'] ) {
+				$journal['promotion_slug'] = '';
+			}
+		} elseif ( ! yotm_thumbnail_health_owns_output( $entry ) ) {
+			return new WP_Error( 'yotm_health_output_changed', __( 'A repair destination was created or replaced by another process. It was preserved; inspect the retained recovery record.', 'thumbnail-manager' ) );
+		}
+	}
+	unset( $entry );
+	return $journal;
+}
+
+/**
+ * Publish a missing output without replacing a concurrently created file.
+ *
+ * Keep the staged hard link until transaction cleanup so interrupted intent
+ * can be distinguished from an unrelated file with identical bytes.
+ *
+ * @param array $entry Journal destination, updated by reference.
+ * @return bool
+ */
+function yotm_thumbnail_health_promote_destination( &$entry ) {
+	// phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- Atomic no-clobber publication on the same filesystem; failure preserves the existing destination.
+	if ( ! yotm_thumbnail_health_file_node( $entry['source'] ) || ! @link( $entry['source'], $entry['destination'] ) ) {
+		$entry['promoted'] = false;
+		return false;
+	}
+	$entry['promoted']      = true;
+	$entry['promoted_node'] = yotm_thumbnail_health_file_node( $entry['destination'] );
+	return yotm_regenerate_file_hash_matches( $entry['destination'], $entry['promoted_hash'] );
+}
+
+/**
+ * Capture a regular file identity for exact repair rollback evidence.
+ *
+ * @param string $path File path.
+ * @return array|null Device and inode, or null when unsafe/unavailable.
+ */
+function yotm_thumbnail_health_file_node( $path ) {
+	// phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- A missing or unsafe node provides no rollback authority.
+	$node = @lstat( $path );
+	return is_array( $node ) && ! empty( $node['ino'] ) && ! is_link( $path ) && is_file( $path )
+		? array(
+			'dev' => (string) $node['dev'],
+			'ino' => (string) $node['ino'],
+		)
+		: null;
+}
+
+/**
+ * Prove a repair output belongs to the staged publication, not a later writer.
+ *
+ * @param array $entry Journal destination.
+ * @return bool
+ */
+function yotm_thumbnail_health_owns_output( $entry ) {
+	$actual   = yotm_thumbnail_health_file_node( $entry['destination'] );
+	$expected = $entry['promoted_node'] ?? yotm_thumbnail_health_file_node( $entry['source'] );
+	return is_array( $actual ) && is_array( $expected ) && $actual === $expected;
+}

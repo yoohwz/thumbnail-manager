@@ -26,7 +26,9 @@ function yotm_regenerate_prepare() {
 		isset( $_POST['subpath'] ) ? sanitize_text_field( wp_unslash( $_POST['subpath'] ) ) : '',
 		isset( $_POST['attachment_ids'] ) ? sanitize_textarea_field( wp_unslash( $_POST['attachment_ids'] ) ) : '',
 		! empty( $_POST['force_all'] ),
-		! empty( $_POST['only_missing'] )
+		! empty( $_POST['only_missing'] ),
+		sanitize_key( wp_unslash( $_POST['operation'] ?? '' ) ),
+		sanitize_text_field( wp_unslash( $_POST['report_token'] ?? '' ) )
 	);
 	yotm_regenerate_send_application_outcome( $outcome );
 }
@@ -60,3 +62,20 @@ function yotm_regenerate_send_application_outcome( $outcome ) {
 
 	wp_send_json_error( $outcome['data'] ?? null, $status );
 }
+
+/**
+ * Return a bounded public health-results page for the current owner.
+ */
+function yotm_thumbnail_health_results() {
+	if ( ! current_user_can( 'manage_options' ) ) {
+		wp_send_json_error( array( 'msg' => __( 'No permission.', 'thumbnail-manager' ) ), 403 );
+	}
+	check_ajax_referer( 'yotm_prune_nonce', 'nonce' );
+	$outcome = yotm_thumbnail_health_results_application(
+		sanitize_text_field( wp_unslash( $_POST['token'] ?? '' ) ),
+		absint( wp_unslash( $_POST['page'] ?? 1 ) ),
+		absint( wp_unslash( $_POST['per_page'] ?? 25 ) )
+	);
+	yotm_regenerate_send_application_outcome( $outcome );
+}
+add_action( 'wp_ajax_yotm_thumbnail_health_results', 'yotm_thumbnail_health_results' );

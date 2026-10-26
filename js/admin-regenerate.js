@@ -379,6 +379,9 @@
         const data = response && response.success ? response.data : null;
         const operation = data && (data.operation || (data.context || {}).operation);
         if (data && (operation === 'check' || operation === 'repair')) {
+          const context = data.context || {};
+          renderRegenState(Object.assign({}, data, {operation: operation, scope_label: context.scope_label, regenerated: data.succeeded || 0, skipped: Math.max(0, (data.processed || 0) - (data.succeeded || 0) - (data.failed || 0))}));
+          $regenResults.prepend(htmlNotice('notice-info', t('healthSavedResults', 'Saved job results. No new processing was started.')));
           loadHealthResults(token, 1);
         }
       }
@@ -431,12 +434,12 @@
       clearRegenJob({keepResults: true});
       $regenResults.trigger('focus');
       loadRecentJobs();
-    }).fail(function(){
+    }).fail(function(stopRequest){
       if (regenToken !== token) {
         return;
       }
-      regenRunning = true;
-      $regenCancel.prop('disabled', false);
+      $regenResults.prepend(htmlNotice('notice-warning', responseError(stopRequest && stopRequest.responseJSON, t('stopping', 'Stopping after the current batch…')) + ' ' + t('resumeAfterNetworkError', 'The job is still saved. Reload this page to resume it.')));
+      clearRegenJob({keepResults: true, preserveJob: true});
     });
   });
 

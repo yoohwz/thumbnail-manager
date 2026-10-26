@@ -50,9 +50,21 @@ function yotm_regenerate_application_error( $data, $status = 400 ) {
  * @param string $ids_raw Raw attachment IDs.
  * @param bool   $force_all Whether Force mode is enabled.
  * @param bool   $only_missing Whether only missing sizes are requested.
+ * @param string $operation Optional check or repair operation.
+ * @param string $report_token Completed inspection token for repair.
  * @return array{success:bool,data:mixed,status:int}
  */
-function yotm_regenerate_prepare_application( $scope, $subpath, $ids_raw, $force_all, $only_missing ) {
+function yotm_regenerate_prepare_application( $scope, $subpath, $ids_raw, $force_all, $only_missing, $operation = '', $report_token = '' ) {
+	if ( 'repair' === $operation ) {
+		return yotm_thumbnail_health_prepare_repair( $report_token );
+	}
+	if ( '' !== $operation && 'check' !== $operation ) {
+		return yotm_regenerate_application_error( array( 'msg' => __( 'Invalid thumbnail operation.', 'thumbnail-manager' ) ), 400 );
+	}
+	if ( 'check' === $operation ) {
+		$force_all    = false;
+		$only_missing = true;
+	}
 	$scope = sanitize_text_field( (string) $scope );
 
 	if ( ! in_array( $scope, array( 'all', 'year', 'subpath', 'ids' ), true ) ) {
@@ -100,6 +112,9 @@ function yotm_regenerate_prepare_application( $scope, $subpath, $ids_raw, $force
 		$raw_ids = isset( $matches[0] ) ? array_map( 'absint', $matches[0] ) : array();
 		$raw_ids = array_values( array_filter( array_unique( $raw_ids ) ) );
 
+		if ( 'check' === $operation && count( $raw_ids ) > 500 ) {
+			return yotm_regenerate_application_error( array( 'msg' => __( 'Select up to 500 images at a time, or use a folder scope.', 'thumbnail-manager' ) ), 400 );
+		}
 		foreach ( $raw_ids as $attachment_id ) {
 			$post = get_post( $attachment_id );
 			$mime = get_post_mime_type( $attachment_id );
@@ -114,7 +129,7 @@ function yotm_regenerate_prepare_application( $scope, $subpath, $ids_raw, $force
 		}
 
 		$cursor_mode = false;
-		$scope_label = __( 'Specific attachment IDs', 'thumbnail-manager' );
+		$scope_label = 'check' === $operation ? __( 'Selected images', 'thumbnail-manager' ) : __( 'Specific attachment IDs', 'thumbnail-manager' );
 	}//end if
 
 	$selection_meta_max = 'attached_meta_v2' === $selector ? yotm_get_max_attached_file_meta_id() : 0;
@@ -127,6 +142,8 @@ function yotm_regenerate_prepare_application( $scope, $subpath, $ids_raw, $force
 	$job           = yotm_job_create(
 		'regenerate',
 		array(
+			'operation'                => $operation,
+			'inspected_at'             => gmdate( 'Y-m-d H:i:s' ),
 			'only_missing'             => $only_missing ? 1 : 0,
 			'force_all'                => $force_all ? 1 : 0,
 			'scan_phase'               => $initial_phase,
@@ -239,7 +256,9 @@ function yotm_regenerate_batch_application( $token, $batch ) {
 		return yotm_regenerate_application_success( $response );
 	}
 	if ( 'selection' === $job['phase'] ) {
-		$selected = yotm_regenerate_select_folder_batch( $job, $worker, $batch );
+		$selected = 'health_report_v1' === ( $job['payload']['selector'] ?? '' )
+			? yotm_thumbnail_health_select_report_batch( $job, $worker )
+			: yotm_regenerate_select_folder_batch( $job, $worker, $batch );
 		if ( is_wp_error( $selected ) ) {
 			return yotm_regenerate_application_error( array( 'msg' => $selected->get_error_message() ), 503 );
 		}
@@ -417,7 +436,7 @@ function yotm_regenerate_item_batch( $job, $worker, $batch ) {
 				: yotm_job_finish_item( $item, 'failed', __( 'Attachment ID is missing.', 'thumbnail-manager' ) );
 			continue;
 		}
-		if ( 'attached_meta_v2' === ( $payload['selector'] ?? '' ) && empty( $item['payload']['regeneration_journal'] ) ) {
+		if ( ( 'attached_meta_v2' === ( $payload['selector'] ?? '' ) || 'attached_meta_v2' === ( $payload['source_selector'] ?? '' ) ) && empty( $item['payload']['regeneration_journal'] ) ) {
 			$authorized = yotm_authorize_attached_file_selector_scope(
 				$attachment_id,
 				absint( $item['payload']['selection_meta_id'] ?? 0 ),
@@ -432,9 +451,11 @@ function yotm_regenerate_item_batch( $job, $worker, $batch ) {
 			}
 		}
 
-		$result = ! empty( $payload['force_all'] )
+		$result = ! empty( $payload['operation'] )
+			? yotm_thumbnail_health_process_item( $item, $worker, $payload['operation'] )
+			: ( ! empty( $payload['force_all'] )
 			? yotm_regenerate_force_attachment( $attachment_id, $item, $worker )
-			: yotm_regenerate_attachment( $attachment_id, ! empty( $payload['only_missing'] ), false );
+			: yotm_regenerate_attachment( $attachment_id, ! empty( $payload['only_missing'] ), false ) );
 		if ( 'regenerated' === $result['status'] ) {
 			$item_v3 ? yotm_job_finish_item_v3( $item, $worker, 'done' ) : yotm_job_finish_item( $item, 'done' );
 		} elseif ( 'skipped' === $result['status'] ) {
@@ -616,6 +637,9 @@ function yotm_regenerate_legacy_batch( $job, $worker, $batch ) {
  * @return bool
  */
 function yotm_regenerate_persist_journal( &$item, $journal ) {
+	if ( ( $item['payload']['regeneration_journal'] ?? null ) === $journal ) {
+		return yotm_job_refresh_item_claim( $item );
+	}
 	$payload                         = $item['payload'];
 	$payload['regeneration_journal'] = $journal;
 	if ( ! yotm_job_update_claimed_item_payload( $item, $payload ) ) {
@@ -649,8 +673,12 @@ function yotm_regenerate_recover_journal( &$item ) {
 	) {
 		return yotm_regenerate_failure( __( 'The regeneration recovery journal is malformed and requires manual inspection.', 'thumbnail-manager' ) );
 	}
-	$full  = yotm_media_source_canonical_path( $journal['full'] );
-	$stage = yotm_normalize_filesystem_path( (string) ( $journal['stage'] ?? '' ) );
+	if ( isset( $journal['mode'] ) && ! in_array( $journal['mode'], array( 'force', 'repair' ), true ) ) {
+		return yotm_regenerate_failure( __( 'The regeneration recovery mode is invalid.', 'thumbnail-manager' ) );
+	}
+	$repair = 'repair' === ( $journal['mode'] ?? 'force' );
+	$full   = yotm_media_source_canonical_path( $journal['full'] );
+	$stage  = yotm_normalize_filesystem_path( (string) ( $journal['stage'] ?? '' ) );
 	if ( is_wp_error( $full ) || ! hash_equals( (string) $full, (string) $journal['full'] ) || 0 !== strpos( trailingslashit( $stage ), trailingslashit( dirname( $full ) ) . '.yotm-regenerate-' ) ) {
 		return yotm_regenerate_failure( __( 'The regeneration recovery paths are invalid and require manual inspection.', 'thumbnail-manager' ) );
 	}
@@ -658,7 +686,8 @@ function yotm_regenerate_recover_journal( &$item ) {
 	$aliases = array();
 	foreach ( $journal['destinations'] as $entry ) {
 		$destination = yotm_media_source_canonical_path( $entry['destination'] ?? '' );
-		$backup      = yotm_normalize_filesystem_path( (string) ( $entry['backup'] ?? '' ) );
+		$backup      = (string) ( $entry['backup'] ?? '' );
+		$backup      = '' === $backup ? '' : yotm_normalize_filesystem_path( $backup );
 		if (
 			is_wp_error( $destination )
 			|| ! hash_equals( (string) $destination, (string) ( $entry['destination'] ?? '' ) )
@@ -678,6 +707,17 @@ function yotm_regenerate_recover_journal( &$item ) {
 			return yotm_regenerate_failure( $metadata_state, 'yotm_regenerate_recovery_metadata_state' !== $metadata_state->get_error_code() );
 		}
 
+		if ( $repair ) {
+			$postcondition = yotm_thumbnail_health_recovery_postcondition( $journal );
+			if ( is_wp_error( $postcondition ) ) {
+				return yotm_regenerate_failure( $postcondition );
+			}
+			if ( $journal['old_metadata'] === $journal['final_metadata'] && ! $postcondition ) {
+				$metadata_state = 'old';
+			} elseif ( 'final' === $metadata_state && ! $postcondition ) {
+				return yotm_regenerate_failure( __( 'Repair metadata is saved but generated files cannot be verified. Restore the affected files or inspect the retained recovery record.', 'thumbnail-manager' ) );
+			}
+		}
 		if ( 'final' === $metadata_state ) {
 			$synced = yotm_media_source_sync_attachment( absint( $journal['attachment_id'] ), null, true );
 			if ( is_wp_error( $synced ) ) {
@@ -687,7 +727,7 @@ function yotm_regenerate_recover_journal( &$item ) {
 				'full'     => (string) $journal['full'],
 				'metadata' => $journal['old_metadata'],
 			);
-			$cleaned  = yotm_regenerate_cleanup_obsolete( $snapshot, $journal['final_metadata'] );
+			$cleaned  = $repair ? true : yotm_regenerate_cleanup_obsolete( $snapshot, $journal['final_metadata'] );
 			if ( is_wp_error( $cleaned ) ) {
 				return yotm_regenerate_failure( $cleaned, true );
 			}
@@ -702,6 +742,12 @@ function yotm_regenerate_recover_journal( &$item ) {
 			);
 		}//end if
 
+		if ( $repair ) {
+			$journal = yotm_thumbnail_health_rollback_journal( $journal );
+			if ( is_wp_error( $journal ) ) {
+				return yotm_regenerate_failure( $journal );
+			}
+		}
 		$recovered = yotm_regenerate_recover_destinations( $journal );
 		if ( is_wp_error( $recovered ) ) {
 			return yotm_regenerate_failure( $recovered );
@@ -728,9 +774,10 @@ function yotm_regenerate_recover_journal( &$item ) {
  * @param int   $attachment_id Attachment ID.
  * @param array $item Claimed item.
  * @param array $worker Worker ownership.
+ * @param bool  $repair Whether to restore missing destinations only.
  * @return array{status:string,message:string,retryable?:bool}
  */
-function yotm_regenerate_force_attachment( $attachment_id, $item, $worker ) {
+function yotm_regenerate_force_attachment( $attachment_id, $item, $worker, $repair = false ) {
 	if ( empty( $item['id'] ) || ! yotm_job_refresh_worker( $worker ) || ! yotm_job_refresh_item_claim( $item ) ) {
 		return yotm_regenerate_failure( __( 'The regeneration claim is stale.', 'thumbnail-manager' ), true );
 	}
@@ -753,7 +800,19 @@ function yotm_regenerate_force_attachment( $attachment_id, $item, $worker ) {
 		if ( ! empty( $item['payload']['regeneration_journal'] ) ) {
 			return yotm_regenerate_recover_journal( $item );
 		}
-		$snapshot = yotm_regenerate_preflight( $attachment_id );
+		if ( $repair ) {
+			$health = yotm_thumbnail_health_inspect( $attachment_id );
+			if ( 'missing' !== $health['report']['status'] ) {
+				return array(
+					'status'  => 'blocked' === $health['report']['status'] ? 'failed' : 'skipped',
+					'message' => $health['report']['message'],
+				);
+			}
+			$snapshot                    = $health['snapshot'];
+			$snapshot['requested_sizes'] = $health['requested_sizes'];
+		} else {
+			$snapshot = yotm_regenerate_preflight( $attachment_id );
+		}
 		if ( is_wp_error( $snapshot ) ) {
 			return yotm_regenerate_failure( $snapshot );
 		}
@@ -782,9 +841,15 @@ function yotm_regenerate_force_attachment( $attachment_id, $item, $worker ) {
 			return yotm_regenerate_failure( __( 'The acquired destination-lock set does not match the final generated-file map.', 'thumbnail-manager' ) );
 		}
 
-		$current = yotm_regenerate_preflight( $attachment_id );
+		$current = yotm_regenerate_preflight( $attachment_id, $repair );
 		if ( is_wp_error( $current ) || $current['attached_raw'] !== $snapshot['attached_raw'] || $current['metadata'] !== $snapshot['metadata'] || $current['backups'] !== $snapshot['backups'] || ! hash_equals( $snapshot['source_hash'], $current['source_hash'] ) ) {
 			return yotm_regenerate_failure( __( 'Attachment state changed during regeneration; no live file was replaced.', 'thumbnail-manager' ), true );
+		}
+		if ( $repair ) {
+			$current_health = yotm_thumbnail_health_inspect( $attachment_id );
+			if ( $current_health['requested_sizes'] !== $snapshot['requested_sizes'] ) {
+				return yotm_regenerate_failure( __( 'Enabled sizes or thumbnail files changed during repair. Run a new check; existing files were preserved.', 'thumbnail-manager' ) );
+			}
 		}
 		$old_owners = yotm_regenerate_old_owners( $snapshot );
 		if ( is_wp_error( $old_owners ) ) {
@@ -793,6 +858,9 @@ function yotm_regenerate_force_attachment( $attachment_id, $item, $worker ) {
 		$destinations = array();
 		foreach ( $finalized['map'] as $slug => $entry ) {
 			$prestate = yotm_regenerate_destination_prestate( $entry, $snapshot, $old_owners, $stage );
+			if ( $repair && ! is_wp_error( $prestate ) && empty( $prestate['old_absent'] ) ) {
+				return yotm_regenerate_failure( __( 'An existing thumbnail was preserved. Run a new check to review the changed files.', 'thumbnail-manager' ) );
+			}
 			if ( is_wp_error( $prestate ) ) {
 				return yotm_regenerate_failure( $prestate );
 			}
@@ -800,6 +868,7 @@ function yotm_regenerate_force_attachment( $attachment_id, $item, $worker ) {
 		}
 		$journal = array(
 			'version'           => YOTM_REGENERATE_JOURNAL_VERSION,
+			'mode'              => $repair ? 'repair' : 'force',
 			'phase'             => 'prepared',
 			'attachment_id'     => $attachment_id,
 			'old_metadata'      => $snapshot['metadata'],
@@ -816,15 +885,19 @@ function yotm_regenerate_force_attachment( $attachment_id, $item, $worker ) {
 		}
 
 		foreach ( $journal['destinations'] as $slug => &$entry ) {
+			if ( $repair && ( ! yotm_job_refresh_worker( $worker ) || ! yotm_job_refresh_item_claim( $item ) ) ) {
+				return yotm_regenerate_failure( __( 'Repair was interrupted. Resume the saved job to reconcile its recovery record.', 'thumbnail-manager' ), true );
+			}
 			$owners_now = yotm_regenerate_destination_prestate( $entry, $snapshot, $old_owners, $stage, false );
-			if ( is_wp_error( $owners_now ) || $owners_now['mode'] !== $entry['mode'] || $owners_now['owners'] !== $entry['owners'] || $owners_now['old_hash'] !== $entry['old_hash'] ) {
+			if ( is_wp_error( $owners_now ) || ( $repair && empty( $owners_now['old_absent'] ) ) || $owners_now['mode'] !== $entry['mode'] || $owners_now['owners'] !== $entry['owners'] || $owners_now['old_hash'] !== $entry['old_hash'] ) {
 				return yotm_regenerate_failure( __( 'A generated destination changed before promotion.', 'thumbnail-manager' ), true );
 			}
 			$journal['promotion_slug'] = (string) $slug;
 			if ( ! yotm_regenerate_persist_journal( $item, $journal ) ) {
 				return yotm_regenerate_failure( __( 'Could not persist the next promotion intent.', 'thumbnail-manager' ), true );
 			}
-			if ( ! yotm_regenerate_promote_destination( $entry ) ) {
+			$promoted = $repair ? yotm_thumbnail_health_promote_destination( $entry ) : yotm_regenerate_promote_destination( $entry );
+			if ( ! $promoted ) {
 				yotm_regenerate_rollback( $journal );
 				return yotm_regenerate_failure( __( 'Could not promote all staged generated files.', 'thumbnail-manager' ) );
 			}
@@ -832,7 +905,7 @@ function yotm_regenerate_force_attachment( $attachment_id, $item, $worker ) {
 			if ( ! yotm_regenerate_persist_journal( $item, $journal ) ) {
 				return yotm_regenerate_failure( __( 'Could not persist promoted-file evidence.', 'thumbnail-manager' ), true );
 			}
-		}
+		}//end foreach
 		unset( $entry );
 		$journal['phase'] = 'files_promoted';
 		if ( ! yotm_regenerate_persist_journal( $item, $journal ) ) {
@@ -840,6 +913,9 @@ function yotm_regenerate_force_attachment( $attachment_id, $item, $worker ) {
 			return yotm_regenerate_failure( __( 'Could not persist the promoted-files journal.', 'thumbnail-manager' ) );
 		}
 
+		if ( $repair && ( ! yotm_job_refresh_worker( $worker ) || ! yotm_job_refresh_item_claim( $item ) ) ) {
+			return yotm_regenerate_failure( __( 'Repair was interrupted before saving metadata. Resume the saved job to reconcile its recovery record.', 'thumbnail-manager' ), true );
+		}
 		$metadata_commit = yotm_regenerate_commit_metadata( $attachment_id, $journal, $snapshot['metadata'] );
 		if ( 'incomplete' === $metadata_commit ) {
 			return yotm_regenerate_failure( __( 'Metadata commit and automatic rollback were incomplete; journal evidence was retained for manual recovery.', 'thumbnail-manager' ) );
@@ -855,7 +931,7 @@ function yotm_regenerate_force_attachment( $attachment_id, $item, $worker ) {
 		if ( is_wp_error( $synced ) ) {
 			return yotm_regenerate_failure( $synced, true );
 		}
-		$cleaned = yotm_regenerate_cleanup_obsolete( $snapshot, $journal['final_metadata'] );
+		$cleaned = $repair ? true : yotm_regenerate_cleanup_obsolete( $snapshot, $journal['final_metadata'] );
 		if ( is_wp_error( $cleaned ) ) {
 			return yotm_regenerate_failure( $cleaned, true );
 		}
@@ -920,6 +996,9 @@ function yotm_build_regenerate_response( $job, $done ) {
 		'scope_label'       => (string) ( $payload['scope_label'] ?? __( 'All media', 'thumbnail-manager' ) ),
 		'only_missing'      => ! empty( $payload['only_missing'] ) ? 1 : 0,
 		'force_all'         => ! empty( $payload['force_all'] ) ? 1 : 0,
+		'operation'         => (string) ( $payload['operation'] ?? '' ),
+		'inspected_at'      => (string) ( $payload['inspected_at'] ?? '' ),
+		'report_token'      => (string) ( $payload['report_token'] ?? $job['token'] ),
 		'errors'            => yotm_job_get_error_sample( $job['id'] ),
 	);
 }

@@ -21,7 +21,9 @@ Large operations run as persistent, bounded jobs. They continue in batches, surv
 = Thumbnail control and regeneration =
 
 * Review every registered image size and decide which sizes WordPress should generate for future uploads.
-* Generate only missing sizes or force-regenerate selected image attachments.
+* Check selected images for missing enabled thumbnails, including files missing on disk while metadata still exists.
+* Explicitly repair only missing sizes while preserving existing thumbnail files and the current full image.
+* Select images using the native Media Library picker, individual Check thumbnails links, or the Media Library list-view bulk action.
 * Regenerate all media, current-year images, one uploads folder, or specific image attachments.
 * Review conservative keep recommendations with explicit evidence and confidence based on protected size policies, attachment metadata, and common content references.
 * Resume or cancel persistent jobs and review recent job results and per-item errors.
@@ -59,9 +61,19 @@ Recommendations are an informed starting point, not proof that a size is used or
 
 = Can I regenerate thumbnails after changing image sizes? =
 
-Yes. **Only Missing** creates absent sub-sizes and honors the sizes currently enabled in **Thumbnail Sizes**. **Force Regenerate** rebuilds the selected attachments more comprehensively from an available original image source and follows the same enabled-size policy.
+Yes. **Check and repair missing thumbnails** first inspects the selected images and the sizes currently enabled in **Thumbnail Sizes**. Review the results, then choose **Repair missing thumbnails**. Repair uses the current full image, honors edits, and preserves existing thumbnails and unrelated metadata. Sizes that cannot be made without enlarging the source are not required. **Force Regenerate** rebuilds the selected attachments more comprehensively from an available original image source and follows the enabled-size policy.
 
 Regenerate can process all media, current-year images, one uploads folder, or specific image attachments. Choose the narrowest useful scope before starting a large job.
+
+= How do I check and repair selected images? =
+
+In **Media > Library**, use **Check thumbnails** on an image, or select images in list view and choose the **Check thumbnails** bulk action. In **Tools > Thumbnails > Regenerate**, you can also choose **Selected images > Choose images** and use the familiar Media Library search and filters. Select up to 500 images at a time; folder and broader scopes run in bounded batches.
+
+Choose **Check thumbnails**, review the per-image and per-size results, then explicitly choose **Repair missing thumbnails**. Navigation and checking do not modify media. Repair derives the selection from the saved check and rechecks current files and enabled sizes before generating anything. Recent jobs lets you reopen saved check and repair results.
+
+Checks cover currently enabled registered thumbnail sizes and local upload files. A present file is not a full corruption audit, and the report does not verify frontend pages, external references or CDN copies. Disabled and historical unregistered sizes are preserved and are not recreated. Missing original/full files, missing or malformed complete attachment metadata, unsupported formats and unsafe paths require the suggested manual action; the plugin cannot reconstruct a lost original. An occupied, unreferenced destination is preserved rather than overwritten.
+
+Jobs continue only while the administration page sends batches. After a network interruption or page reload, return to the plugin page to resume the saved active job. Stopping keeps completed work and its audit record; in-flight transactions may need recovery before stopping finishes. After expiry or after resolving a blocked source/storage issue, run a new check. Result retention is temporary, not a permanent media audit.
 
 = Can it clean unused generated thumbnails? =
 

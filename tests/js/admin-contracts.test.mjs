@@ -699,7 +699,8 @@ test('Regenerate module preserves prepare and bounded batch payloads', () => {
     subpath: '',
     attachment_ids: '',
     only_missing: 1,
-    force_all: 0
+    force_all: 0,
+    operation: 'check'
   });
   prepare.deferred.resolve({
     success: true,
@@ -939,7 +940,8 @@ test('admin modules retain the established AJAX action and storage contracts', (
     'yotm_recommend_batch',
     'yotm_recommend_prepare',
     'yotm_regenerate_batch',
-    'yotm_regenerate_prepare'
+    'yotm_regenerate_prepare',
+    'yotm_thumbnail_health_results'
   ]);
 
   for (const type of ['prune', 'regenerate', 'recommendation']) {

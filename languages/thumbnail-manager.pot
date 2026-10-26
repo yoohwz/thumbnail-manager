@@ -34,522 +34,702 @@ msgstr ""
 msgid "https://yoohw.com"
 msgstr ""
 
-#: inc/admin/assets.php:86
-msgid "All sizes are enabled — there are no disabled sizes to prune."
-msgstr ""
-
-#: inc/admin/assets.php:87
-msgid "Scanning…"
-msgstr ""
-
-#: inc/admin/assets.php:88
-msgid "Deleting…"
-msgstr ""
-
 #: inc/admin/assets.php:89
-msgid "Processing…"
+msgid "Thumbnail file is present."
 msgstr ""
 
 #: inc/admin/assets.php:90
-msgid "Scan failed:"
+msgid "Thumbnail file is missing."
 msgstr ""
 
 #: inc/admin/assets.php:91
-msgid "Prepare failed:"
+msgid "Thumbnail metadata is missing."
 msgstr ""
 
 #: inc/admin/assets.php:92
-msgid "Delete failed:"
+msgid "This size is not needed for the source image dimensions."
 msgstr ""
 
 #: inc/admin/assets.php:93
-msgid "Unknown error"
+msgid "This thumbnail size is currently disabled."
 msgstr ""
 
 #: inc/admin/assets.php:94
-msgid "Network error during prepare."
+msgid "The thumbnail path could not be verified safely."
 msgstr ""
 
 #: inc/admin/assets.php:95
-msgid "Network error during scan."
+msgid "This thumbnail size has an invalid definition."
 msgstr ""
 
 #: inc/admin/assets.php:96
-msgid "Network error during delete."
+msgid "This thumbnail size would require enlarging the source image."
 msgstr ""
 
 #: inc/admin/assets.php:97
-msgid "Cancelled."
+#: inc/admin/assets.php:228
+#: inc/admin/media-library.php:94
+#: inc/admin/media-library.php:107
+#: inc/admin/media-library.php:141
+#: inc/admin/view.php:170
+msgid "Check thumbnails"
 msgstr ""
 
 #: inc/admin/assets.php:98
-msgid "An unfinished job was found. Resuming it now…"
+msgid "Run force regeneration"
 msgstr ""
 
 #: inc/admin/assets.php:99
-msgid "The job is still saved. Reload this page to resume it."
+#: inc/admin/view.php:145
+msgid "Choose images"
 msgstr ""
 
 #: inc/admin/assets.php:100
-msgid "Scan complete. Review the immutable manifest below; nothing has been deleted."
+msgid "Use selected images"
 msgstr ""
 
 #: inc/admin/assets.php:101
-msgid "Delete approval failed:"
+msgid "1 image selected"
 msgstr ""
 
-#: inc/admin/assets.php:102
-msgid "Network error while approving the manifest."
-msgstr ""
-
+#. translators: %s: selected image count.
 #: inc/admin/assets.php:103
-msgid "Manifest:"
+msgid "%s images selected"
 msgstr ""
 
 #: inc/admin/assets.php:104
-msgid "Scanning uploads folders…"
+msgid "Choose up to 500 images at a time. Your previous selection has been retained."
 msgstr ""
 
 #: inc/admin/assets.php:105
-msgid "Indexing authoritative media sources…"
+#: inc/admin/media-library.php:26
+msgid "Choose at least one image from the Media Library."
 msgstr ""
 
 #: inc/admin/assets.php:106
-msgid "Building immutable manifest…"
+msgid "Check complete. Review the results, then choose Repair missing thumbnails to make changes."
 msgstr ""
 
 #: inc/admin/assets.php:107
-msgid "Failed files:"
+msgid "Repair complete. Results show the files restored by this job."
 msgstr ""
 
 #: inc/admin/assets.php:108
+msgid "Only currently enabled sizes and local upload files were checked. Frontend pages and CDN copies are outside this report."
+msgstr ""
+
+#: inc/admin/assets.php:109
+msgid "Loading thumbnail results…"
+msgstr ""
+
+#: inc/admin/assets.php:110
+msgid "Could not load thumbnail results."
+msgstr ""
+
+#: inc/admin/assets.php:111
+msgid "Inspected (UTC):"
+msgstr ""
+
+#: inc/admin/assets.php:112
+msgid "Inspected:"
+msgstr ""
+
+#: inc/admin/assets.php:113
+msgid "Image"
+msgstr ""
+
+#: inc/admin/assets.php:114
+msgid "Suggested action"
+msgstr ""
+
+#: inc/admin/assets.php:115
+msgid "Missing"
+msgstr ""
+
+#: inc/admin/assets.php:116
+msgid "Healthy"
+msgstr ""
+
+#: inc/admin/assets.php:117
+msgid "Blocked"
+msgstr ""
+
+#: inc/admin/assets.php:118
+msgid "Unsupported"
+msgstr ""
+
+#: inc/admin/assets.php:119
+msgid "Disabled"
+msgstr ""
+
+#: inc/admin/assets.php:120
+msgid "Not needed"
+msgstr ""
+
+#: inc/admin/assets.php:121
+msgid "Restored:"
+msgstr ""
+
+#: inc/admin/assets.php:122
+msgid "No thumbnail results are available yet."
+msgstr ""
+
+#: inc/admin/assets.php:123
+#: inc/admin/view.php:500
+msgid "Previous"
+msgstr ""
+
+#: inc/admin/assets.php:124
+#: inc/admin/view.php:502
+msgid "Next"
+msgstr ""
+
+#: inc/admin/assets.php:125
+msgid "Run a new check after changing enabled sizes or media files."
+msgstr ""
+
+#: inc/admin/assets.php:126
+msgid "Job result:"
+msgstr ""
+
+#: inc/admin/assets.php:127
+msgid "All sizes are enabled — there are no disabled sizes to prune."
+msgstr ""
+
+#: inc/admin/assets.php:128
+msgid "Scanning…"
+msgstr ""
+
+#: inc/admin/assets.php:129
+msgid "Deleting…"
+msgstr ""
+
+#: inc/admin/assets.php:130
+msgid "Processing…"
+msgstr ""
+
+#: inc/admin/assets.php:131
+msgid "Scan failed:"
+msgstr ""
+
+#: inc/admin/assets.php:132
+msgid "Prepare failed:"
+msgstr ""
+
+#: inc/admin/assets.php:133
+msgid "Delete failed:"
+msgstr ""
+
+#: inc/admin/assets.php:134
+msgid "Unknown error"
+msgstr ""
+
+#: inc/admin/assets.php:135
+msgid "Network error during prepare."
+msgstr ""
+
+#: inc/admin/assets.php:136
+msgid "Network error during scan."
+msgstr ""
+
+#: inc/admin/assets.php:137
+msgid "Network error during delete."
+msgstr ""
+
+#: inc/admin/assets.php:138
+msgid "Cancelled."
+msgstr ""
+
+#: inc/admin/assets.php:139
+msgid "An unfinished job was found. Resuming it now…"
+msgstr ""
+
+#: inc/admin/assets.php:140
+msgid "The job is still saved. Reload this page to resume it."
+msgstr ""
+
+#: inc/admin/assets.php:141
+msgid "Scan complete. Review the immutable manifest below; nothing has been deleted."
+msgstr ""
+
+#: inc/admin/assets.php:142
+msgid "Delete approval failed:"
+msgstr ""
+
+#: inc/admin/assets.php:143
+msgid "Network error while approving the manifest."
+msgstr ""
+
+#: inc/admin/assets.php:144
+msgid "Manifest:"
+msgstr ""
+
+#: inc/admin/assets.php:145
+msgid "Scanning uploads folders…"
+msgstr ""
+
+#: inc/admin/assets.php:146
+msgid "Indexing authoritative media sources…"
+msgstr ""
+
+#: inc/admin/assets.php:147
+msgid "Building immutable manifest…"
+msgstr ""
+
+#: inc/admin/assets.php:148
+msgid "Failed files:"
+msgstr ""
+
+#: inc/admin/assets.php:149
 msgid "No matching thumbnails found. Try enabling orphan discovery or widen the folder scope."
 msgstr ""
 
 #. translators: 1: deleted file count, 2: formatted bytes freed.
-#: inc/admin/assets.php:110
+#: inc/admin/assets.php:151
 msgid "Done. Deleted %1$s files — Freed %2$s."
 msgstr ""
 
-#: inc/admin/assets.php:111
+#: inc/admin/assets.php:152
 msgid "Regeneration cancelled."
 msgstr ""
 
-#: inc/admin/assets.php:112
+#: inc/admin/assets.php:153
 msgid "Preparing regeneration queue…"
 msgstr ""
 
 #. translators: %s: number of authoritative attachment rows checked.
-#: inc/admin/assets.php:114
+#: inc/admin/assets.php:155
 msgid "Scanning attachment rows… %s checked"
 msgstr ""
 
-#: inc/admin/assets.php:115
+#: inc/admin/assets.php:156
 msgid "Starting…"
 msgstr ""
 
 #. translators: 1: regenerated count, 2: skipped count, 3: failed count.
-#: inc/admin/assets.php:117
+#: inc/admin/assets.php:158
 msgid "Done. Regenerated %1$s attachments, skipped %2$s, failed %3$s."
 msgstr ""
 
-#: inc/admin/assets.php:118
+#: inc/admin/assets.php:159
 msgid "Batch failed:"
 msgstr ""
 
-#: inc/admin/assets.php:119
+#: inc/admin/assets.php:160
 msgid "Network error during regenerate batch."
 msgstr ""
 
-#: inc/admin/assets.php:120
+#: inc/admin/assets.php:161
 msgid "Network error during regenerate prepare."
 msgstr ""
 
-#: inc/admin/assets.php:121
+#: inc/admin/assets.php:162
 msgid "No image attachments found."
 msgstr ""
 
-#: inc/admin/assets.php:122
+#: inc/admin/assets.php:163
 msgid "No items to process."
 msgstr ""
 
-#: inc/admin/assets.php:123
+#: inc/admin/assets.php:164
 msgid "Recommendation scan failed."
 msgstr ""
 
-#: inc/admin/assets.php:124
+#: inc/admin/assets.php:165
 msgid "Network error during recommendation scan."
 msgstr ""
 
-#: inc/admin/assets.php:125
+#: inc/admin/assets.php:166
 msgid "Scan completed."
 msgstr ""
 
-#: inc/admin/assets.php:126
+#: inc/admin/assets.php:167
 msgid "Scan base:"
 msgstr ""
 
-#: inc/admin/assets.php:127
+#: inc/admin/assets.php:168
 msgid "KEEP:"
 msgstr ""
 
-#: inc/admin/assets.php:128
+#: inc/admin/assets.php:169
 msgid "DELETE (not selected):"
 msgstr ""
 
-#: inc/admin/assets.php:129
+#: inc/admin/assets.php:170
 msgid "Matched files:"
 msgstr ""
 
-#: inc/admin/assets.php:130
+#: inc/admin/assets.php:171
 msgid "Orphan discovery:"
 msgstr ""
 
-#: inc/admin/assets.php:131
+#: inc/admin/assets.php:172
 msgid "distinct dims on disk/metadata."
 msgstr ""
 
-#: inc/admin/assets.php:132
+#: inc/admin/assets.php:173
 msgid "Dims kept by selection:"
 msgstr ""
 
-#: inc/admin/assets.php:133
+#: inc/admin/assets.php:174
 msgid "Metadata orphan dims marked for deletion:"
 msgstr ""
 
-#: inc/admin/assets.php:134
+#: inc/admin/assets.php:175
 msgid "Original files protected:"
 msgstr ""
 
-#: inc/admin/assets.php:135
+#: inc/admin/assets.php:176
 msgid "Unmapped disk candidates skipped:"
 msgstr ""
 
-#: inc/admin/assets.php:136
+#: inc/admin/assets.php:177
 msgid "Unverified format sidecars preserved:"
 msgstr ""
 
-#: inc/admin/assets.php:137
+#: inc/admin/assets.php:178
 msgid "Ambiguous sibling files preserved:"
 msgstr ""
 
-#: inc/admin/assets.php:138
+#: inc/admin/assets.php:179
 msgid "Authoritative source paths protected:"
 msgstr ""
 
-#: inc/admin/assets.php:139
+#: inc/admin/assets.php:180
 msgid "Indeterminate source checks preserved:"
 msgstr ""
 
-#: inc/admin/assets.php:140
+#: inc/admin/assets.php:181
 msgid "Metadata-backed candidates:"
 msgstr ""
 
-#: inc/admin/assets.php:141
+#: inc/admin/assets.php:182
 msgid "Verified legacy disk-only candidates:"
 msgstr ""
 
-#: inc/admin/assets.php:142
+#: inc/admin/assets.php:183
 msgid "Verified legacy — currently disabled size:"
 msgstr ""
 
-#: inc/admin/assets.php:143
+#: inc/admin/assets.php:184
 msgid "Verified historical legacy — size no longer registered:"
 msgstr ""
 
-#: inc/admin/assets.php:144
+#: inc/admin/assets.php:185
 msgid "Ambiguous/unverified historical-looking files preserved:"
 msgstr ""
 
-#: inc/admin/assets.php:145
+#: inc/admin/assets.php:186
 msgid "Malformed or mismatched files preserved:"
 msgstr ""
 
-#: inc/admin/assets.php:146
+#: inc/admin/assets.php:187
 msgid "Files matching a kept size preserved:"
 msgstr ""
 
-#: inc/admin/assets.php:147
+#: inc/admin/assets.php:188
 msgid "Verified legacy disk-only evidence"
 msgstr ""
 
-#: inc/admin/assets.php:148
+#: inc/admin/assets.php:189
 msgid "Verified historical legacy / no longer registered"
 msgstr ""
 
-#: inc/admin/assets.php:149
+#: inc/admin/assets.php:190
 msgid "Sample matches"
 msgstr ""
 
-#: inc/admin/assets.php:150
+#: inc/admin/assets.php:191
 msgid "shown"
 msgstr ""
 
-#: inc/admin/assets.php:151
+#: inc/admin/assets.php:192
 msgid "Scope:"
 msgstr ""
 
-#: inc/admin/assets.php:152
+#: inc/admin/assets.php:193
 msgid "Processed:"
 msgstr ""
 
-#: inc/admin/assets.php:153
+#: inc/admin/assets.php:194
 msgid "Regenerated:"
 msgstr ""
 
-#: inc/admin/assets.php:154
+#: inc/admin/assets.php:195
 msgid "Skipped:"
 msgstr ""
 
-#: inc/admin/assets.php:155
+#: inc/admin/assets.php:196
 msgid "Failed:"
 msgstr ""
 
-#: inc/admin/assets.php:156
+#: inc/admin/assets.php:197
 msgid "Attachments found:"
 msgstr ""
 
-#: inc/admin/assets.php:157
+#: inc/admin/assets.php:198
 msgid "Only generate missing:"
 msgstr ""
 
-#: inc/admin/assets.php:158
+#: inc/admin/assets.php:199
 msgid "Force regenerate all:"
 msgstr ""
 
-#: inc/admin/assets.php:159
-#: inc/admin/view.php:404
-#: inc/admin/view.php:582
+#: inc/admin/assets.php:200
+#: inc/admin/view.php:399
+#: inc/admin/view.php:577
 msgid "Yes"
 msgstr ""
 
-#: inc/admin/assets.php:160
-#: inc/admin/view.php:404
-#: inc/admin/view.php:582
+#: inc/admin/assets.php:201
+#: inc/admin/view.php:399
+#: inc/admin/view.php:577
 msgid "No"
 msgstr ""
 
-#: inc/admin/assets.php:161
+#: inc/admin/assets.php:202
 msgid "No recommendation data found."
 msgstr ""
 
-#: inc/admin/assets.php:162
+#: inc/admin/assets.php:203
 #: inc/application/recommendations.php:635
 msgid "Unknown"
 msgstr ""
 
-#: inc/admin/assets.php:163
+#: inc/admin/assets.php:204
 msgid "Attachment metadata"
 msgstr ""
 
-#: inc/admin/assets.php:164
+#: inc/admin/assets.php:205
 msgid "Size"
 msgstr ""
 
-#: inc/admin/assets.php:165
+#: inc/admin/assets.php:206
 msgid "Dimensions"
 msgstr ""
 
-#: inc/admin/assets.php:166
+#: inc/admin/assets.php:207
 #: inc/admin/view.php:59
-#: inc/admin/view.php:367
+#: inc/admin/view.php:362
 msgid "Status"
 msgstr ""
 
-#: inc/admin/assets.php:167
+#: inc/admin/assets.php:208
 msgid "Reason"
 msgstr ""
 
-#: inc/admin/assets.php:168
+#: inc/admin/assets.php:209
 msgid "Recommendation"
 msgstr ""
 
-#: inc/admin/assets.php:169
+#: inc/admin/assets.php:210
 msgid "Keep confidence"
 msgstr ""
 
-#: inc/admin/assets.php:170
+#: inc/admin/assets.php:211
 msgid "High"
 msgstr ""
 
-#: inc/admin/assets.php:171
+#: inc/admin/assets.php:212
 msgid "Medium"
 msgstr ""
 
-#: inc/admin/assets.php:172
+#: inc/admin/assets.php:213
 msgid "Low"
 msgstr ""
 
-#: inc/admin/assets.php:173
+#: inc/admin/assets.php:214
 msgid "Evidence"
 msgstr ""
 
-#: inc/admin/assets.php:174
+#: inc/admin/assets.php:215
 msgid "This result uses an older recommendation format. Run a new scan before applying recommendations."
 msgstr ""
 
-#: inc/admin/assets.php:175
+#: inc/admin/assets.php:216
 msgid "Registered image sizes changed after this scan. Run a new scan before applying recommendations."
 msgstr ""
 
-#: inc/admin/assets.php:176
+#: inc/admin/assets.php:217
 msgid "This recommendation result is incomplete. Run a new scan before applying recommendations."
 msgstr ""
 
-#: inc/admin/assets.php:177
+#: inc/admin/assets.php:218
 msgid "Safe recommendations are ready. Unknown sizes will keep their current setting."
 msgstr ""
 
-#: inc/admin/assets.php:178
+#: inc/admin/assets.php:219
 msgid "Scanning media usage…"
 msgstr ""
 
-#: inc/admin/assets.php:179
+#: inc/admin/assets.php:220
 msgid "Scanning attachment metadata…"
 msgstr ""
 
-#: inc/admin/assets.php:180
+#: inc/admin/assets.php:221
 msgid "Scanning content references…"
 msgstr ""
 
-#: inc/admin/assets.php:181
+#: inc/admin/assets.php:222
 msgid "Job stopped. Completed work was not rolled back, and the audit record was retained."
 msgstr ""
 
-#: inc/admin/assets.php:182
+#: inc/admin/assets.php:223
 msgid "Stopping after the current batch…"
 msgstr ""
 
-#: inc/admin/assets.php:183
+#: inc/admin/assets.php:224
 #: inc/admin/view.php:47
 msgid "Active job"
 msgstr ""
 
-#: inc/admin/assets.php:184
+#: inc/admin/assets.php:225
 #: inc/admin/view.php:50
 msgid "View job"
 msgstr ""
 
-#: inc/admin/assets.php:185
+#: inc/admin/assets.php:226
 msgid "No recent jobs."
 msgstr ""
 
-#: inc/admin/assets.php:186
+#: inc/admin/assets.php:227
 msgid "Prune files"
 msgstr ""
 
-#: inc/admin/assets.php:187
+#: inc/admin/assets.php:229
+#: inc/admin/view.php:182
+msgid "Repair missing thumbnails"
+msgstr ""
+
+#: inc/admin/assets.php:230
+msgid "Saved job results. No new processing was started."
+msgstr ""
+
+#: inc/admin/assets.php:231
 #: inc/admin/view.php:72
 msgid "Regenerate"
 msgstr ""
 
-#: inc/admin/assets.php:188
+#: inc/admin/assets.php:232
 #: inc/admin/view.php:75
-#: inc/admin/view.php:195
+#: inc/admin/view.php:190
 msgid "Recommendations"
 msgstr ""
 
-#: inc/admin/assets.php:189
+#: inc/admin/assets.php:233
 msgid "Scanning"
 msgstr ""
 
-#: inc/admin/assets.php:190
+#: inc/admin/assets.php:234
 msgid "Running"
 msgstr ""
 
-#: inc/admin/assets.php:191
+#: inc/admin/assets.php:235
 msgid "Awaiting review"
 msgstr ""
 
-#: inc/admin/assets.php:192
+#: inc/admin/assets.php:236
 msgid "Approved"
 msgstr ""
 
-#: inc/admin/assets.php:193
+#: inc/admin/assets.php:237
 msgid "Deleting"
 msgstr ""
 
-#: inc/admin/assets.php:194
+#: inc/admin/assets.php:238
 msgid "Completed"
 msgstr ""
 
-#: inc/admin/assets.php:195
+#: inc/admin/assets.php:239
 msgid "Stopped"
 msgstr ""
 
-#: inc/admin/assets.php:196
+#: inc/admin/assets.php:240
 msgid "Expired"
 msgstr ""
 
-#: inc/admin/assets.php:197
+#: inc/admin/assets.php:241
 msgid "No manifest items match this filter."
 msgstr ""
 
-#: inc/admin/assets.php:198
+#: inc/admin/assets.php:242
 msgid "Loading manifest…"
 msgstr ""
 
-#: inc/admin/assets.php:199
+#: inc/admin/assets.php:243
 msgid "Could not load the manifest."
 msgstr ""
 
 #. translators: 1: current manifest page, 2: total manifest pages.
-#: inc/admin/assets.php:201
+#: inc/admin/assets.php:245
 msgid "Page %1$s of %2$s"
 msgstr ""
 
 #. translators: %s: number of reviewed files.
-#: inc/admin/assets.php:203
+#: inc/admin/assets.php:247
 msgid "Delete %s reviewed files"
 msgstr ""
 
-#: inc/admin/assets.php:204
+#: inc/admin/assets.php:248
 msgid "Error details"
 msgstr ""
 
 #. translators: %s: number of upload directory entries checked.
-#: inc/admin/assets.php:206
+#: inc/admin/assets.php:250
 msgid "Scanning uploads folders… %s entries checked"
 msgstr ""
 
-#: inc/admin/assets.php:207
+#: inc/admin/assets.php:251
 msgid "Approval window: 30 minutes after confirmation"
 msgstr ""
 
-#: inc/admin/assets.php:208
+#: inc/admin/assets.php:252
 msgid "Unknown item"
 msgstr ""
 
-#: inc/admin/assets.php:209
-#: inc/admin/view.php:290
+#: inc/admin/assets.php:253
+#: inc/admin/view.php:285
 #: inc/upload-subpaths.php:19
 msgid "All uploads"
 msgstr ""
 
-#: inc/admin/assets.php:210
+#: inc/admin/assets.php:254
 #: inc/admin/view.php:110
-#: inc/application/regenerate.php:67
-#: inc/application/regenerate.php:920
+#: inc/application/regenerate.php:79
+#: inc/application/regenerate.php:996
 msgid "All media"
 msgstr ""
 
 #. translators: %s: number of selected uploads folders.
-#: inc/admin/assets.php:212
+#: inc/admin/assets.php:256
 msgid "%s folders selected"
 msgstr ""
 
-#: inc/admin/assets.php:213
+#: inc/admin/assets.php:257
 msgid "1 folder selected"
 msgstr ""
 
-#: inc/admin/assets.php:214
+#: inc/admin/assets.php:258
 msgid "Choose at least one folder or use All uploads."
 msgstr ""
 
-#: inc/admin/assets.php:215
+#: inc/admin/assets.php:259
 msgid "Remove folder"
 msgstr ""
 
+#: inc/admin/media-library.php:32
+msgid "The image selection is invalid. Choose images again from the Media Library."
+msgstr ""
+
+#: inc/admin/media-library.php:38
+msgid "Choose up to 500 images at a time. No images have been selected."
+msgstr ""
+
+#: inc/admin/media-library.php:43
+msgid "The selection contains an unavailable or non-image attachment. Choose images again."
+msgstr ""
+
+#: inc/admin/media-library.php:139
 #: inc/admin/page.php:17
 #: inc/admin/page.php:18
 msgid "Thumbnails"
@@ -601,11 +781,11 @@ msgid "Regenerate thumbnails for existing image attachments in your Media Librar
 msgstr ""
 
 #: inc/admin/view.php:103
-msgid "Recommended after changing thumbnail size settings or after enabling new sizes."
+msgid "Checks cover currently enabled sizes and local upload files. They do not verify frontend pages or CDN copies. Checking does not change any files."
 msgstr ""
 
 #: inc/admin/view.php:107
-#: inc/admin/view.php:477
+#: inc/admin/view.php:472
 msgid "Scope"
 msgstr ""
 
@@ -618,363 +798,343 @@ msgid "Specific uploads folder"
 msgstr ""
 
 #: inc/admin/view.php:122
-#: inc/application/regenerate.php:117
-msgid "Specific attachment IDs"
+#: inc/application/regenerate.php:132
+msgid "Selected images"
 msgstr ""
 
 #: inc/admin/view.php:130
 msgid "Choose subfolder inside <code>uploads/</code>:"
 msgstr ""
 
-#: inc/admin/view.php:146
-msgid "Attachment IDs"
+#: inc/admin/view.php:147
+msgid "Select up to 500 images using the Media Library picker."
 msgstr ""
 
-#: inc/admin/view.php:152
-msgid "Example: 123, 456, 789"
-msgstr ""
-
-#: inc/admin/view.php:155
-msgid "Enter one or more Media Library attachment IDs separated by commas or spaces."
-msgstr ""
-
-#: inc/admin/view.php:160
+#: inc/admin/view.php:153
 msgid "Regeneration mode"
 msgstr ""
 
-#: inc/admin/view.php:163
-msgid "Generate missing sizes only"
+#: inc/admin/view.php:156
+msgid "Check and repair missing thumbnails"
 msgstr ""
 
-#: inc/admin/view.php:163
-msgid "Faster and recommended for routine maintenance."
+#: inc/admin/view.php:156
+msgid "Inspect first, review the results, then explicitly repair missing thumbnails."
 msgstr ""
 
-#: inc/admin/view.php:167
+#: inc/admin/view.php:160
 msgid "Force regenerate all selected images"
 msgstr ""
 
-#: inc/admin/view.php:167
+#: inc/admin/view.php:160
 msgid "Rebuilds metadata from the original image and removes obsolete generated files."
 msgstr ""
 
-#: inc/admin/view.php:172
+#: inc/admin/view.php:165
 msgid "Force mode is slower and may replace existing thumbnail files. Originals remain protected."
 msgstr ""
 
-#: inc/admin/view.php:177
-msgid "Run regenerate"
-msgstr ""
-
-#: inc/admin/view.php:180
-#: inc/admin/view.php:207
-#: inc/admin/view.php:456
+#: inc/admin/view.php:173
+#: inc/admin/view.php:202
+#: inc/admin/view.php:451
 msgid "Stop job"
 msgstr ""
 
-#: inc/admin/view.php:199
+#: inc/admin/view.php:194
 msgid "These suggestions use policy protections and positive content-reference heuristics to recommend keeping sizes. Missing evidence never proves a size is unused, and recommendations never authorize deletion."
 msgstr ""
 
-#: inc/admin/view.php:204
+#: inc/admin/view.php:199
 msgid "Scan media usage"
 msgstr ""
 
-#: inc/admin/view.php:220
+#: inc/admin/view.php:215
 msgid "Protected"
 msgstr ""
 
-#: inc/admin/view.php:225
+#: inc/admin/view.php:220
 msgid "Detected References"
 msgstr ""
 
-#: inc/admin/view.php:230
+#: inc/admin/view.php:225
 msgid "Unknown / Review"
 msgstr ""
 
-#: inc/admin/view.php:235
+#: inc/admin/view.php:230
 msgid "Generated Footprint"
 msgstr ""
 
-#: inc/admin/view.php:246
+#: inc/admin/view.php:241
 msgid "Apply safe recommendations"
 msgstr ""
 
-#: inc/admin/view.php:250
+#: inc/admin/view.php:245
 msgid "Review in Prune Files"
 msgstr ""
 
-#: inc/admin/view.php:256
+#: inc/admin/view.php:251
 msgid "Apply only enables sizes supported by keep evidence. Unknown sizes keep their current setting; saving remains a separate action."
 msgstr ""
 
-#: inc/admin/view.php:266
+#: inc/admin/view.php:261
 msgid "Choose which registered image sizes to <strong>KEEP</strong>, then scan. The scan only builds a reviewable manifest; deletion requires a separate explicit approval after the scan completes."
 msgstr ""
 
-#: inc/admin/view.php:278
+#: inc/admin/view.php:273
 msgid "Prune progress"
 msgstr ""
 
-#: inc/admin/view.php:279
+#: inc/admin/view.php:274
 msgid "Configure"
 msgstr ""
 
-#: inc/admin/view.php:280
+#: inc/admin/view.php:275
 msgid "Scan"
 msgstr ""
 
-#: inc/admin/view.php:281
+#: inc/admin/view.php:276
 msgid "Review"
 msgstr ""
 
-#: inc/admin/view.php:282
+#: inc/admin/view.php:277
 msgid "Delete"
 msgstr ""
 
-#: inc/admin/view.php:283
+#: inc/admin/view.php:278
 msgid "Complete"
 msgstr ""
 
-#: inc/admin/view.php:287
+#: inc/admin/view.php:282
 msgid "Uploads scope"
 msgstr ""
 
-#: inc/admin/view.php:290
+#: inc/admin/view.php:285
 msgid "Scan the complete uploads directory."
 msgstr ""
 
-#: inc/admin/view.php:294
+#: inc/admin/view.php:289
 msgid "Selected folders"
 msgstr ""
 
-#: inc/admin/view.php:294
+#: inc/admin/view.php:289
 msgid "Choose multiple years or months to reduce scan time."
 msgstr ""
 
-#: inc/admin/view.php:299
+#: inc/admin/view.php:294
 msgid "Search uploads folders"
 msgstr ""
 
-#: inc/admin/view.php:300
+#: inc/admin/view.php:295
 msgid "Search year or folder, e.g. 2024/08…"
 msgstr ""
 
-#: inc/admin/view.php:302
+#: inc/admin/view.php:297
 msgid "Select visible"
 msgstr ""
 
-#: inc/admin/view.php:303
+#: inc/admin/view.php:298
 msgid "Clear"
 msgstr ""
 
-#: inc/admin/view.php:307
+#: inc/admin/view.php:302
 msgid "Available uploads folders"
 msgstr ""
 
 #. translators: %s: localized number of month/subfolder options.
-#: inc/admin/view.php:326
+#: inc/admin/view.php:321
 msgid "%s folder"
 msgid_plural "%s folders"
 msgstr[0] ""
 msgstr[1] ""
 
-#: inc/admin/view.php:335
+#: inc/admin/view.php:330
 msgid "Entire folder"
 msgstr ""
 
-#: inc/admin/view.php:347
+#: inc/admin/view.php:342
 msgid "No folders match this search."
 msgstr ""
 
-#: inc/admin/view.php:351
+#: inc/admin/view.php:346
 msgid "No folders selected"
 msgstr ""
 
-#: inc/admin/view.php:362
+#: inc/admin/view.php:357
 msgid "Keep"
 msgstr ""
 
-#: inc/admin/view.php:363
-#: inc/admin/view.php:545
+#: inc/admin/view.php:358
+#: inc/admin/view.php:540
 msgid "Size name"
 msgstr ""
 
-#: inc/admin/view.php:364
-#: inc/admin/view.php:546
+#: inc/admin/view.php:359
+#: inc/admin/view.php:541
 msgid "Target (WxH)"
 msgstr ""
 
-#: inc/admin/view.php:365
-#: inc/admin/view.php:547
+#: inc/admin/view.php:360
+#: inc/admin/view.php:542
 msgid "Crop"
 msgstr ""
 
-#: inc/admin/view.php:366
+#: inc/admin/view.php:361
 msgid "Deletion evidence"
 msgstr ""
 
-#: inc/admin/view.php:382
+#: inc/admin/view.php:377
 msgid "Deletes only the exact generated filename recorded in attachment metadata; unverified sidecars and siblings are report-only."
 msgstr ""
 
-#: inc/admin/view.php:399
-#: inc/admin/view.php:577
+#: inc/admin/view.php:394
+#: inc/admin/view.php:572
 #: inc/application/recommendations.php:640
 msgid "Core"
 msgstr ""
 
-#: inc/admin/view.php:409
+#: inc/admin/view.php:404
 msgid "Disabled for new uploads"
 msgstr ""
 
-#: inc/admin/view.php:411
-#: inc/admin/view.php:586
+#: inc/admin/view.php:406
+#: inc/admin/view.php:581
 msgid "Enabled"
 msgstr ""
 
-#: inc/admin/view.php:426
+#: inc/admin/view.php:421
 msgid "Include verified legacy thumbnails for currently disabled sizes (disk-only)"
 msgstr ""
 
-#: inc/admin/view.php:437
+#: inc/admin/view.php:432
 msgid "Only files bound to one authoritative local attachment source, an explicitly removed registered size, matching decoded dimensions/MIME, and no current reference can enter the review manifest. Ambiguous files and sidecars are preserved. Choose a smaller folder first on very large sites."
 msgstr ""
 
-#: inc/admin/view.php:444
+#: inc/admin/view.php:439
 msgid "Also include verified historical thumbnails from sizes no longer registered"
 msgstr ""
 
-#: inc/admin/view.php:447
+#: inc/admin/view.php:442
 msgid "Historical deletion is separately opt-in. Only conservative metadata-anchored fixed hard-crop cohorts enter review; soft-crop, one-off, unanchored, and ambiguous files are preserved."
 msgstr ""
 
-#: inc/admin/view.php:453
+#: inc/admin/view.php:448
 msgid "Scan and review"
 msgstr ""
 
-#: inc/admin/view.php:468
+#: inc/admin/view.php:463
 msgid "Review deletion manifest"
 msgstr ""
 
-#: inc/admin/view.php:469
+#: inc/admin/view.php:464
 msgid "This manifest is immutable. Nothing will be deleted until you explicitly approve it below."
 msgstr ""
 
-#: inc/admin/view.php:471
+#: inc/admin/view.php:466
 msgid "Awaiting approval"
 msgstr ""
 
-#: inc/admin/view.php:475
+#: inc/admin/view.php:470
 msgid "Files"
 msgstr ""
 
-#: inc/admin/view.php:476
-#: inc/admin/view.php:497
+#: inc/admin/view.php:471
+#: inc/admin/view.php:492
 msgid "Estimated size"
 msgstr ""
 
-#: inc/admin/view.php:478
+#: inc/admin/view.php:473
 msgid "Review expires"
 msgstr ""
 
-#: inc/admin/view.php:481
+#: inc/admin/view.php:476
 msgid "Manifest hash"
 msgstr ""
 
-#: inc/admin/view.php:485
+#: inc/admin/view.php:480
 msgid "Filter manifest"
 msgstr ""
 
-#: inc/admin/view.php:486
+#: inc/admin/view.php:481
 msgid "Filter by path or size…"
 msgstr ""
 
-#: inc/admin/view.php:494
+#: inc/admin/view.php:489
 msgid "File path"
 msgstr ""
 
-#: inc/admin/view.php:495
+#: inc/admin/view.php:490
 msgid "Attachment"
 msgstr ""
 
-#: inc/admin/view.php:496
+#: inc/admin/view.php:491
 msgid "Ownership evidence"
 msgstr ""
 
-#: inc/admin/view.php:505
-msgid "Previous"
-msgstr ""
-
-#: inc/admin/view.php:506
+#: inc/admin/view.php:501
 msgid "Page 1 of 1"
 msgstr ""
 
-#: inc/admin/view.php:507
-msgid "Next"
-msgstr ""
-
-#: inc/admin/view.php:513
+#: inc/admin/view.php:508
 msgid "I reviewed this manifest and understand that only these files will be permanently deleted."
 msgstr ""
 
-#: inc/admin/view.php:515
+#: inc/admin/view.php:510
 msgid "Approval is bound to your user, this site, and the manifest hash. It expires 30 minutes after confirmation."
 msgstr ""
 
-#: inc/admin/view.php:516
+#: inc/admin/view.php:511
 msgid "Delete reviewed files"
 msgstr ""
 
-#: inc/admin/view.php:526
+#: inc/admin/view.php:521
 msgid "Choose which sizes to <strong>generate for future uploads</strong>. Sizes you uncheck will be disabled at upload time.  To remove files that already exist for disabled sizes, use the <em>Prune Files</em> tab."
 msgstr ""
 
-#: inc/admin/view.php:544
+#: inc/admin/view.php:539
 msgid "Generate"
 msgstr ""
 
-#: inc/admin/view.php:548
+#: inc/admin/view.php:543
 msgid "Notes"
 msgstr ""
 
-#: inc/admin/view.php:587
+#: inc/admin/view.php:582
 msgid "Disabled (won’t be generated)"
 msgstr ""
 
-#: inc/admin/view.php:598
+#: inc/admin/view.php:593
 msgid "Save changes"
 msgstr ""
 
-#: inc/admin/view.php:601
+#: inc/admin/view.php:596
 msgid "Save changes and run regenerate"
 msgstr ""
 
-#: inc/admin/view.php:604
+#: inc/admin/view.php:599
 msgid "Enable core only"
 msgstr ""
 
-#: inc/admin/view.php:607
+#: inc/admin/view.php:602
 msgid "Enable all"
 msgstr ""
 
-#: inc/admin/view.php:610
+#: inc/admin/view.php:605
 msgid "Disable all"
 msgstr ""
 
-#: inc/admin/view.php:617
+#: inc/admin/view.php:612
 msgid "Changes above affect <strong>future uploads</strong>. Use the button below to remove existing thumbnails for disabled sizes."
 msgstr ""
 
-#: inc/admin/view.php:629
+#: inc/admin/view.php:624
 msgid "Danger zone"
 msgstr ""
 
-#: inc/admin/view.php:633
+#: inc/admin/view.php:628
 msgid "This starts a review-first Prune scan for metadata-backed and verified legacy thumbnails matching sizes that are <em>disabled</em> below. Nothing is deleted until you review and explicitly approve the immutable manifest. Originals remain protected."
 msgstr ""
 
-#: inc/admin/view.php:644
+#: inc/admin/view.php:639
 msgid "Delete thumbnails of disabled sizes"
 msgstr ""
 
@@ -1214,110 +1374,166 @@ msgstr ""
 msgid "A positive content heuristic supports keeping this size, but does not prove current runtime use."
 msgstr ""
 
-#: inc/application/regenerate.php:74
+#: inc/application/regenerate.php:62
+msgid "Invalid thumbnail operation."
+msgstr ""
+
+#: inc/application/regenerate.php:86
 msgid "Current year"
 msgstr ""
 
-#: inc/application/regenerate.php:80
+#: inc/application/regenerate.php:92
 msgid "Please choose an uploads folder."
 msgstr ""
 
-#: inc/application/regenerate.php:113
+#: inc/application/regenerate.php:116
+msgid "Select up to 500 images at a time, or use a folder scope."
+msgstr ""
+
+#: inc/application/regenerate.php:128
 msgid "Please enter at least one valid image attachment ID."
 msgstr ""
 
-#: inc/application/regenerate.php:207
+#: inc/application/regenerate.php:132
+msgid "Specific attachment IDs"
+msgstr ""
+
+#: inc/application/regenerate.php:224
 msgid "Invalid regeneration job."
 msgstr ""
 
-#: inc/application/regenerate.php:215
+#: inc/application/regenerate.php:232
 msgid "This regeneration job is not runnable."
 msgstr ""
 
-#: inc/application/regenerate.php:268
+#: inc/application/regenerate.php:287
 msgid "The regeneration folder selector is invalid."
 msgstr ""
 
-#: inc/application/regenerate.php:416
-#: inc/application/regenerate.php:417
+#: inc/application/regenerate.php:435
+#: inc/application/regenerate.php:436
 msgid "Attachment ID is missing."
 msgstr ""
 
-#: inc/application/regenerate.php:549
+#: inc/application/regenerate.php:570
 msgid "This legacy Force job predates transactional regeneration. Start a new Force job."
 msgstr ""
 
-#: inc/application/regenerate.php:650
+#: inc/application/regenerate.php:674
 msgid "The regeneration recovery journal is malformed and requires manual inspection."
 msgstr ""
 
-#: inc/application/regenerate.php:655
-#: inc/application/regenerate.php:667
+#: inc/application/regenerate.php:677
+msgid "The regeneration recovery mode is invalid."
+msgstr ""
+
+#: inc/application/regenerate.php:683
+#: inc/application/regenerate.php:696
 msgid "The regeneration recovery paths are invalid and require manual inspection."
 msgstr ""
 
-#: inc/application/regenerate.php:696
+#: inc/application/regenerate.php:718
+msgid "Repair metadata is saved but generated files cannot be verified. Restore the affected files or inspect the retained recovery record."
+msgstr ""
+
+#: inc/application/regenerate.php:736
 msgid "Could not finalize the recovered regeneration journal."
 msgstr ""
 
-#: inc/application/regenerate.php:713
+#: inc/application/regenerate.php:759
 msgid "Could not clear the rolled-back regeneration journal."
 msgstr ""
 
-#: inc/application/regenerate.php:717
+#: inc/application/regenerate.php:763
 msgid "The interrupted regeneration was rolled back and will be retried."
 msgstr ""
 
-#: inc/application/regenerate.php:735
+#: inc/application/regenerate.php:782
 msgid "The regeneration claim is stale."
 msgstr ""
 
-#: inc/application/regenerate.php:782
+#: inc/application/regenerate.php:841
 msgid "The acquired destination-lock set does not match the final generated-file map."
 msgstr ""
 
-#: inc/application/regenerate.php:787
+#: inc/application/regenerate.php:846
 msgid "Attachment state changed during regeneration; no live file was replaced."
 msgstr ""
 
-#: inc/application/regenerate.php:815
+#: inc/application/regenerate.php:851
+msgid "Enabled sizes or thumbnail files changed during repair. Run a new check; existing files were preserved."
+msgstr ""
+
+#: inc/application/regenerate.php:862
+msgid "An existing thumbnail was preserved. Run a new check to review the changed files."
+msgstr ""
+
+#: inc/application/regenerate.php:884
 msgid "Could not persist the regeneration journal."
 msgstr ""
 
-#: inc/application/regenerate.php:821
+#: inc/application/regenerate.php:889
+msgid "Repair was interrupted. Resume the saved job to reconcile its recovery record."
+msgstr ""
+
+#: inc/application/regenerate.php:893
 msgid "A generated destination changed before promotion."
 msgstr ""
 
-#: inc/application/regenerate.php:825
+#: inc/application/regenerate.php:897
 msgid "Could not persist the next promotion intent."
 msgstr ""
 
-#: inc/application/regenerate.php:829
+#: inc/application/regenerate.php:902
 msgid "Could not promote all staged generated files."
 msgstr ""
 
-#: inc/application/regenerate.php:833
+#: inc/application/regenerate.php:906
 msgid "Could not persist promoted-file evidence."
 msgstr ""
 
-#: inc/application/regenerate.php:840
+#: inc/application/regenerate.php:913
 msgid "Could not persist the promoted-files journal."
 msgstr ""
 
-#: inc/application/regenerate.php:845
+#: inc/application/regenerate.php:917
+msgid "Repair was interrupted before saving metadata. Resume the saved job to reconcile its recovery record."
+msgstr ""
+
+#: inc/application/regenerate.php:921
 msgid "Metadata commit and automatic rollback were incomplete; journal evidence was retained for manual recovery."
 msgstr ""
 
-#: inc/application/regenerate.php:848
+#: inc/application/regenerate.php:924
 msgid "Could not commit exact regenerated attachment metadata; the old state was restored."
 msgstr ""
 
-#: inc/application/regenerate.php:852
+#: inc/application/regenerate.php:928
 msgid "Metadata committed, but its recovery journal could not be advanced."
 msgstr ""
 
-#: inc/application/regenerate.php:864
+#: inc/application/regenerate.php:940
 msgid "Could not finalize the regeneration journal."
+msgstr ""
+
+#: inc/application/thumbnail-health.php:21
+msgid "Run a complete thumbnail check before repairing this selection."
+msgstr ""
+
+#: inc/application/thumbnail-health.php:78
+msgid "The inspection record is no longer available. Stop this job and run a new check."
+msgstr ""
+
+#: inc/application/thumbnail-health.php:149
+msgid "Missing thumbnails were restored. Other thumbnail files and metadata were preserved."
+msgstr ""
+
+#: inc/application/thumbnail-health.php:154
+msgid "Review the reason below, resolve the source or storage issue, then run a new check."
+msgstr ""
+
+#: inc/application/thumbnail-health.php:179
+msgid "This thumbnail inspection or repair record is unavailable."
 msgstr ""
 
 #: inc/handle-delete.php:22
@@ -1331,7 +1547,8 @@ msgstr ""
 #: inc/handle-recommendations.php:22
 #: inc/handle-recommendations.php:34
 #: inc/handle-regenerate.php:20
-#: inc/handle-regenerate.php:39
+#: inc/handle-regenerate.php:41
+#: inc/handle-regenerate.php:71
 msgid "No permission."
 msgstr ""
 
@@ -1457,9 +1674,9 @@ msgstr ""
 #: inc/media-source-index.php:384
 #: inc/media-source-index.php:473
 #: inc/media-source-index.php:477
-#: inc/media/regeneration.php:99
-#: inc/media/regeneration.php:140
-#: inc/media/regeneration.php:147
+#: inc/media/regeneration.php:100
+#: inc/media/regeneration.php:141
+#: inc/media/regeneration.php:148
 msgid "Attachment edit-backup state could not be resolved."
 msgstr ""
 
@@ -1885,181 +2102,201 @@ msgstr ""
 msgid "The file was removed, but its exact metadata reference could not be reconciled."
 msgstr ""
 
-#: inc/media/regeneration.php:79
+#: inc/media/regeneration.php:80
 msgid "Attachment is not a local raster image."
 msgstr ""
 
-#: inc/media/regeneration.php:92
+#: inc/media/regeneration.php:93
 msgid "Force requires exactly one valid raw attached-file row."
 msgstr ""
 
-#: inc/media/regeneration.php:95
+#: inc/media/regeneration.php:96
 msgid "Force requires exactly one valid raw attachment-metadata row."
 msgstr ""
 
-#: inc/media/regeneration.php:108
+#: inc/media/regeneration.php:109
 msgid "Raw attached-file and metadata full-image paths do not match."
 msgstr ""
 
-#: inc/media/regeneration.php:111
+#: inc/media/regeneration.php:112
 msgid "The current full image is missing or unsafe."
 msgstr ""
 
-#: inc/media/regeneration.php:125
+#: inc/media/regeneration.php:126
 msgid "A declared attachment companion is malformed."
 msgstr ""
 
-#: inc/media/regeneration.php:129
+#: inc/media/regeneration.php:130
 msgid "A declared attachment companion is missing or unsafe."
 msgstr ""
 
-#: inc/media/regeneration.php:154
+#: inc/media/regeneration.php:155
 msgid "The selected regeneration source could not be read safely."
 msgstr ""
 
-#: inc/media/regeneration.php:214
+#: inc/media/regeneration.php:159
+msgid "The current full image cannot be decoded. Restore a readable local source image before repair."
+msgstr ""
+
+#: inc/media/regeneration.php:221
 msgid "Could not create the private regeneration staging directory."
 msgstr ""
 
-#: inc/media/regeneration.php:219
+#: inc/media/regeneration.php:226
 msgid "Could not stage the authoritative source image."
 msgstr ""
 
-#: inc/media/regeneration.php:238
+#: inc/media/regeneration.php:249
 msgid "The filtered image-size definition is invalid."
 msgstr ""
 
-#: inc/media/regeneration.php:250
+#: inc/media/regeneration.php:261
 msgid "The image editor returned an invalid sub-size."
 msgstr ""
 
-#: inc/media/regeneration.php:258
+#: inc/media/regeneration.php:269
 msgid "The image editor returned invalid sub-sizes."
 msgstr ""
 
-#: inc/media/regeneration.php:269
+#: inc/media/regeneration.php:274
+msgid "The image editor did not create every requested missing thumbnail."
+msgstr ""
+
+#: inc/media/regeneration.php:284
 msgid "A staged sub-size is missing or unsafe."
 msgstr ""
 
-#: inc/media/regeneration.php:295
+#: inc/media/regeneration.php:290
+msgid "A repair output would upscale the current full image."
+msgstr ""
+
+#: inc/media/regeneration.php:314
 msgid "Current full-image dimensions could not be verified."
 msgstr ""
 
-#: inc/media/regeneration.php:311
+#: inc/media/regeneration.php:335
 msgid "A metadata filter returned an invalid result."
 msgstr ""
 
-#: inc/media/regeneration.php:317
+#: inc/media/regeneration.php:344
+msgid "A metadata filter removed a required repair size."
+msgstr ""
+
+#: inc/media/regeneration.php:348
+msgid "A metadata filter changed data outside the missing sizes. No live file was replaced."
+msgstr ""
+
+#: inc/media/regeneration.php:355
 msgid "A metadata filter changed a protected attachment file declaration."
 msgstr ""
 
-#: inc/media/regeneration.php:321
+#: inc/media/regeneration.php:359
 msgid "A metadata filter changed verified current-full properties."
 msgstr ""
 
-#: inc/media/regeneration.php:330
+#: inc/media/regeneration.php:371
 msgid "A metadata filter introduced an ungenerated or unsafe sub-size."
 msgstr ""
 
-#: inc/media/regeneration.php:336
+#: inc/media/regeneration.php:377
 msgid "A filtered staged-file rename could not be applied safely."
 msgstr ""
 
-#: inc/media/regeneration.php:341
+#: inc/media/regeneration.php:382
 msgid "A generated destination collides with protected or duplicate media."
 msgstr ""
 
-#: inc/media/regeneration.php:352
+#: inc/media/regeneration.php:393
 msgid "A generated sub-size does not match its filtered metadata."
 msgstr ""
 
-#: inc/media/regeneration.php:359
+#: inc/media/regeneration.php:400
 msgid "A generated sub-size could not be read safely."
 msgstr ""
 
-#: inc/media/regeneration.php:387
+#: inc/media/regeneration.php:428
 msgid "Existing generated-size metadata is malformed."
 msgstr ""
 
-#: inc/media/regeneration.php:415
+#: inc/media/regeneration.php:456
 msgid "A generated destination is protected by attachment source metadata."
 msgstr ""
 
-#: inc/media/regeneration.php:423
+#: inc/media/regeneration.php:464
 msgid "Another or unexpected generated-file reference owns this destination."
 msgstr ""
 
-#: inc/media/regeneration.php:430
+#: inc/media/regeneration.php:471
 msgid "An existing unreferenced destination was preserved."
 msgstr ""
 
-#: inc/media/regeneration.php:442
+#: inc/media/regeneration.php:483
 msgid "A generated destination is not a regular file."
 msgstr ""
 
-#: inc/media/regeneration.php:449
+#: inc/media/regeneration.php:490
 msgid "A replaceable generated file could not be read safely."
 msgstr ""
 
-#: inc/media/regeneration.php:454
+#: inc/media/regeneration.php:495
 msgid "Could not verify a private backup of the replaceable generated file."
 msgstr ""
 
-#: inc/media/regeneration.php:525
-#: inc/media/regeneration.php:534
+#: inc/media/regeneration.php:566
+#: inc/media/regeneration.php:575
 msgid "Current metadata does not match either journaled transaction state."
 msgstr ""
 
-#: inc/media/regeneration.php:549
+#: inc/media/regeneration.php:590
 msgid "Recovery found a newly protected destination."
 msgstr ""
 
-#: inc/media/regeneration.php:559
+#: inc/media/regeneration.php:600
 msgid "Destination ownership changed after the interrupted regeneration."
 msgstr ""
 
-#: inc/media/regeneration.php:565
+#: inc/media/regeneration.php:606
 msgid "A promoted artifact changed after the interrupted regeneration."
 msgstr ""
 
-#: inc/media/regeneration.php:569
+#: inc/media/regeneration.php:610
 msgid "Could not remove an exact interrupted promoted artifact."
 msgstr ""
 
-#: inc/media/regeneration.php:572
+#: inc/media/regeneration.php:613
 msgid "Could not restore an exact interrupted generated-file backup."
 msgstr ""
 
-#: inc/media/regeneration.php:575
+#: inc/media/regeneration.php:616
 msgid "A non-promoted destination changed after the interrupted regeneration."
 msgstr ""
 
-#: inc/media/regeneration.php:632
-#: inc/media/regeneration.php:636
+#: inc/media/regeneration.php:673
+#: inc/media/regeneration.php:677
 msgid "An obsolete generated file could not be deleted safely."
 msgstr ""
 
-#: inc/media/regeneration.php:655
+#: inc/media/regeneration.php:696
 msgid "Force regeneration requires a persistent claimed job item."
 msgstr ""
 
-#: inc/media/regeneration.php:663
+#: inc/media/regeneration.php:704
 msgid "Attached image file is missing."
 msgstr ""
 
-#: inc/media/regeneration.php:670
+#: inc/media/regeneration.php:711
 msgid "Attachment is not a raster image."
 msgstr ""
 
-#: inc/media/regeneration.php:680
+#: inc/media/regeneration.php:721
 msgid "No image sizes are missing."
 msgstr ""
 
-#: inc/media/regeneration.php:707
+#: inc/media/regeneration.php:748
 msgid "WordPress returned empty image metadata."
 msgstr ""
 
-#: inc/media/regeneration.php:722
+#: inc/media/regeneration.php:763
 msgid "Could not update attachment metadata."
 msgstr ""
 
@@ -2085,6 +2322,99 @@ msgstr ""
 
 #: inc/media/source-store.php:209
 msgid "Too many authoritative media aliases matched one exact path."
+msgstr ""
+
+#: inc/media/thumbnail-health.php:44
+msgid "Attachment metadata is missing or invalid."
+msgstr ""
+
+#: inc/media/thumbnail-health.php:46
+msgid "The attached local image cannot be resolved safely."
+msgstr ""
+
+#: inc/media/thumbnail-health.php:49
+msgid "Restore valid attachment metadata from a backup before checking or repairing thumbnails."
+msgstr ""
+
+#: inc/media/thumbnail-health.php:50
+msgid "Restore the local full image and its declared source files, or review the storage integration and attachment metadata."
+msgstr ""
+
+#: inc/media/thumbnail-health.php:56
+msgid "The server image editor does not support this image type."
+msgstr ""
+
+#: inc/media/thumbnail-health.php:57
+msgid "Enable a compatible WordPress image editor before repairing this image."
+msgstr ""
+
+#: inc/media/thumbnail-health.php:63
+msgid "The attachment thumbnail metadata is malformed."
+msgstr ""
+
+#: inc/media/thumbnail-health.php:64
+#: inc/media/thumbnail-health.php:72
+msgid "Restore valid attachment metadata before repairing thumbnails."
+msgstr ""
+
+#: inc/media/thumbnail-health.php:71
+msgid "The attachment contains an unsafe thumbnail metadata entry."
+msgstr ""
+
+#: inc/media/thumbnail-health.php:81
+msgid "An image-size filter returned an invalid definition."
+msgstr ""
+
+#: inc/media/thumbnail-health.php:82
+msgid "Review image-size filters before repairing thumbnails."
+msgstr ""
+
+#: inc/media/thumbnail-health.php:104
+msgid "Review this registered image-size definition."
+msgstr ""
+
+#: inc/media/thumbnail-health.php:118
+msgid "Review the thumbnail path and restore safe attachment metadata."
+msgstr ""
+
+#: inc/media/thumbnail-health.php:145
+msgid "Review image-resize filters that request upscaling."
+msgstr ""
+
+#: inc/media/thumbnail-health.php:152
+msgid "Repair this missing thumbnail from the current full image."
+msgstr ""
+
+#: inc/media/thumbnail-health.php:159
+msgid "Some thumbnail paths or size definitions require manual review."
+msgstr ""
+
+#: inc/media/thumbnail-health.php:159
+msgid "Enabled thumbnails are missing."
+msgstr ""
+
+#: inc/media/thumbnail-health.php:159
+msgid "No required enabled thumbnails are missing."
+msgstr ""
+
+#: inc/media/thumbnail-health.php:160
+msgid "Resolve the reported unsafe thumbnail state before repair."
+msgstr ""
+
+#: inc/media/thumbnail-health.php:160
+msgid "Repair the missing thumbnails."
+msgstr ""
+
+#: inc/media/thumbnail-health.php:178
+msgid "The repair recovery record is incomplete. Inspect the retained recovery record before retrying."
+msgstr ""
+
+#: inc/media/thumbnail-health.php:183
+msgid "The repair recovery record does not prove an absent destination."
+msgstr ""
+
+#: inc/media/thumbnail-health.php:205
+msgid "A repair destination was created or replaced by another process. It was preserved; inspect the retained recovery record."
 msgstr ""
 
 #. translators: %s: four-digit uploads year.
