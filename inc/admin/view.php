@@ -100,7 +100,7 @@ function yotm_render_admin_view( $view ) {
 			</p>
 
 			<p class="description">
-				<?php echo esc_html__( 'Recommended after changing thumbnail size settings or after enabling new sizes.', 'thumbnail-manager' ); ?>
+				<?php echo esc_html__( 'Checks cover currently enabled sizes and local upload files. They do not verify frontend pages or CDN copies. Checking does not change any files.', 'thumbnail-manager' ); ?>
 			</p>
 
 			<fieldset class="yo-row yo-scope-picker" id="yotm_regen_scope_picker">
@@ -119,7 +119,7 @@ function yotm_render_admin_view( $view ) {
 				</label>
 				<label class="yo-scope-mode">
 					<input type="radio" name="yotm_regen_scope" value="ids">
-					<span><strong><?php echo esc_html__( 'Specific attachment IDs', 'thumbnail-manager' ); ?></strong></span>
+					<span><strong><?php echo esc_html__( 'Selected images', 'thumbnail-manager' ); ?></strong></span>
 				</label>
 			</fieldset>
 
@@ -142,25 +142,18 @@ function yotm_render_admin_view( $view ) {
 			</div>
 
 			<div class="yo-row yo-hidden" id="yotm_regen_ids_wrap">
-				<label for="yotm_regen_attachment_ids">
-					<?php echo esc_html__( 'Attachment IDs', 'thumbnail-manager' ); ?>
-				</label><br>
-				<textarea
-					id="yotm_regen_attachment_ids"
-					rows="4"
-					style="width:100%;max-width:720px;"
-					placeholder="<?php echo esc_attr__( 'Example: 123, 456, 789', 'thumbnail-manager' ); ?>"
-				></textarea>
-				<p class="description">
-					<?php echo esc_html__( 'Enter one or more Media Library attachment IDs separated by commas or spaces.', 'thumbnail-manager' ); ?>
-				</p>
+				<button type="button" id="yotm_regen_choose" class="button"><?php echo esc_html__( 'Choose images', 'thumbnail-manager' ); ?></button>
+				<span id="yotm_regen_selection_count" aria-live="polite"></span>
+				<p class="description"><?php echo esc_html__( 'Select up to 500 images using the Media Library picker.', 'thumbnail-manager' ); ?></p>
+				<input type="hidden" id="yotm_regen_attachment_ids" value="">
+				<div id="yotm_regen_selection_error" role="alert"></div>
 			</div>
 
 			<fieldset class="yo-row yo-radio-group" id="yotm_regen_mode_group">
 				<legend><strong><?php echo esc_html__( 'Regeneration mode', 'thumbnail-manager' ); ?></strong></legend>
 				<label class="yo-radio-option">
 					<input type="radio" name="yotm_regen_mode" value="missing" checked>
-					<span><strong><?php echo esc_html__( 'Generate missing sizes only', 'thumbnail-manager' ); ?></strong><small><?php echo esc_html__( 'Faster and recommended for routine maintenance.', 'thumbnail-manager' ); ?></small></span>
+					<span><strong><?php echo esc_html__( 'Check and repair missing thumbnails', 'thumbnail-manager' ); ?></strong><small><?php echo esc_html__( 'Inspect first, review the results, then explicitly repair missing thumbnails.', 'thumbnail-manager' ); ?></small></span>
 				</label>
 				<label class="yo-radio-option">
 					<input type="radio" name="yotm_regen_mode" value="force">
@@ -174,7 +167,7 @@ function yotm_render_admin_view( $view ) {
 
 			<p class="yo-row">
 				<button type="button" id="yotm_regen_run" class="button button-primary">
-					<?php echo esc_html__( 'Run regenerate', 'thumbnail-manager' ); ?>
+					<?php echo esc_html__( 'Check thumbnails', 'thumbnail-manager' ); ?>
 				</button>
 				<button id="yotm_regen_cancel" type="button" class="button yo-hidden">
 					<?php echo esc_html__( 'Stop job', 'thumbnail-manager' ); ?>
@@ -186,6 +179,8 @@ function yotm_render_admin_view( $view ) {
 				</div>
 				<div id="yotm_regen_status" class="yo-status" aria-live="polite"></div>
 			<div id="yotm_regen_results" tabindex="-1" aria-live="polite"></div>
+			<p><button type="button" id="yotm_regen_repair" class="button button-primary yo-hidden"><?php echo esc_html__( 'Repair missing thumbnails', 'thumbnail-manager' ); ?></button></p>
+			<div id="yotm_health_results" aria-live="polite"></div>
 		</div>
 
 		<!-- TAB: RECOMMENDATIONS -->

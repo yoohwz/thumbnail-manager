@@ -67,10 +67,11 @@ function yotm_regenerate_failure( $message, $retryable = false ) {
 /**
  * Read and validate the raw authoritative state used by Force.
  *
- * @param int $attachment_id Attachment ID.
+ * @param int  $attachment_id Attachment ID.
+ * @param bool $repair Whether missing-only repair uses the current full image.
  * @return array|WP_Error
  */
-function yotm_regenerate_preflight( $attachment_id ) {
+function yotm_regenerate_preflight( $attachment_id, $repair = false ) {
 	$attachment_id = absint( $attachment_id );
 	$uploads       = wp_get_upload_dir();
 	$base          = (string) ( $uploads['basedir'] ?? '' );
@@ -129,7 +130,7 @@ function yotm_regenerate_preflight( $attachment_id ) {
 			return new WP_Error( 'yotm_regenerate_companion_missing', __( 'A declared attachment companion is missing or unsafe.', 'thumbnail-manager' ) );
 		}
 		$protected[ $path ] = $field;
-		if ( 'original_image' === $field ) {
+		if ( 'original_image' === $field && ! $repair ) {
 			$source = $path;
 		}
 	}
@@ -153,19 +154,25 @@ function yotm_regenerate_preflight( $attachment_id ) {
 	if ( ! is_string( $source_hash ) || '' === $source_hash ) {
 		return new WP_Error( 'yotm_regenerate_source_unreadable', __( 'The selected regeneration source could not be read safely.', 'thumbnail-manager' ) );
 	}
+	$dimensions = $repair ? wp_getimagesize( $source ) : array();
+	if ( $repair && ( ! is_array( $dimensions ) || empty( $dimensions[0] ) || empty( $dimensions[1] ) ) ) {
+		return new WP_Error( 'yotm_regenerate_source_dimensions', __( 'The current full image cannot be decoded. Restore a readable local source image before repair.', 'thumbnail-manager' ) );
+	}
 
 	return array(
-		'attachment_id'    => $attachment_id,
-		'attached_meta_id' => absint( $attached_rows[0]['meta_id'] ?? 0 ),
-		'metadata_meta_id' => absint( $metadata_rows[0]['meta_id'] ?? 0 ),
-		'attached_raw'     => $attached_values[0],
-		'metadata'         => $metadata,
-		'backups'          => array_values( $backup_values ),
-		'full'             => $full,
-		'source'           => $source,
-		'protected'        => $protected,
-		'metadata_hash'    => yotm_regenerate_metadata_hash( $metadata ),
-		'source_hash'      => $source_hash,
+		'attachment_id'     => $attachment_id,
+		'attached_meta_id'  => absint( $attached_rows[0]['meta_id'] ?? 0 ),
+		'metadata_meta_id'  => absint( $metadata_rows[0]['meta_id'] ?? 0 ),
+		'attached_raw'      => $attached_values[0],
+		'metadata'          => $metadata,
+		'backups'           => array_values( $backup_values ),
+		'full'              => $full,
+		'source'            => $source,
+		'protected'         => $protected,
+		'metadata_hash'     => yotm_regenerate_metadata_hash( $metadata ),
+		'source_hash'       => $source_hash,
+		'repair'            => (bool) $repair,
+		'source_dimensions' => $dimensions,
 	);
 }
 
@@ -224,15 +231,19 @@ function yotm_regenerate_stage_outputs( $snapshot ) {
 		yotm_regenerate_remove_stage( $stage, $parent );
 		return $editor;
 	}
-	$rotated = $editor->maybe_exif_rotate();
+	$rotated = empty( $snapshot['repair'] ) ? $editor->maybe_exif_rotate() : true;
 	if ( is_wp_error( $rotated ) ) {
 		yotm_regenerate_remove_stage( $stage, $parent );
 		return $rotated;
 	}
-	$sizes = wp_get_registered_image_subsizes();
-	// phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Core-compatible generation surface.
-	$sizes = apply_filters( 'intermediate_image_sizes_advanced', $sizes, $snapshot['metadata'], $snapshot['attachment_id'] );
-	$sizes = yotm_apply_enabled_size_policy( $sizes );
+	if ( ! empty( $snapshot['repair'] ) ) {
+		$sizes = $snapshot['requested_sizes'] ?? array();
+	} else {
+		$sizes = wp_get_registered_image_subsizes();
+		// phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Core-compatible generation surface.
+		$sizes = apply_filters( 'intermediate_image_sizes_advanced', $sizes, $snapshot['metadata'], $snapshot['attachment_id'] );
+		$sizes = yotm_apply_enabled_size_policy( $sizes );
+	}
 	if ( ! is_array( $sizes ) ) {
 		yotm_regenerate_remove_stage( $stage, $parent );
 		return new WP_Error( 'yotm_regenerate_sizes_invalid', __( 'The filtered image-size definition is invalid.', 'thumbnail-manager' ) );
@@ -258,6 +269,10 @@ function yotm_regenerate_stage_outputs( $snapshot ) {
 			return is_wp_error( $outputs ) ? $outputs : new WP_Error( 'yotm_regenerate_output_invalid', __( 'The image editor returned invalid sub-sizes.', 'thumbnail-manager' ) );
 		}
 	}
+	if ( ! empty( $snapshot['repair'] ) && array_diff_key( $sizes, $outputs ) ) {
+		yotm_regenerate_remove_stage( $stage, $parent );
+		return new WP_Error( 'yotm_repair_output_missing', __( 'The image editor did not create every requested missing thumbnail.', 'thumbnail-manager' ) );
+	}
 
 	$validated = array();
 	foreach ( $outputs as $slug => $output ) {
@@ -270,6 +285,10 @@ function yotm_regenerate_stage_outputs( $snapshot ) {
 		}
 		$output['file']     = $filename;
 		$output['filesize'] = filesize( $path );
+		if ( ! empty( $snapshot['repair'] ) && ( (int) ( $output['width'] ?? 0 ) > (int) $snapshot['source_dimensions'][0] || (int) ( $output['height'] ?? 0 ) > (int) $snapshot['source_dimensions'][1] ) ) {
+			yotm_regenerate_remove_stage( $stage, $parent );
+			return new WP_Error( 'yotm_repair_output_upscaled', __( 'A repair output would upscale the current full image.', 'thumbnail-manager' ) );
+		}
 		$validated[ $slug ] = array(
 			'metadata' => $output,
 			'path'     => $path,
@@ -294,11 +313,16 @@ function yotm_regenerate_finalize_metadata( $snapshot, $staged ) {
 	if ( ! is_array( $dimensions ) || empty( $dimensions[0] ) || empty( $dimensions[1] ) ) {
 		return new WP_Error( 'yotm_regenerate_full_dimensions', __( 'Current full-image dimensions could not be verified.', 'thumbnail-manager' ) );
 	}
-	$proposed             = $snapshot['metadata'];
-	$proposed['width']    = (int) $dimensions[0];
-	$proposed['height']   = (int) $dimensions[1];
-	$proposed['filesize'] = filesize( $snapshot['full'] );
-	$proposed['sizes']    = array();
+	$repair   = ! empty( $snapshot['repair'] );
+	$proposed = $snapshot['metadata'];
+	if ( ! $repair ) {
+		$proposed['width']    = (int) $dimensions[0];
+		$proposed['height']   = (int) $dimensions[1];
+		$proposed['filesize'] = filesize( $snapshot['full'] );
+		$proposed['sizes']    = array();
+	} else {
+		$proposed['sizes'] = $proposed['sizes'] ?? array();
+	}
 	foreach ( $staged['outputs'] as $slug => $output ) {
 		$proposed['sizes'][ $slug ] = $output['metadata'];
 	}
@@ -310,6 +334,20 @@ function yotm_regenerate_finalize_metadata( $snapshot, $staged ) {
 	if ( ! is_array( $final ) || empty( $final ) || ! is_array( $final['sizes'] ?? null ) ) {
 		return new WP_Error( 'yotm_regenerate_filtered_metadata', __( 'A metadata filter returned an invalid result.', 'thumbnail-manager' ) );
 	}
+	if ( $repair ) {
+		$preserved_old          = $snapshot['metadata'];
+		$preserved_final        = $final;
+		$preserved_old['sizes'] = $preserved_old['sizes'] ?? array();
+		foreach ( array_keys( $staged['outputs'] ) as $slug ) {
+			unset( $preserved_old['sizes'][ $slug ], $preserved_final['sizes'][ $slug ] );
+			if ( ! isset( $final['sizes'][ $slug ] ) ) {
+				return new WP_Error( 'yotm_repair_target_removed', __( 'A metadata filter removed a required repair size.', 'thumbnail-manager' ) );
+			}
+		}
+		if ( $preserved_old !== $preserved_final ) {
+			return new WP_Error( 'yotm_repair_preserved_metadata', __( 'A metadata filter changed data outside the missing sizes. No live file was replaced.', 'thumbnail-manager' ) );
+		}
+	}
 
 	$protected_fields = array( 'file', 'original_image', 'source_image', 'thumb', 'animated_video', 'animated_video_poster' );
 	foreach ( $protected_fields as $field ) {
@@ -317,13 +355,16 @@ function yotm_regenerate_finalize_metadata( $snapshot, $staged ) {
 			return new WP_Error( 'yotm_regenerate_protected_metadata', __( 'A metadata filter changed a protected attachment file declaration.', 'thumbnail-manager' ) );
 		}
 	}
-	if ( (int) ( $final['width'] ?? 0 ) !== $proposed['width'] || (int) ( $final['height'] ?? 0 ) !== $proposed['height'] || (int) ( $final['filesize'] ?? 0 ) !== $proposed['filesize'] ) {
+	if ( ! $repair && ( (int) ( $final['width'] ?? 0 ) !== $proposed['width'] || (int) ( $final['height'] ?? 0 ) !== $proposed['height'] || (int) ( $final['filesize'] ?? 0 ) !== $proposed['filesize'] ) ) {
 		return new WP_Error( 'yotm_regenerate_full_metadata', __( 'A metadata filter changed verified current-full properties.', 'thumbnail-manager' ) );
 	}
 
 	$map  = array();
 	$seen = array();
 	foreach ( $final['sizes'] as $slug => &$size ) {
+		if ( $repair && ! isset( $staged['outputs'][ $slug ] ) ) {
+			continue;
+		}
 		$slug     = sanitize_key( $slug );
 		$filename = is_array( $size ) ? ( $size['file'] ?? '' ) : '';
 		if ( '' === $slug || ! isset( $staged['outputs'][ $slug ] ) || ! is_string( $filename ) || '' === $filename || wp_basename( $filename ) !== $filename || false !== strpos( $filename, '\\' ) ) {
@@ -478,7 +519,7 @@ function yotm_regenerate_rollback( $journal ) {
 		if ( empty( $entry['promoted'] ) ) {
 			continue;
 		}
-		if ( ! yotm_regenerate_file_hash_matches( $path, (string) ( $entry['promoted_hash'] ?? '' ) ) ) {
+		if ( ( 'repair' === ( $journal['mode'] ?? '' ) && ! yotm_thumbnail_health_owns_output( $entry ) ) || ! yotm_regenerate_file_hash_matches( $path, (string) ( $entry['promoted_hash'] ?? '' ) ) ) {
 			$complete = false;
 			continue;
 		}

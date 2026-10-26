@@ -20,6 +20,8 @@ function yotm_admin_enqueue_assets( $hook ) {
 		return;
 	}
 
+	wp_enqueue_media();
+
 	// CSS.
 	wp_register_style(
 		'yotm-prune-admin',
@@ -78,11 +80,50 @@ function yotm_admin_enqueue_assets( $hook ) {
 		array(
 			'ajaxurl'                  => admin_url( 'admin-ajax.php' ),
 			'nonce'                    => wp_create_nonce( 'yotm_prune_nonce' ),
+			'mediaSelection'           => yotm_admin_requested_media_selection(),
 			'siteId'                   => get_current_blog_id(),
 			'registeredSizesSignature' => function_exists( 'yotm_recommend_registered_sizes_signature' )
 				? yotm_recommend_registered_sizes_signature( yotm_get_registered_sizes() )
 				: '',
 			'i18n'                     => array(
+				'healthFilePresent'               => __( 'Thumbnail file is present.', 'thumbnail-manager' ),
+				'healthFileMissing'               => __( 'Thumbnail file is missing.', 'thumbnail-manager' ),
+				'healthMetadataMissing'           => __( 'Thumbnail metadata is missing.', 'thumbnail-manager' ),
+				'healthSourceTooSmall'            => __( 'This size is not needed for the source image dimensions.', 'thumbnail-manager' ),
+				'healthSizeNotEnabled'            => __( 'This thumbnail size is currently disabled.', 'thumbnail-manager' ),
+				'healthUnsafePath'                => __( 'The thumbnail path could not be verified safely.', 'thumbnail-manager' ),
+				'healthInvalidDefinition'         => __( 'This thumbnail size has an invalid definition.', 'thumbnail-manager' ),
+				'healthUpscaledDefinition'        => __( 'This thumbnail size would require enlarging the source image.', 'thumbnail-manager' ),
+				'checkThumbnails'                 => __( 'Check thumbnails', 'thumbnail-manager' ),
+				'runForceRegenerate'              => __( 'Run force regeneration', 'thumbnail-manager' ),
+				'chooseImages'                    => __( 'Choose images', 'thumbnail-manager' ),
+				'useSelectedImages'               => __( 'Use selected images', 'thumbnail-manager' ),
+				'oneImageSelected'                => __( '1 image selected', 'thumbnail-manager' ),
+				/* translators: %s: selected image count. */
+				'selectedImageCount'              => __( '%s images selected', 'thumbnail-manager' ),
+				'selectionLimit'                  => __( 'Choose up to 500 images at a time. Your previous selection has been retained.', 'thumbnail-manager' ),
+				'selectionEmpty'                  => __( 'Choose at least one image from the Media Library.', 'thumbnail-manager' ),
+				'healthCheckDone'                 => __( 'Check complete. Review the results, then choose Repair missing thumbnails to make changes.', 'thumbnail-manager' ),
+				'healthRepairDone'                => __( 'Repair complete. Results show the files restored by this job.', 'thumbnail-manager' ),
+				'healthCoverage'                  => __( 'Only currently enabled sizes and local upload files were checked. Frontend pages and CDN copies are outside this report.', 'thumbnail-manager' ),
+				'healthLoading'                   => __( 'Loading thumbnail results…', 'thumbnail-manager' ),
+				'healthLoadFailed'                => __( 'Could not load thumbnail results.', 'thumbnail-manager' ),
+				'healthInspected'                 => __( 'Inspected (UTC):', 'thumbnail-manager' ),
+				'healthInspectedCount'            => __( 'Inspected:', 'thumbnail-manager' ),
+				'healthTitle'                     => __( 'Image', 'thumbnail-manager' ),
+				'healthAction'                    => __( 'Suggested action', 'thumbnail-manager' ),
+				'healthMissing'                   => __( 'Missing', 'thumbnail-manager' ),
+				'healthHealthy'                   => __( 'Healthy', 'thumbnail-manager' ),
+				'healthBlocked'                   => __( 'Blocked', 'thumbnail-manager' ),
+				'healthUnsupported'               => __( 'Unsupported', 'thumbnail-manager' ),
+				'healthDisabled'                  => __( 'Disabled', 'thumbnail-manager' ),
+				'healthNotNeeded'                 => __( 'Not needed', 'thumbnail-manager' ),
+				'healthRestored'                  => __( 'Restored:', 'thumbnail-manager' ),
+				'healthNoResults'                 => __( 'No thumbnail results are available yet.', 'thumbnail-manager' ),
+				'previousPage'                    => __( 'Previous', 'thumbnail-manager' ),
+				'nextPage'                        => __( 'Next', 'thumbnail-manager' ),
+				'healthNewCheck'                  => __( 'Run a new check after changing enabled sizes or media files.', 'thumbnail-manager' ),
+				'healthItemResult'                => __( 'Job result:', 'thumbnail-manager' ),
 				'allSizesEnabled'                 => __( 'All sizes are enabled — there are no disabled sizes to prune.', 'thumbnail-manager' ),
 				'scanning'                        => __( 'Scanning…', 'thumbnail-manager' ),
 				'deleting'                        => __( 'Deleting…', 'thumbnail-manager' ),
@@ -184,6 +225,9 @@ function yotm_admin_enqueue_assets( $hook ) {
 				'viewJob'                         => __( 'View job', 'thumbnail-manager' ),
 				'noRecentJobs'                    => __( 'No recent jobs.', 'thumbnail-manager' ),
 				'jobPrune'                        => __( 'Prune files', 'thumbnail-manager' ),
+				'jobThumbnailCheck'               => __( 'Check thumbnails', 'thumbnail-manager' ),
+				'jobThumbnailRepair'              => __( 'Repair missing thumbnails', 'thumbnail-manager' ),
+				'healthSavedResults'              => __( 'Saved job results. No new processing was started.', 'thumbnail-manager' ),
 				'jobRegenerate'                   => __( 'Regenerate', 'thumbnail-manager' ),
 				'jobRecommendation'               => __( 'Recommendations', 'thumbnail-manager' ),
 				'statusScanning'                  => __( 'Scanning', 'thumbnail-manager' ),

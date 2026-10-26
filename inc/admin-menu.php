@@ -19,6 +19,7 @@ if ( ! defined( 'YOTM_PLUGIN_PATH' ) ) {
 require_once __DIR__ . '/admin/assets.php';
 require_once __DIR__ . '/admin/page.php';
 require_once __DIR__ . '/admin/view.php';
+require_once __DIR__ . '/admin/media-library.php';
 
 add_action( 'admin_enqueue_scripts', 'yotm_admin_enqueue_assets' );
 add_action( 'admin_menu', 'yotm_register_admin_page' );
