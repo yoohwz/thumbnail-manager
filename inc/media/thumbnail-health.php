@@ -219,14 +219,15 @@ function yotm_thumbnail_health_rollback_journal( $journal ) {
  * @return bool
  */
 function yotm_thumbnail_health_promote_destination( &$entry ) {
+	$source_node            = yotm_thumbnail_health_file_node( $entry['source'] );
+	$entry['promoted_node'] = $source_node;
 	// phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- Atomic no-clobber publication on the same filesystem; failure preserves the existing destination.
-	if ( ! yotm_thumbnail_health_file_node( $entry['source'] ) || ! @link( $entry['source'], $entry['destination'] ) ) {
+	if ( ! $source_node || ! @link( $entry['source'], $entry['destination'] ) ) {
 		$entry['promoted'] = false;
 		return false;
 	}
-	$entry['promoted']      = true;
-	$entry['promoted_node'] = yotm_thumbnail_health_file_node( $entry['destination'] );
-	return yotm_regenerate_file_hash_matches( $entry['destination'], $entry['promoted_hash'] );
+	$entry['promoted'] = yotm_thumbnail_health_owns_output( $entry );
+	return $entry['promoted'] && yotm_regenerate_file_hash_matches( $entry['destination'], $entry['promoted_hash'] );
 }
 
 /**
@@ -236,6 +237,7 @@ function yotm_thumbnail_health_promote_destination( &$entry ) {
  * @return array|null Device and inode, or null when unsafe/unavailable.
  */
 function yotm_thumbnail_health_file_node( $path ) {
+	clearstatcache( true, $path );
 	// phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- A missing or unsafe node provides no rollback authority.
 	$node = @lstat( $path );
 	return is_array( $node ) && ! empty( $node['ino'] ) && ! is_link( $path ) && is_file( $path )

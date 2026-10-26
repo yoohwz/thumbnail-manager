@@ -260,6 +260,36 @@ class YOTM_Thumbnail_Health_Application_Test extends WP_UnitTestCase {
 		$this->assertFalse( yotm_thumbnail_health_owns_output( $entry ) );
 	}
 
+	public function test_rollback_preserves_identical_bytes_from_a_replaced_destination() {
+		$source      = $this->dir . '/source.jpg';
+		$target      = $this->dir . '/published.jpg';
+		$entry       = array(
+			'source'        => $source,
+			'destination'   => $target,
+			'promoted_hash' => hash_file( 'sha256', $source ),
+			'old_absent'    => true,
+			'mode'          => 'expected_absent',
+		);
+		$source_node = yotm_thumbnail_health_file_node( $source );
+		$this->assertTrue( yotm_thumbnail_health_promote_destination( $entry ) );
+		$this->assertSame( $source_node, $entry['promoted_node'] );
+		copy( $source, $this->dir . '/replacement.jpg' );
+		rename( $this->dir . '/replacement.jpg', $target );
+		$replacement_node = yotm_thumbnail_health_file_node( $target );
+		$this->assertNotSame( $source_node, $replacement_node );
+		$this->assertFalse( yotm_thumbnail_health_owns_output( $entry ) );
+		$this->assertFalse(
+			yotm_regenerate_rollback(
+				array(
+					'mode'         => 'repair',
+					'destinations' => array( $entry ),
+				)
+			)
+		);
+		$this->assertFileExists( $target );
+		$this->assertSame( $replacement_node, yotm_thumbnail_health_file_node( $target ) );
+	}
+
 	/** @dataProvider interrupted_repair_modes */
 	public function test_partial_publication_recovers_without_creating_remaining_outputs( $cancel ) {
 		foreach ( $this->metadata['sizes'] as $size ) {
