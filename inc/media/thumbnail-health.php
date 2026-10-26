@@ -58,7 +58,7 @@ function yotm_thumbnail_health_inspect( $attachment_id ) {
 		return $result;
 	}
 	$metadata = $snapshot['metadata'];
-	if ( isset( $metadata['sizes'] ) && ! is_array( $metadata['sizes'] ) ) {
+	if ( array_key_exists( 'sizes', $metadata ) && ! is_array( $metadata['sizes'] ) ) {
 		$result['report']['reason']  = 'invalid_size_metadata';
 		$result['report']['message'] = __( 'The attachment thumbnail metadata is malformed.', 'thumbnail-manager' );
 		$result['report']['action']  = __( 'Restore valid attachment metadata before repairing thumbnails.', 'thumbnail-manager' );
