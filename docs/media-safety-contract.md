@@ -211,6 +211,6 @@ Do not weaken this document incidentally during a feature or refactor. A deliber
 
 1. Controlled-Lane task framing;
 2. explicit identification of the invariant being changed;
-3. ChatGPT plan review;
+3. independent Codex subagent plan review and exact-head implementation review;
 4. updated regression evidence;
-5. Human decision when the change alters the product's safety posture or user-visible deletion guarantees.
+5. explicit Human decision before implementing a change to the product's safety posture or user-visible deletion guarantees.
