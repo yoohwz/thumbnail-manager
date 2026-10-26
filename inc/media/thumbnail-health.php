@@ -129,6 +129,16 @@ function yotm_thumbnail_health_inspect( $attachment_id ) {
 			}
 		}//end if
 		$resize = image_resize_dimensions( (int) $snapshot['source_dimensions'][0], (int) $snapshot['source_dimensions'][1], (int) $definition['width'], (int) $definition['height'], $definition['crop'] ?? false );
+		if ( ! is_array( $resize ) && is_array( $existing ) ) {
+			$blocked = true;
+			++$result['report']['missing_count'];
+			$result['report']['sizes'][ $slug ] = array(
+				'status' => 'blocked',
+				'reason' => 'missing_file_source_not_resizable',
+				'action' => __( 'The recorded thumbnail file is missing, and the current full image cannot recreate this size. Restore a suitable full image or review this size setting, then run a new check.', 'thumbnail-manager' ),
+			);
+			continue;
+		}
 		if ( ! is_array( $resize ) ) {
 			$result['report']['sizes'][ $slug ] = array(
 				'status' => 'not_needed',
@@ -156,7 +166,7 @@ function yotm_thumbnail_health_inspect( $attachment_id ) {
 	}//end foreach
 	$result['report']['status']  = $blocked ? 'blocked' : ( $result['report']['missing_count'] ? 'missing' : 'healthy' );
 	$result['report']['reason']  = $blocked ? 'unsafe_thumbnail_state' : ( $result['report']['missing_count'] ? 'missing_thumbnails' : 'enabled_thumbnails_present' );
-	$result['report']['message'] = $blocked ? __( 'Some thumbnail paths or size definitions require manual review.', 'thumbnail-manager' ) : ( $result['report']['missing_count'] ? __( 'Enabled thumbnails are missing.', 'thumbnail-manager' ) : __( 'No required enabled thumbnails are missing.', 'thumbnail-manager' ) );
+	$result['report']['message'] = $blocked ? __( 'Some thumbnails require manual attention before they can be repaired.', 'thumbnail-manager' ) : ( $result['report']['missing_count'] ? __( 'Enabled thumbnails are missing.', 'thumbnail-manager' ) : __( 'No required enabled thumbnails are missing.', 'thumbnail-manager' ) );
 	$result['report']['action']  = $blocked ? __( 'Resolve the reported unsafe thumbnail state before repair.', 'thumbnail-manager' ) : ( $result['report']['missing_count'] ? __( 'Repair the missing thumbnails.', 'thumbnail-manager' ) : '' );
 	if ( ! $blocked ) {
 		$snapshot['requested_sizes'] = $result['requested_sizes'];

@@ -69,6 +69,20 @@ class YOTM_Thumbnail_Health_Test extends WP_UnitTestCase {
 		$this->assertStringNotContainsString( $this->directory, wp_json_encode( $inspection['report'] ) );
 	}
 
+	public function test_recorded_missing_thumbnail_is_blocked_when_current_full_is_too_small() {
+		$metadata = $this->create_fixture();
+		unlink( $this->directory . '/' . $metadata['sizes']['yotm_health_small']['file'] );
+		$editor = wp_get_image_editor( $this->directory . '/source.jpg' );
+		$this->assertNotWPError( $editor );
+		$this->assertNotWPError( $editor->resize( 60, 40, true ) );
+		$this->assertNotWPError( $editor->save( $this->directory . '/source.jpg' ) );
+		$inspection = yotm_thumbnail_health_inspect( $this->attachment_id );
+		$this->assertSame( 'blocked', $inspection['report']['status'] );
+		$this->assertSame( 'blocked', $inspection['report']['sizes']['yotm_health_small']['status'] );
+		$this->assertNotEmpty( $inspection['report']['sizes']['yotm_health_small']['action'] );
+		$this->assertSame( $metadata, wp_get_attachment_metadata( $this->attachment_id ) );
+	}
+
 	public function test_missing_metadata_size_is_detected_and_oversized_sizes_are_not_required() {
 		$metadata = $this->create_fixture();
 		unlink( $this->directory . '/' . $metadata['sizes']['yotm_health_small']['file'] );

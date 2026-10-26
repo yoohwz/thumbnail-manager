@@ -696,7 +696,7 @@ msgstr ""
 #: inc/admin/assets.php:254
 #: inc/admin/view.php:110
 #: inc/application/regenerate.php:79
-#: inc/application/regenerate.php:996
+#: inc/application/regenerate.php:998
 msgid "All media"
 msgstr ""
 
@@ -1484,35 +1484,39 @@ msgstr ""
 msgid "Could not persist the next promotion intent."
 msgstr ""
 
-#: inc/application/regenerate.php:902
+#: inc/application/regenerate.php:903
+msgid "The storage system could not safely create a missing thumbnail. Check write permissions and filesystem support, then run a new check. Existing files were preserved."
+msgstr ""
+
+#: inc/application/regenerate.php:904
 msgid "Could not promote all staged generated files."
 msgstr ""
 
-#: inc/application/regenerate.php:906
+#: inc/application/regenerate.php:908
 msgid "Could not persist promoted-file evidence."
 msgstr ""
 
-#: inc/application/regenerate.php:913
+#: inc/application/regenerate.php:915
 msgid "Could not persist the promoted-files journal."
 msgstr ""
 
-#: inc/application/regenerate.php:917
+#: inc/application/regenerate.php:919
 msgid "Repair was interrupted before saving metadata. Resume the saved job to reconcile its recovery record."
 msgstr ""
 
-#: inc/application/regenerate.php:921
+#: inc/application/regenerate.php:923
 msgid "Metadata commit and automatic rollback were incomplete; journal evidence was retained for manual recovery."
 msgstr ""
 
-#: inc/application/regenerate.php:924
+#: inc/application/regenerate.php:926
 msgid "Could not commit exact regenerated attachment metadata; the old state was restored."
 msgstr ""
 
-#: inc/application/regenerate.php:928
+#: inc/application/regenerate.php:930
 msgid "Metadata committed, but its recovery journal could not be advanced."
 msgstr ""
 
-#: inc/application/regenerate.php:940
+#: inc/application/regenerate.php:942
 msgid "Could not finalize the regeneration journal."
 msgstr ""
 
@@ -2377,43 +2381,47 @@ msgstr ""
 msgid "Review the thumbnail path and restore safe attachment metadata."
 msgstr ""
 
-#: inc/media/thumbnail-health.php:145
+#: inc/media/thumbnail-health.php:138
+msgid "The recorded thumbnail file is missing, and the current full image cannot recreate this size. Restore a suitable full image or review this size setting, then run a new check."
+msgstr ""
+
+#: inc/media/thumbnail-health.php:155
 msgid "Review image-resize filters that request upscaling."
 msgstr ""
 
-#: inc/media/thumbnail-health.php:152
+#: inc/media/thumbnail-health.php:162
 msgid "Repair this missing thumbnail from the current full image."
 msgstr ""
 
-#: inc/media/thumbnail-health.php:159
-msgid "Some thumbnail paths or size definitions require manual review."
+#: inc/media/thumbnail-health.php:169
+msgid "Some thumbnails require manual attention before they can be repaired."
 msgstr ""
 
-#: inc/media/thumbnail-health.php:159
+#: inc/media/thumbnail-health.php:169
 msgid "Enabled thumbnails are missing."
 msgstr ""
 
-#: inc/media/thumbnail-health.php:159
+#: inc/media/thumbnail-health.php:169
 msgid "No required enabled thumbnails are missing."
 msgstr ""
 
-#: inc/media/thumbnail-health.php:160
+#: inc/media/thumbnail-health.php:170
 msgid "Resolve the reported unsafe thumbnail state before repair."
 msgstr ""
 
-#: inc/media/thumbnail-health.php:160
+#: inc/media/thumbnail-health.php:170
 msgid "Repair the missing thumbnails."
 msgstr ""
 
-#: inc/media/thumbnail-health.php:178
+#: inc/media/thumbnail-health.php:188
 msgid "The repair recovery record is incomplete. Inspect the retained recovery record before retrying."
 msgstr ""
 
-#: inc/media/thumbnail-health.php:183
+#: inc/media/thumbnail-health.php:193
 msgid "The repair recovery record does not prove an absent destination."
 msgstr ""
 
-#: inc/media/thumbnail-health.php:205
+#: inc/media/thumbnail-health.php:215
 msgid "A repair destination was created or replaced by another process. It was preserved; inspect the retained recovery record."
 msgstr ""
 

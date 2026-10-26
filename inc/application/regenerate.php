@@ -899,7 +899,11 @@ function yotm_regenerate_force_attachment( $attachment_id, $item, $worker, $repa
 			$promoted = $repair ? yotm_thumbnail_health_promote_destination( $entry ) : yotm_regenerate_promote_destination( $entry );
 			if ( ! $promoted ) {
 				yotm_regenerate_rollback( $journal );
-				return yotm_regenerate_failure( __( 'Could not promote all staged generated files.', 'thumbnail-manager' ) );
+				return yotm_regenerate_failure(
+					$repair
+					? __( 'The storage system could not safely create a missing thumbnail. Check write permissions and filesystem support, then run a new check. Existing files were preserved.', 'thumbnail-manager' )
+					: __( 'Could not promote all staged generated files.', 'thumbnail-manager' )
+				);
 			}
 			$journal['promotion_slug'] = '';
 			if ( ! yotm_regenerate_persist_journal( $item, $journal ) ) {
