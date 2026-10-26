@@ -45,7 +45,7 @@ function yotm_thumbnail_health_inspect( $attachment_id ) {
 		} elseif ( 'yotm_regenerate_attached_state' === $code ) {
 			$result['report']['message'] = __( 'The attached local image cannot be resolved safely.', 'thumbnail-manager' );
 		}
-		$result['report']['action']  = 'yotm_regenerate_metadata_state' === $code
+		$result['report']['action'] = 'yotm_regenerate_metadata_state' === $code
 			? __( 'Restore valid attachment metadata from a backup before checking or repairing thumbnails.', 'thumbnail-manager' )
 			: __( 'Restore the local full image and its declared source files, or review the storage integration and attachment metadata.', 'thumbnail-manager' );
 		return $result;

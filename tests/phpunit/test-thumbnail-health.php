@@ -208,6 +208,21 @@ class YOTM_Thumbnail_Health_Test extends WP_UnitTestCase {
 		return array( array( '../outside.jpg' ), array( 'sub\\outside.jpg' ), array( 'source.jpg' ) );
 	}
 
+	/** @dataProvider malformed_size_collections */
+	public function test_explicit_malformed_size_collection_is_blocked( $sizes ) {
+		$metadata          = $this->create_fixture();
+		$metadata['sizes'] = $sizes;
+		wp_update_attachment_metadata( $this->attachment_id, $metadata );
+		$inspection = yotm_thumbnail_health_inspect( $this->attachment_id );
+		$this->assertSame( 'blocked', $inspection['report']['status'] );
+		$this->assertSame( 'invalid_size_metadata', $inspection['report']['reason'] );
+		$this->assertNull( $inspection['snapshot'] );
+	}
+
+	public function malformed_size_collections() {
+		return array( array( null ), array( 'invalid' ), array( 42 ) );
+	}
+
 	public function health_sizes( $sizes ) {
 		return array_intersect_key( $sizes, array_fill_keys( array( 'yotm_health_small', 'yotm_health_other', 'yotm_health_large', 'yotm_health_ratio' ), true ) );
 	}
