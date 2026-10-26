@@ -22,60 +22,38 @@ These instructions apply to the entire `thumbnail-manager` repository.
 
 ## Roles
 
-- **Human** owns product direction, unresolved trade-offs, merge approval, release/version decisions, production actions, and WordPress.org publication.
-- **ChatGPT** owns task framing, risk classification, architecture/product decisions, plan review for Controlled work, and the single external review gate focused on approved-plan/diff alignment, architecture and invariants, safety boundaries, scope drift, compatibility, and evidence sufficiency.
-- **Codex** owns repository discovery, implementation, tests and runtime reproduction, validation, repo-local technical/adversarial verification before handoff, commits, branch/PR maintenance, and correction of review findings.
-- **GitHub** is the durable record for commits, pull requests, CI, review results, and Controlled-Lane planning handoffs.
+- **Human** owns product direction, unresolved product/scope/safety trade-offs, merge approval, release/version decisions, production actions, and WordPress.org publication.
+- **Codex** owns task framing, risk classification, technical architecture, planning, implementation, testing, review, corrections, work coordination, and branch/PR maintenance. One lead Codex remains accountable for the complete result and evidence, including delegated work.
+- **Subagents** perform bounded discovery, implementation, testing, or independent review delegated by the lead Codex. They report evidence and findings to the lead; they do not replace Human authority or create another approval stage.
+- **GitHub** is the durable record for plans, commits, pull requests, CI, review evidence, and Human decisions.
+
+Human can give a goal directly to Codex. Codex resolves technical choices within the authorized scope and continues through validation and PR preparation without an external agent handoff. Ask Human only for missing information that blocks safe progress or a decision reserved to Human.
 
 ## Human command shorthand and routing
 
-Keep Human commands short. Equivalent natural-language commands such as `Chạy task này`, `Tiếp tục`, `Review`, and `Sửa tiếp` must be resolved from the current conversation and durable GitHub state rather than requiring the Human to restate known context.
+Keep Human commands short. Resolve `Chạy task này`, `Tiếp tục`, `Review`, and `Sửa tiếp` from the current conversation and durable GitHub state rather than requiring Human to restate known context.
 
-Commands may optionally include a target prefix. The prefix is a routing hint, not part of the task identifier or workflow status:
+- `Codex - Continue <TASK-ID>` recovers the latest applicable plan, decisions, PR head, CI, and findings, then performs the next Codex-owned action.
+- `Codex - Review <TASK-ID>` reviews the current task/PR with the required independence and risk profile, fixes blocking findings within scope, and continues toward the Human gate.
+- `Human - ...` identifies a Human-owned product decision, merge, release, or production action.
 
-- `Codex - Continue TM-AUD-0001` tells Codex to recover the newest applicable GitHub state for that task and perform the next Codex-owned action.
-- `ChatGPT - Review TM-AUD-0001` tells ChatGPT to recover the newest applicable durable handoff and route it to plan review, technical review, correction re-review, or Human decision as appropriate.
-- General short commands may use the same form, for example `ChatGPT - Add workflow shorthand rule` or `Codex - Fix the current review findings`.
-- `Human - ...` may be used when the next action is explicitly Human-owned, such as a merge, product decision, release action, or production action.
+When a task ID or PR/issue reference is supplied, recover known context from GitHub. Inspect both top-level PR conversation comments and PR review submissions, ordered by time and exact-head applicability. If a review and its top-level mirror represent the same decision, use the top-level comment as the actionable handoff. A newer applicable review must not be hidden by an older handoff. Missing, contradictory, or genuinely ambiguous state must be reported specifically rather than guessed.
 
-When a task ID or PR/issue reference is supplied, do not ask the Human to repeat plan text, findings, SHAs, PR numbers, or other context that can be recovered safely from GitHub. This rule applies in fresh ChatGPT/Codex threads as well as continuing conversations.
-
-`Continue <TASK-ID>` and `Review <TASK-ID>` are canonical shorthand:
-
-- `Continue <TASK-ID>` means recover the latest durable task state and continue the next action owned by the receiving agent. For Codex this includes correcting a rejected plan, implementing an approved plan, correcting technical-review findings, or continuing other repository work already authorized by the current workflow state.
-- `Review <TASK-ID>` means ChatGPT recovers and reviews the newest applicable durable handoff rather than asking the Human which review stage applies.
-- For pull-request state recovery, inspect both top-level PR conversation comments and PR review submissions. Order applicable records by creation/submission time and exact-head applicability; a newer exact-head review carrying a workflow status must not be hidden by an older top-level handoff.
-- If a detailed review submission and a mirrored top-level handoff represent the same decision, the top-level PR comment is the canonical actionable handoff and the review submission is the detailed review artifact.
-- If durable state is missing, contradictory, stale, or genuinely ambiguous, stop and report the specific missing/ambiguous state instead of guessing.
+Legacy `PLAN_REVIEW_REQUIRED`, `TECHNICAL_REVIEW_REQUIRED`, and `TECHNICAL_CHANGES_REQUIRED` records are historical inputs, not active gates. On continuation, Codex recovers the original scope, plan, decisions, and unresolved findings, then performs the outstanding planning/review/correction work internally under this workflow. Preserve prior Human decisions; never infer approval of a safety-contract change from migration. Revalidate the current head before a new merge-ready handoff.
 
 ### Mandatory `Next:` hint
 
-Every **final user-visible workflow response** from ChatGPT or Codex that has a clear next action must end with exactly one concise copy-ready hint:
+Every final user-visible workflow response with a clear next action must end with exactly one concise copy-ready hint:
 
 `Next: <Target> - <short command>`
 
-When that response also creates or updates a durable GitHub handoff, the issue/PR handoff comment must also end with the same `Next:` hint. The durable handoff and the user-visible final response must route to the same next owner and action.
+A durable issue/PR handoff must end with the same hint as the user-visible response:
 
-Do not omit `Next:` merely because the preceding workflow status appears to make the next step obvious. Progress/intermediate updates are exempt; they should not emit a `Next:` hint unless they are also ending the current workflow turn.
-
-Canonical handoff routing is:
-
-- `PLAN_REVIEW_REQUIRED: <TASK-ID>` -> `Next: ChatGPT - Review <TASK-ID>`
-- `TECHNICAL_REVIEW_REQUIRED: <TASK-ID>` -> `Next: ChatGPT - Review <TASK-ID>`
-- `TECHNICAL_CHANGES_REQUIRED: <TASK-ID>` -> `Next: Codex - Continue <TASK-ID>`
 - `READY_FOR_HUMAN_MERGE` -> `Next: Human - Merge PR #<N>`
 - `HUMAN_DECISION_REQUIRED: <TASK-ID>` -> `Next: Human - Decide <TASK-ID>`
+- Unfinished Codex work -> `Next: Codex - Continue <TASK-ID>`
 
-Other clear transitions use the same format. For example, after an approved Human merge, if the next roadmap task is unambiguous, use `Next: Codex - Continue <NEXT-TASK-ID>`.
-
-Examples:
-
-- `Next: Codex - Continue TM-AUD-0001`
-- `Next: ChatGPT - Review TM-AUD-0001`
-- `Next: Human - Merge PR #19`
-- `Next: Human - Decide TM-AUD-0008`
-
-`Next:` is Human UX only. It is not a workflow status, does not replace the durable GitHub handoff, and must not introduce a new state outside the status protocol below. If there is genuinely no clear next action, no `Next:` line is required.
+`Next:` is Human UX, not a workflow status. Progress updates do not need a hint. Do not stop autonomous work merely to emit a hint. If there is genuinely no clear next action, no hint is required.
 
 ## Task brief
 
@@ -91,7 +69,7 @@ For **Controlled Lane**, also record the affected invariants, implementation con
 
 When product semantics could be ambiguous, the Controlled brief/plan must freeze a compact set of user-visible and edge-case scenarios before implementation. Keep the scenario table in the existing issue/plan; do not create another artifact or workflow status. Each row should identify the scenario, expected behavior, and whether it is in scope so distinctions such as current-disabled versus historical-unregistered cleanup are resolved before code changes.
 
-Controlled plans must also state a proportional complexity budget and stop-loss. Record the expected runtime surfaces and whether DDL, a new lock domain, a new recovery coordinator, or another destructive authority is expected. Stop and return through `PLAN_REVIEW_REQUIRED` or `HUMAN_DECISION_REQUIRED` when implementation unexpectedly requires a new persistent schema/migration, lock/transaction/recovery domain, cross-subsystem destructive authority, material scope expansion, or repeated blockers that make the approved architecture poor value for its cost.
+Controlled plans must also state a proportional complexity budget and stop-loss. Record the expected runtime surfaces and whether DDL, a new lock domain, a new recovery coordinator, or another destructive authority is expected. If implementation unexpectedly requires a new persistent schema/migration, lock/transaction/recovery domain, cross-subsystem destructive authority, or repeated blockers make the architecture poor value, stop the affected implementation and revise the plan with proportional independent subagent review before resuming. Use `HUMAN_DECISION_REQUIRED` only when the revision requires a Human-owned product/scope/safety decision. Do not silently expand scope or weaken an invariant.
 
 Do not create repository planning documents merely to mirror conversation or pull-request history.
 
@@ -118,9 +96,9 @@ Use Fast Lane when the change is isolated and cannot materially alter media inte
 
 Normal flow:
 
-`Human -> ChatGPT brief -> Codex implementation + validation + local verification -> draft PR/evidence -> ChatGPT lightweight external review -> Human merge gate`
+`Human goal -> Codex brief + implementation + validation + proportional review -> PR + applicable Final CI -> Human merge gate`
 
-A separate plan-review gate is not required. For very small documentation, test-only, tooling, or governance changes with no runtime or safety-contract impact, the task brief may explicitly waive the ChatGPT external review and use `Codex -> CI -> Human merge`; this is opt-in per task, not the default.
+No separate plan approval or mandatory subagent is required. Use a subagent when a bounded parallel task or independent check materially improves confidence; a small, well-understood change can use the lead Codex's own verification.
 
 ### Controlled Lane
 
@@ -144,11 +122,13 @@ Classification is semantic, not filename-based. A text-only edit inside a safety
 
 Normal flow:
 
-`Human -> ChatGPT brief -> Codex discovery/plan -> PLAN_REVIEW_REQUIRED -> ChatGPT plan review -> Codex implementation + validation + local verification -> draft PR/evidence -> TECHNICAL_REVIEW_REQUIRED -> ChatGPT external review -> Human merge gate`
+`Human goal -> Codex discovery + recorded plan -> implementation + tests/runtime evidence + independent review where required + corrections -> PR + applicable Final CI -> Human merge gate`
 
-Before `TECHNICAL_REVIEW_REQUIRED`, Codex must complete the execution cycle `implement -> tests/runtime evidence -> repo-local adversarial review -> fix findings -> exact-head handoff`. The purpose is to make Codex the primary repo-local technical checker while retaining one external review gate rather than adding another mandatory workflow stage.
+Codex records the Controlled plan before runtime implementation. Use the existing issue or draft PR; do not create a separate issue solely for plan approval. Resolve technical planning and review internally. Obtain Human decisions before implementing changes to product scope, safety posture, or other Human-owned choices.
 
-At `TECHNICAL_REVIEW_REQUIRED`, ChatGPT reviews the approved plan against the actual diff and evidence, with emphasis on architecture/invariants, safety boundaries, scope drift, compatibility, acceptance criteria, and evidence sufficiency. ChatGPT should not mechanically duplicate Codex's exhaustive repo-local verification or act as a second linter.
+For safety-critical changes or a new destructive/persistence/locking architecture, have a fresh subagent challenge the plan's scenarios, invariants, complexity, and validation strategy before implementation. This is a focused technical check, not a cross-agent workflow gate. Record material findings and corrections with the plan. Later implementation review checks the actual diff and evidence, not a repetition of the planning exercise.
+
+Complete `implement -> tests/runtime evidence -> proportional adversarial review -> fix blocking findings -> exact-head Final CI -> Human handoff`. Codex remains responsible for plan/diff alignment, architecture and invariants, safety boundaries, scope, compatibility, acceptance criteria, and evidence sufficiency.
 
 If Fast-Lane discovery reveals a Controlled risk, stop before risky runtime implementation and promote the task to Controlled Lane.
 
@@ -165,7 +145,7 @@ Record the selected profile in the PR evidence. Risk-lane classification remains
 
 ### Review intensity: fresh independent Codex review
 
-A fresh independent Codex review is a **review intensity**, not a separate workflow stage or status. It runs inside the Codex execution cycle before the external ChatGPT handoff.
+A fresh independent Codex review is a **review intensity**, not a separate workflow stage or status. It runs inside the Codex execution cycle before the Human merge handoff.
 
 A fresh independent Codex review is mandatory for safety-critical Controlled changes that materially touch any of these surfaces:
 
@@ -177,7 +157,7 @@ A fresh independent Codex review is mandatory for safety-critical Controlled cha
 - crash recovery or transactional recovery logic;
 - irreversible migration or similarly hard-to-undo state transition.
 
-The independent review must use a fresh context and a separate worktree or clean checkout, bind to the exact PR head, and produce findings that the implementing Codex resolves before posting `TECHNICAL_REVIEW_REQUIRED`. It does not create a new cross-agent status. ChatGPT may require this review during plan review when the change surface warrants it, and the Human may require it at any time.
+The independent review must use a fresh subagent context and a separate worktree or clean checkout, bind to the exact PR head, and produce findings that the lead Codex resolves before posting `READY_FOR_HUMAN_MERGE`. Give the reviewer the task, plan, invariants, diff, and evidence without the implementer's private reasoning. Record the reviewer, reviewed SHA, findings, and corrections in the PR. If the head changes, review the delta and affected invariants against the new head; do not reuse stale approval. If independent review is unavailable, report the missing evidence and do not claim merge readiness. Human may require independent review at any time.
 
 Other Controlled tasks may use the implementing Codex's own adversarial verification plus strong automated/runtime evidence when a fresh reviewer would add disproportionate overhead.
 
@@ -199,35 +179,32 @@ The following invariants are non-negotiable unless the Human explicitly approves
 8. Attachment metadata changes must be limited to references corresponding to the approved/deleted generated file.
 9. Bounded batches and persistent cursors must remain resumable and must not silently restart destructive work from an unsafe state.
 
+## Subagent coordination
+
+- Delegate only bounded work with a clear objective, scope, inputs, and expected evidence. Use parallel agents for independent work when it reduces effort or risk; do not require a fixed roster or agent count.
+- Lead Codex owns integration and resolves conflicting recommendations using repository evidence. Subagents do not approve their own implementation as independent review.
+- Concurrent implementation tasks use separate worktrees or clean checkouts. Avoid overlapping file ownership; integrate changes deliberately and validate the final head.
+- Separate plan critique from implementation verification. Re-review corrections as a delta unless the scope materially expands. Do not add serial review rounds for advisory-only findings.
+
 ## Status protocol
 
-Use only these workflow statuses at cross-agent handoff boundaries:
+Use only these statuses when handing work back to Human:
 
-- `PLAN_REVIEW_REQUIRED`
-- `TECHNICAL_REVIEW_REQUIRED`
-- `TECHNICAL_CHANGES_REQUIRED`
 - `HUMAN_DECISION_REQUIRED`
 - `READY_FOR_HUMAN_MERGE`
 
-Do not add more statuses unless a future workflow demonstrates a real need.
+Planning, implementation, testing, internal findings, and CI progress belong in normal PR evidence; they do not require workflow statuses or Human relays between agents. Missing evidence or failed CI means the work is unfinished, not merge-ready.
 
 ## Durable handoffs and review routing
 
-- Fast-Lane implementation evidence belongs in the draft pull request.
-- Controlled-Lane plan review requires a durable GitHub issue anchor. Reuse an existing issue; otherwise create one lightweight issue before returning `PLAN_REVIEW_REQUIRED`.
-- Codex posts the Controlled plan to that issue before runtime implementation begins.
-- ChatGPT posts `PLAN REVIEW: APPROVED` or `PLAN REVIEW: CHANGES REQUIRED` to the same issue.
-- Before any technical-review handoff, Codex completes proportional repo-local technical/adversarial verification and records the relevant tests/runtime evidence in the PR. When fresh independent Codex review is required, the PR evidence must identify that exact-head review as completed and summarize any findings/corrections.
-- After implementation and local verification, Codex updates the PR body and posts `STATUS: TECHNICAL_REVIEW_REQUIRED` with the current head SHA.
-- A commit pushed after that handoff invalidates the review target; Codex must post a new handoff for the new head.
-- ChatGPT's technical review is the single external boundary/acceptance review. It focuses on approved-plan/diff alignment, architecture/invariants, safety, scope, compatibility, acceptance criteria, and evidence sufficiency, and results in either `STATUS: TECHNICAL_CHANGES_REQUIRED` or `STATUS: READY_FOR_HUMAN_MERGE`.
-- ChatGPT may use a PR review submission for detailed findings, but **every technical-review outcome must also be mirrored as a canonical top-level PR conversation comment**. The top-level handoff must identify the task, reviewed exact head, resulting workflow status, the source review ID when available, and the same `Next:` routing as the user-visible response.
-- The canonical top-level PR comment is the actionable cross-agent handoff; a PR review submission is supporting detail and must not be the only place where a workflow state changes.
-- `Continue` state recovery must inspect both top-level PR conversation comments and PR review submissions. If a newer applicable review submission carries a workflow status that has not yet been mirrored, treat that review as the newest state rather than allowing an older top-level handoff to mask it. If records are genuinely contradictory for the same/newer exact head, report the ambiguity instead of claiming there is no action.
-- `Review` means recover the newest applicable durable handoff and route to plan review, technical review, correction re-review, or Human decision as appropriate.
-- Keep durable PR evidence compact: goal/scope, binding plan or decision, semantic changes, affected invariants, a PASS/NOT RUN evidence table, blocking findings and corrections, and the release boundary. Put detailed command logs in CI/runtime artifacts or linked evidence when practical.
+- The PR is the primary execution record. Reuse an existing task issue when useful; a separate issue or planning document is not mandatory.
+- Record the brief, Controlled plan when applicable, binding Human decisions, semantic changes, affected invariants, a PASS/NOT RUN evidence table, blocking findings and corrections, and the release boundary. Keep detailed logs in linked artifacts where practical.
+- Before a merge-ready handoff, complete required local verification, independent review where required, and applicable Final CI on the current exact head. Update the PR body and post one canonical top-level comment with `STATUS: READY_FOR_HUMAN_MERGE`, task/PR identity, head SHA, evidence, and `Next: Human - Merge PR #<N>`.
+- For a blocking Human-owned decision, post `STATUS: HUMAN_DECISION_REQUIRED` to the existing issue or PR with the concrete decision, options, recommendation, and matching `Next: Human - Decide <TASK-ID>`. Continue independent authorized work where possible.
+- A commit after a merge-ready handoff invalidates that handoff. Codex completes affected checks/review and applicable Final CI, then posts a new exact-head handoff. Do not merge based on stale evidence.
+- Subagent findings and optional GitHub review submissions are supporting evidence. The lead resolves blockers and produces the single Human handoff; do not duplicate every internal review as a workflow transition.
 
-For re-review after corrections, inspect the delta from the previously reviewed SHA first, verify the original blockers and affected invariants, then spot-check the final PR state. Do not repeat a full review from zero unless the change surface materially expanded.
+For corrections, inspect the delta from the previously reviewed SHA first, verify the original blockers and affected invariants, then spot-check the final PR state. Do not repeat a full review from zero unless the change surface materially expanded.
 
 ## Review severity
 
@@ -259,7 +236,7 @@ A green CI run proves only the checks CI actually executes; it does not replace 
 
 - Keep the PR body current with goal, scope, risk lane, changes, validation, runtime evidence/limitations, and release boundary.
 - Draft pull-request heads use **Iteration CI**. It always runs repository contracts and diff hygiene, plus applicable PHP syntax/PHPCS/PHPCompatibility, JavaScript contracts, targeted tests selected by Codex, and one representative WordPress/PHP integration environment for runtime PHP changes. Plugin Check and the full support-boundary matrix may be deferred.
-- Non-draft pull-request heads, `main` pushes, and manual CI dispatches use **Final CI**. Before `TECHNICAL_REVIEW_REQUIRED`, convert the PR to ready-for-review and wait for the exact head's applicable Final CI, including all four supported WordPress/PHP boundary jobs, Plugin Check, coding standards, JavaScript contracts, repository contracts, and aggregate `CI Gate`.
+- Non-draft pull-request heads, `main` pushes, and manual CI dispatches use **Final CI**. Before `READY_FOR_HUMAN_MERGE`, convert the PR to ready-for-review and wait for the exact head's applicable Final CI, including all four supported WordPress/PHP boundary jobs, Plugin Check, coding standards, JavaScript contracts, repository contracts, and aggregate `CI Gate`.
 - A correction pushed after technical review invalidates the target and must again pass applicable Final CI on the new exact head before re-handoff. Converting the PR back to draft is allowed for iteration, but no draft result is merge-ready.
 - The stable required branch-protection signal is the aggregate `CI Gate`; Iteration CI emits `Iteration Gate` instead, so cheaper draft validation cannot satisfy branch protection. Individual conditional jobs may be skipped only when the classifier marks them irrelevant.
 - CI classifiers and `CI Gate` must fail closed: a required job that fails, is cancelled, or is skipped cannot be treated as merge-ready.

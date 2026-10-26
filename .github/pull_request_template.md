@@ -20,11 +20,11 @@
 
 ## Workflow handoff
 
-- Task / issue:
-- Current status:
-- Plan review evidence:
+- Task / issue (if any):
+- Current head / progress:
+- Plan / binding decisions:
 
-<!-- Controlled Lane: link the durable GitHub issue comment/result. Fast Lane may leave plan review evidence as Not applicable. -->
+<!-- Controlled: record or link the plan here or in the existing issue. Include Human decisions when required. No separate plan-approval issue is needed. -->
 
 ## Changes
 
@@ -46,7 +46,7 @@
 
 ## Blocking findings and corrections
 
-<!-- Summarize resolved blockers, or state None. Detailed logs belong in CI/runtime artifacts. -->
+<!-- Summarize blockers and corrections, or state None. When independent review is required, identify the fresh reviewer, exact reviewed SHA, and delta re-review after corrections. Detailed logs belong in linked artifacts. -->
 
 -
 

@@ -117,8 +117,8 @@ if changelog_version != plugin_version:
 
 for needle, label in (
     ("Use only `Fast` and `Controlled`.", "two-lane workflow contract"),
-    ("`PLAN_REVIEW_REQUIRED`", "plan-review status"),
-    ("`TECHNICAL_REVIEW_REQUIRED`", "technical-review status"),
+    ("## Subagent coordination", "Codex subagent coordination"),
+    ("`HUMAN_DECISION_REQUIRED`", "human decision status"),
     ("`READY_FOR_HUMAN_MERGE`", "human merge status"),
     ("docs/media-safety-contract.md", "media safety contract link"),
 ):
@@ -151,9 +151,6 @@ status_section = agents.split("## Status protocol", 1)[1].split(
     "## Durable handoffs and review routing", 1
 )[0]
 expected_statuses = {
-    "PLAN_REVIEW_REQUIRED",
-    "TECHNICAL_REVIEW_REQUIRED",
-    "TECHNICAL_CHANGES_REQUIRED",
     "HUMAN_DECISION_REQUIRED",
     "READY_FOR_HUMAN_MERGE",
 }
