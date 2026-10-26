@@ -98,6 +98,7 @@ function yotm_admin_enqueue_assets( $hook ) {
 				'runForceRegenerate'              => __( 'Run force regeneration', 'thumbnail-manager' ),
 				'chooseImages'                    => __( 'Choose images', 'thumbnail-manager' ),
 				'useSelectedImages'               => __( 'Use selected images', 'thumbnail-manager' ),
+				'oneImageSelected'                => __( '1 image selected', 'thumbnail-manager' ),
 				/* translators: %s: selected image count. */
 				'selectedImageCount'              => __( '%s images selected', 'thumbnail-manager' ),
 				'selectionLimit'                  => __( 'Choose up to 500 images at a time. Your previous selection has been retained.', 'thumbnail-manager' ),
@@ -115,6 +116,7 @@ function yotm_admin_enqueue_assets( $hook ) {
 				'healthHealthy'                   => __( 'Healthy', 'thumbnail-manager' ),
 				'healthBlocked'                   => __( 'Blocked', 'thumbnail-manager' ),
 				'healthUnsupported'               => __( 'Unsupported', 'thumbnail-manager' ),
+				'healthDisabled'                  => __( 'Disabled', 'thumbnail-manager' ),
 				'healthNotNeeded'                 => __( 'Not needed', 'thumbnail-manager' ),
 				'healthRestored'                  => __( 'Restored:', 'thumbnail-manager' ),
 				'healthNoResults'                 => __( 'No thumbnail results are available yet.', 'thumbnail-manager' ),

@@ -34,7 +34,7 @@
 
   function selectionCount() {
     const ids = String($('#yotm_regen_attachment_ids').val() || '').split(',').filter(Boolean);
-    $('#yotm_regen_selection_count').text(String(t('selectedImageCount', '%s images selected')).replace('%s', ids.length));
+    $('#yotm_regen_selection_count').text(ids.length === 1 ? t('oneImageSelected', '1 image selected') : String(t('selectedImageCount', '%s images selected')).replace('%s', ids.length));
   }
 
   function chooseImages() {
@@ -75,7 +75,7 @@
     return {
       healthy: t('healthHealthy', 'Healthy'), missing: t('healthMissing', 'Missing'),
       blocked: t('healthBlocked', 'Blocked'), unsupported: t('healthUnsupported', 'Unsupported'),
-      not_needed: t('healthNotNeeded', 'Not needed')
+      not_needed: t('healthNotNeeded', 'Not needed'), disabled: t('healthDisabled', 'Disabled')
     }[status] || status || t('unknown', 'Unknown');
   }
 
@@ -237,10 +237,15 @@
         return;
       }
       const discovering = data.total_known === false;
-      const label = discovering
+      let label = discovering
         ? String(t('scanningAttachmentRows', 'Scanning attachment rows… %s checked')).replace('%s', data.selection_scanned || 0)
         : t('processing', 'Processing…') + ' ' + data.processed + ' / ' + data.total;
-      regenProgress(data.percent || 0, label, discovering);
+      if (data.phase === 'source_index') {
+        label = t('indexingSources', 'Indexing authoritative media sources…');
+      } else if (data.phase === 'selection') {
+        label = t('preparingRegenerationQueue', 'Preparing regeneration queue…');
+      }
+      regenProgress(data.percent || 0, label, discovering || data.phase === 'source_index' || data.phase === 'selection');
       renderRegenState(data);
       if (!data.done) {
         window.setTimeout(regenerateBatch, parseInt(data.retry_after_ms || 120, 10));
