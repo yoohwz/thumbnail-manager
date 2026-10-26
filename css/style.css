@@ -772,12 +772,33 @@ table.yo-sizes th {
 }
 
 @media screen and (max-width: 600px) {
-	.yo-health-table > thead > tr > th:first-child {
-		width: 26%;
+	.yo-health-table > thead {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		overflow: hidden;
+		clip-path: inset(50%);
 	}
 
-	.yo-health-table > thead > tr > th:nth-child(2) {
-		width: 23%;
+	.yo-health-table > tbody {
+		display: block;
+	}
+
+	.yo-health-table > tbody > tr {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) minmax(70px, 30%);
+		gap: 12px;
+		padding: 12px;
+		border-bottom: 1px solid var(--yotm-border);
+	}
+
+	.yo-health-table > tbody > tr > th,
+	.yo-health-table > tbody > tr > td {
+		padding: 0;
+	}
+
+	.yo-health-table > tbody > tr > td:last-child {
+		grid-column: 1 / -1;
 	}
 
 	.yo-health-sizes {
