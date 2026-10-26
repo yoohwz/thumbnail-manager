@@ -151,3 +151,16 @@ test('stale results cannot expose repair for a different active job', () => {
   h.click('#yotm_regen_repair');
   assert.equal(h.calls.filter(call => call.action === 'yotm_regenerate_prepare').length, 1);
 });
+
+
+test('stopping during prepare prevents a late response from starting or retaining a job', () => {
+  const h = harness();
+  h.click('#yotm_regen_run');
+  const late = h.last('yotm_regenerate_prepare');
+  h.click('#yotm_regen_cancel');
+  late.resolve({token: 'late-report', operation: 'check', total: 1});
+  assert.equal(h.calls.some(call => call.action === 'yotm_regenerate_batch'), false);
+  assert.deepEqual(h.last('cancel').payload, {token: 'late-report'});
+  h.click('#yotm_regen_run');
+  assert.equal(h.calls.filter(call => call.action === 'yotm_regenerate_prepare').length, 2);
+});

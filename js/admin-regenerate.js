@@ -26,6 +26,7 @@
   let reportToken = '';
   let resultsToken = '';
   let resultsRequest = 0;
+  let prepareRequest = 0;
   let mediaFrame;
   const config = window.YOTM || {};
   const $repair = $('#yotm_regen_repair');
@@ -283,6 +284,7 @@
       return;
     }
     regenRunning = true;
+    const requestId = ++prepareRequest;
     reportToken = '';
     resultsToken = '';
     ++resultsRequest;
@@ -304,6 +306,12 @@
       payload.operation = 'check';
     }
     request('yotm_regenerate_prepare', payload).done(function(response){
+      if (requestId !== prepareRequest || !regenRunning) {
+        if (response && response.success && response.data && response.data.token && response.data.token !== regenToken) {
+          cancelJob(response.data.token).always(loadRecentJobs);
+        }
+        return;
+      }
       if (!response || !response.success || !response.data) {
         const resumeToken = response && response.data ? response.data.resume_token : '';
         if (resumeToken) {
@@ -325,6 +333,9 @@
       regenerateBatch();
       loadRecentJobs();
     }).fail(function(){
+      if (requestId !== prepareRequest || !regenRunning) {
+        return;
+      }
       $regenResults.html(htmlNotice('notice-error', t('networkRegeneratePrepare', 'Network error during regenerate prepare.')));
       clearRegenJob({keepResults: true, preserveJob: !!regenToken});
     });
@@ -334,6 +345,7 @@
     if (!token || (regenToken === token && regenRunning)) {
       return;
     }
+    ++prepareRequest;
     regenToken = token;
     regenRunning = true;
     reportToken = '';
@@ -398,6 +410,7 @@
   $regenRun.on('click', function(){ prepareRegenerate(); });
   $regenCancel.on('click', function(){
     if (!regenToken) {
+      ++prepareRequest;
       clearRegenJob({keepResults: true});
       return;
     }

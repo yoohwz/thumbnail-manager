@@ -28,13 +28,15 @@ class YOTM_Media_Library_Health_Test extends WP_UnitTestCase {
 
 	/** @return int Image attachment ID. */
 	private function image_id() {
-		return self::factory()->post->create(
+		$id = self::factory()->post->create(
 			array(
 				'post_type'      => 'attachment',
 				'post_mime_type' => 'image/jpeg',
 				'post_status'    => 'inherit',
 			)
 		);
+		update_post_meta( $id, '_wp_attached_file', '2026/10/navigation-' . $id . '.jpg' );
+		return $id;
 	}
 
 	/** Navigation reads a complete validated selection and never starts a job. */
