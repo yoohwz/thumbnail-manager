@@ -195,7 +195,11 @@ class YOTM_Thumbnail_Health_Test extends WP_UnitTestCase {
 	public function test_unsafe_metadata_is_blocked_without_mutation( $filename ) {
 		$metadata                                       = $this->create_fixture();
 		$metadata['sizes']['yotm_health_small']['file'] = $filename;
-		wp_update_attachment_metadata( $this->attachment_id, $metadata );
+		$this->assertNotFalse( update_post_meta( $this->attachment_id, '_wp_attachment_metadata', wp_slash( $metadata ) ) );
+		$raw_rows = yotm_media_reference_raw_postmeta_rows( $this->attachment_id, '_wp_attachment_metadata' );
+		$this->assertIsArray( $raw_rows );
+		$this->assertCount( 1, $raw_rows );
+		$this->assertSame( $filename, $raw_rows[0]['value']['sizes']['yotm_health_small']['file'] );
 		$before     = $this->file_hashes();
 		$inspection = yotm_thumbnail_health_inspect( $this->attachment_id );
 		$this->assertSame( 'blocked', $inspection['report']['status'] );
