@@ -92,6 +92,52 @@
     }[reason] || '';
   }
 
+  function healthBadge(status, label) {
+    const tone = {healthy: 'yo-safe', missing: 'yo-warning', blocked: 'yo-danger', unsupported: 'yo-warning'}[status] || 'yo-health-neutral';
+    return '<span class="yo-badge ' + tone + '">' + escapeHtml(label || healthStatus(status)) + '</span>';
+  }
+
+  function renderHealthItem(item, operation) {
+    const sizes = item.sizes || {};
+    const order = ['blocked', 'missing', 'unsupported', 'healthy', 'not_needed', 'disabled'];
+    const slugs = Object.keys(sizes).sort(function(a, b){
+      const rank = status => order.includes(status) ? order.indexOf(status) : order.length;
+      return rank(sizes[a].status) - rank(sizes[b].status);
+    });
+    let overview = '';
+    order.forEach(function(status){
+      const count = slugs.filter(slug => sizes[slug].status === status).length;
+      if (count) {
+        overview += healthBadge(status, healthStatus(status) + ': ' + count);
+      }
+    });
+    let result = overview ? '<div class="yo-health-counts">' + overview + '</div>' : '';
+    if (operation === 'repair') {
+      result += '<p class="yo-health-restored"><strong>' + escapeHtml(t('healthRestored', 'Restored:')) + ' ' + escapeHtml(item.restored_count || 0) + '</strong>' + (item.restored_sizes && item.restored_sizes.length ? ' — ' + escapeHtml(item.restored_sizes.join(', ')) : '') + '</p>';
+    }
+    if (item.message && (item.status !== 'healthy' || item.item_status === 'failed' || item.item_status === 'skipped')) {
+      result += '<p class="yo-health-message">' + escapeHtml(item.message) + '</p>';
+    }
+    if (item.action) {
+      result += '<p class="yo-health-action"><strong>' + escapeHtml(t('healthAction', 'Suggested action')) + ':</strong> ' + escapeHtml(item.action) + '</p>';
+    }
+    if (slugs.length) {
+      const detailsLabel = String(t('healthViewSizes', 'View size details (%s)')).replace('%s', slugs.length);
+      const imageLabel = item.title || '#' + item.attachment_id;
+      result += '<details class="yo-health-details"><summary>' + escapeHtml(detailsLabel) + '<span class="screen-reader-text"> — ' + escapeHtml(imageLabel) + ' (#' + escapeHtml(item.attachment_id) + ')</span></summary>';
+      result += '<table class="widefat yo-health-sizes"><caption class="screen-reader-text">' + escapeHtml(imageLabel) + ' — ' + escapeHtml(t('healthSizeDetails', 'Thumbnail size details')) + '</caption><thead><tr><th scope="col">' + escapeHtml(t('size', 'Size')) + '</th><th scope="col">' + escapeHtml(t('status', 'Status')) + '</th><th scope="col">' + escapeHtml(t('healthDetails', 'Details')) + '</th></tr></thead><tbody>';
+      slugs.forEach(function(slug){
+        const size = sizes[slug];
+        const reason = healthReason(size.reason);
+        result += '<tr><th scope="row">' + escapeHtml(slug) + '</th><td>' + healthBadge(size.status) + '</td><td>' + escapeHtml(reason) + (size.action ? '<p>' + escapeHtml(size.action) + '</p>' : '') + '</td></tr>';
+      });
+      result += '</tbody></table></details>';
+    }
+    const itemStatus = {skipped: t('skipped', 'Skipped:'), failed: t('failed', 'Failed:')}[item.item_status];
+    const jobResult = itemStatus ? '<p class="yo-health-job-result">' + escapeHtml(t('healthItemResult', 'Job result:')) + ' ' + escapeHtml(itemStatus) + '</p>' : '';
+    return '<tr><th scope="row" class="yo-health-image">' + escapeHtml(item.title || '#' + item.attachment_id) + '<span class="yo-health-id">#' + escapeHtml(item.attachment_id) + '</span></th><td class="yo-health-status">' + healthBadge(item.status) + jobResult + '</td><td>' + result + '</td></tr>';
+  }
+
   function loadHealthResults(token, page) {
     resultsToken = token;
     const requestId = ++resultsRequest;
@@ -120,19 +166,9 @@
       if (!(data.items || []).length) {
         html += '<p>' + escapeHtml(t('healthNoResults', 'No thumbnail results are available yet.')) + '</p>';
       } else {
-        html += '<div class="yo-table-scroll"><table class="widefat striped"><thead><tr><th>' + escapeHtml(t('healthTitle', 'Image')) + '</th><th>' + escapeHtml(t('status', 'Status')) + '</th><th>' + escapeHtml(t('reason', 'Reason')) + '</th><th>' + escapeHtml(t('healthAction', 'Suggested action')) + '</th></tr></thead><tbody>';
+        html += '<div class="yo-table-scroll"><table class="widefat striped yo-health-table"><thead><tr><th scope="col">' + escapeHtml(t('healthTitle', 'Image')) + '</th><th scope="col">' + escapeHtml(t('status', 'Status')) + '</th><th scope="col">' + escapeHtml(t('healthThumbnailResults', 'Thumbnail results')) + '</th></tr></thead><tbody>';
         data.items.forEach(function(item){
-          let details = '';
-          Object.keys(item.sizes || {}).forEach(function(slug){
-            const size = item.sizes[slug];
-            const reason = healthReason(size.reason);
-            details += '<li><strong>' + escapeHtml(slug) + '</strong>: ' + escapeHtml(healthStatus(size.status)) + (reason ? ' — ' + escapeHtml(reason) : '') + (size.action ? ' — ' + escapeHtml(size.action) : '') + '</li>';
-          });
-          const restored = data.operation === 'repair' ? '<p>' + escapeHtml(t('healthRestored', 'Restored:')) + ' ' + escapeHtml(item.restored_count || 0) + (item.restored_sizes && item.restored_sizes.length ? ' (' + escapeHtml(item.restored_sizes.join(', ')) + ')' : '') + '</p>' : '';
-          const itemStatus = {done: t('statusCompleted', 'Completed'), skipped: t('skipped', 'Skipped:'), failed: t('failed', 'Failed:')}[item.item_status];
-          const reason = healthReason(item.reason);
-          const result = itemStatus ? '<p>' + escapeHtml(t('healthItemResult', 'Job result:')) + ' ' + escapeHtml(itemStatus) + '</p>' : '';
-          html += '<tr><td>' + escapeHtml(item.title || '#' + item.attachment_id) + ' (#' + escapeHtml(item.attachment_id) + ')</td><td>' + escapeHtml(healthStatus(item.status)) + restored + result + '</td><td>' + escapeHtml(item.message || reason || '') + (item.message && reason ? '<p>' + escapeHtml(reason) + '</p>' : '') + (details ? '<ul>' + details + '</ul>' : '') + '</td><td>' + escapeHtml(item.action || '') + '</td></tr>';
+          html += renderHealthItem(item, data.operation);
         });
         html += '</tbody></table></div>';
       }

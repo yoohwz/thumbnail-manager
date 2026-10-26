@@ -111,6 +111,11 @@ function yotm_admin_enqueue_assets( $hook ) {
 				'healthInspected'                 => __( 'Inspected (UTC):', 'thumbnail-manager' ),
 				'healthInspectedCount'            => __( 'Inspected:', 'thumbnail-manager' ),
 				'healthTitle'                     => __( 'Image', 'thumbnail-manager' ),
+				'healthThumbnailResults'          => __( 'Thumbnail results', 'thumbnail-manager' ),
+				'healthDetails'                   => __( 'Details', 'thumbnail-manager' ),
+				'healthSizeDetails'               => __( 'Thumbnail size details', 'thumbnail-manager' ),
+				/* translators: %s: number of thumbnail sizes in the image result. */
+				'healthViewSizes'                 => __( 'View size details (%s)', 'thumbnail-manager' ),
 				'healthAction'                    => __( 'Suggested action', 'thumbnail-manager' ),
 				'healthMissing'                   => __( 'Missing', 'thumbnail-manager' ),
 				'healthHealthy'                   => __( 'Healthy', 'thumbnail-manager' ),

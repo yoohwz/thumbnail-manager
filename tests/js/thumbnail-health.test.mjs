@@ -164,3 +164,39 @@ test('stopping during prepare prevents a late response from starting or retainin
   h.click('#yotm_regen_run');
   assert.equal(h.calls.filter(call => call.action === 'yotm_regenerate_prepare').length, 2);
 });
+
+test('healthy image rows summarize size counts while retaining closed accessible details', () => {
+  const h = harness();
+  h.workflow.resume('compact-report');
+  h.last('status').resolve({status: 'completed', context: {operation: 'check'}});
+  const sizes = Object.fromEntries(Array.from({length: 7}, (_, i) => ['size_' + i, {status: 'healthy', reason: 'file_present'}]));
+  sizes.large = {status: 'not_needed', reason: 'source_size_not_resizable'};
+  sizes.extra_large = {status: 'not_needed', reason: 'source_size_not_resizable'};
+  h.last('yotm_thumbnail_health_results').resolve({operation: 'check', done: true, items: [{attachment_id: 42, title: '<long image title>', status: 'healthy', item_status: 'done', message: 'No required enabled thumbnails are missing.', sizes}]});
+  const html = h.$('#yotm_health_results').html();
+  const overview = html.split('<details')[0];
+  assert.match(overview, /Healthy: 7/);
+  assert.match(overview, /Not needed: 2/);
+  assert.doesNotMatch(overview, /Thumbnail file is present|No required enabled thumbnails|Job result:|Suggested action/);
+  assert.match(html, /<details class="yo-health-details"><summary>View size details \(9\)/);
+  assert.match(html, /screen-reader-text.*&lt;long image title&gt;.*#42/);
+  assert.match(html, /<th scope="row">size_6<\/th>/);
+  assert.match(html, /<th scope="row">extra_large<\/th>/);
+});
+
+test('blocked reasons, actions and actual repair outcomes stay visible before size disclosure', () => {
+  const h = harness();
+  h.workflow.resume('blocked-repair');
+  h.last('status').resolve({status: 'completed', context: {operation: 'repair'}});
+  h.last('yotm_thumbnail_health_results').resolve({operation: 'repair', done: true, items: [{attachment_id: 9, title: 'Image', status: 'blocked', item_status: 'failed', message: '<Source unavailable>', action: '<Restore source>', restored_count: 1, restored_sizes: ['medium'], sizes: {thumbnail: {status: 'healthy', reason: 'file_present'}, medium: {status: 'missing', reason: 'file_missing'}, large: {status: 'blocked', action: 'Review size'}}}]});
+  const html = h.$('#yotm_health_results').html();
+  const overview = html.split('<details')[0];
+  assert.match(overview, /&lt;Source unavailable&gt;/);
+  assert.match(overview, /&lt;Restore source&gt;/);
+  assert.match(overview, /Restored: 1/);
+  assert.match(overview, /Job result: Failed/);
+  assert.match(overview, /Blocked: 1/);
+  assert.match(overview, /Missing: 1/);
+  assert.ok(html.indexOf('<th scope="row">large') < html.indexOf('<th scope="row">medium'));
+  assert.ok(html.indexOf('<th scope="row">medium') < html.indexOf('<th scope="row">thumbnail'));
+});

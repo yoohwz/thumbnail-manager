@@ -695,6 +695,121 @@ table.yo-sizes th {
 	vertical-align: middle;
 }
 
+/* Health results keep each image compact; native disclosures retain all size evidence. */
+.yo-health-table {
+	table-layout: fixed;
+}
+
+.yo-health-table > thead > tr > th:first-child {
+	width: 25%;
+}
+
+.yo-health-table > thead > tr > th:nth-child(2) {
+	width: 17%;
+}
+
+.yo-health-table th,
+.yo-health-table td {
+	vertical-align: top;
+	overflow-wrap: anywhere;
+}
+
+.yo-health-table .yo-health-image {
+	font-weight: 600;
+}
+
+.yo-health-id,
+.yo-health-job-result {
+	display: block;
+	margin-top: 5px;
+	color: var(--yotm-muted);
+	font-weight: 400;
+}
+
+.yo-health-counts {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 5px 8px;
+}
+
+.yo-health-neutral {
+	color: #50575e;
+	background: #e9eaeb;
+}
+
+.yo-health-table .yo-badge {
+	white-space: normal;
+}
+
+.yo-health-table p {
+	margin: 7px 0 0;
+}
+
+.yo-health-details {
+	margin-top: 10px;
+}
+
+.yo-health-details summary {
+	width: fit-content;
+	color: var(--yotm-accent-dark);
+	cursor: pointer;
+}
+
+.yo-health-details[open] summary {
+	margin-bottom: 10px;
+}
+
+.yo-health-sizes {
+	background: var(--yotm-surface);
+}
+
+.yo-health-sizes th:first-child {
+	width: 27%;
+}
+
+.yo-health-sizes th:nth-child(2) {
+	width: 23%;
+}
+
+@media screen and (max-width: 600px) {
+	.yo-health-table > thead {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		overflow: hidden;
+		clip-path: inset(50%);
+	}
+
+	.yo-health-table > tbody {
+		display: block;
+	}
+
+	.yo-health-table > tbody > tr {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) minmax(70px, 30%);
+		gap: 12px;
+		padding: 12px;
+		border-bottom: 1px solid var(--yotm-border);
+	}
+
+	.yo-health-table > tbody > tr > th,
+	.yo-health-table > tbody > tr > td {
+		padding: 0;
+	}
+
+	.yo-health-table > tbody > tr > td:last-child {
+		grid-column: 1 / -1;
+	}
+
+	.yo-health-sizes {
+		min-width: 420px;
+	}
+
+	.yo-health-details {
+		overflow-x: auto;
+	}
+}
+
 @media screen and (max-width: 960px) {
 	.yo-card-grid,
 	.yo-review-summary {
