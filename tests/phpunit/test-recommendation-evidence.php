@@ -144,6 +144,12 @@ class YOTM_Recommendation_Evidence_Test extends WP_UnitTestCase {
 		$this->assertStringNotContainsString( dirname( $source ), wp_json_encode( $outcome['data']['result'] ) );
 	}
 
+	public function test_malformed_saved_items_project_as_empty_without_disabling_current_sizes() {
+		$result = yotm_recommendation_result_for_response( array( 'items' => 'malformed' ) );
+		$this->assertSame( array(), $result['items'] );
+		$this->assertContains( 'tm_evidence_a', $result['recommended_keep'] );
+	}
+
 	public function test_content_samples_are_bounded_identify_hints_and_recheck_current_permission() {
 		$post_ids = array();
 		for ( $i = 0; $i < 8; ++$i ) {

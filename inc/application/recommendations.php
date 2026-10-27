@@ -281,7 +281,7 @@ function yotm_recommend_scan_attachment_metadata_ids( $ids, &$usage, $worker = n
 			}
 			++$usage[ $size_name ]['count'];
 			$filename = is_array( $size_data ) ? ( $size_data['file'] ?? ( $size_data['filename'] ?? '' ) ) : '';
-			$path     = $file && is_string( $filename ) && '' !== $filename && wp_basename( $filename ) === $filename
+			$path     = is_string( $file ) && '' !== $file && is_string( $filename ) && '' !== $filename && wp_basename( $filename ) === $filename
 				? yotm_media_source_canonical_path( trailingslashit( dirname( $file ) ) . $filename ) : new WP_Error( 'unverified' );
 			if ( is_wp_error( $path ) ) {
 				$usage[ $size_name ]['unverified_count'] = (int) ( $usage[ $size_name ]['unverified_count'] ?? 0 ) + 1;
@@ -839,6 +839,9 @@ function yotm_build_recommendation_result( $sizes, $metadata_usage, $content_usa
 function yotm_recommendation_result_for_response( $result ) {
 	$root_keys = array( 'schema_version', 'registered_sizes_signature', 'items', 'statistics', 'protected_count', 'detected_reference_count', 'unknown_count', 'generated_bytes', 'generated_bytes_human', 'coverage', 'keep_count', 'unused_count', 'savings' );
 	$projected = is_array( $result ) ? array_intersect_key( $result, array_flip( $root_keys ) ) : array();
+	if ( array_key_exists( 'items', $projected ) ) {
+		$projected['items'] = is_array( $projected['items'] ) ? array_values( $projected['items'] ) : array();
+	}
 	foreach ( (array) ( $projected['items'] ?? array() ) as $index => $item ) {
 		$allowed            = array( 'name', 'dimensions', 'status', 'confidence', 'apply_action', 'label', 'reason', 'recommendation', 'evidence', 'generated_count', 'content_refs', 'bytes' );
 		$public             = is_array( $item ) ? array_intersect_key( $item, array_flip( $allowed ) ) : array();
