@@ -120,7 +120,7 @@
     reportOpen = true;
     $('.yotm-wrap').addClass('yo-report-open');
     if (!current || current.job.token !== token) { selected = new Set(); }
-    $report.removeClass('yo-hidden').html(backButton() + '<h2 id="yotm_report_heading">' + text('resultTitle', 'Saved job results') + '</h2>' + core.htmlNotice('notice-info', t('healthLoading', 'Loading thumbnail results…'))).trigger('focus');
+    $report.removeClass('yo-hidden').html(backButton() + '<h2 id="yotm_report_heading">' + text('resultTitle', 'Saved job results') + '</h2>' + '<p role="status">' + text('healthLoading', 'Loading thumbnail results…') + '</p>').trigger('focus');
     core.request('yotm_job_results', {token: token, page: page || 1, filter: filter || ''}).done(function(response){
       if (requestId !== generation) { return; }
       if (!response || !response.success || !response.data) { $report.html(backButton() + '<h2 id="yotm_report_heading">' + text('resultTitle', 'Saved job results') + '</h2>' + core.htmlNotice('notice-warning', core.responseError(response, t('resultUnavailable', 'This saved result is unavailable. Run a new check or scan.')))); return; }
