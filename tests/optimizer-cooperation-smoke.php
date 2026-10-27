@@ -222,12 +222,45 @@ try {
 		delete_option( YoOhw_Media_Optimizer::QUEUE_OPTION );
 	}//end foreach
 
-	$fixture_id = $fixture_ids['changed'];
-	$job        = $finish( $prepare( $fixture_id, true ) );
-	$metadata   = get_post_meta( $fixture_id, '_wp_attachment_metadata', true );
-	$selected   = $dir . '/' . $metadata['sizes']['yotm_coop_selected']['file'];
-	$original   = file_get_contents( $selected );
-	$mtime      = filemtime( $selected );
+	$fixture_id    = $fixture_ids['changed'];
+	$job           = $finish( $prepare( $fixture_id, true ) );
+	$metadata      = get_post_meta( $fixture_id, '_wp_attachment_metadata', true );
+	$selected      = $dir . '/' . $metadata['sizes']['yotm_coop_selected']['file'];
+	$selected_hash = hash_file( 'sha256', $selected );
+	$alias_id      = wp_insert_attachment(
+		array(
+			'post_mime_type' => 'image/png',
+			'post_status'    => 'inherit',
+			'post_title'     => 'Optimizer protected source alias',
+		),
+		$selected
+	);
+	$assert( is_int( $alias_id ) && $alias_id > 0, 'Could not create the protected-source alias attachment.' );
+	$fixture_ids['source_alias'] = $alias_id;
+	$alias_relative              = ltrim( str_replace( trailingslashit( wp_get_upload_dir()['basedir'] ), '', $selected ), '/' );
+	$alias_metadata              = array(
+		'file'   => $alias_relative,
+		'width'  => 120,
+		'height' => 120,
+		'sizes'  => array(),
+	);
+	update_post_meta( $alias_id, '_wp_attachment_metadata', $alias_metadata );
+	$assert( ! is_wp_error( yotm_media_source_sync_attachment( $alias_id, null, true ) ), 'Could not index the cross-attachment protected source.' );
+	$assert( true === yotm_media_source_path_is_authoritative( $selected ), 'Alias fixture must be a proven protected full source, not only an unknown index.' );
+	$run   = $optimizer->run_thumbnail_manager_batch( $job['token'], '', true, 1 );
+	$queue = get_option( YoOhw_Media_Optimizer::QUEUE_OPTION );
+	$assert( 'failed' === $queue['items'][ $fixture_id ]['status'] && ! is_file( $selected . '.webp' ), 'A generated path that is another attachment full source must fail without encoding.' );
+	$assert( hash_file( 'sha256', $selected ) === $selected_hash && get_post_meta( $fixture_id, '_wp_attachment_metadata', true ) === $metadata && get_post_meta( $alias_id, '_wp_attachment_metadata', true ) === $alias_metadata, 'Cross-attachment veto changed source bytes or either attachment metadata.' );
+	// Detach the borrowed source before deleting this script's alias record.
+	delete_post_meta( $alias_id, '_wp_attached_file' );
+	delete_post_meta( $alias_id, '_wp_attachment_metadata' );
+	wp_delete_attachment( $alias_id, true );
+	unset( $fixture_ids['source_alias'] );
+	delete_option( YoOhw_Media_Optimizer::QUEUE_OPTION );
+	$assert( false === yotm_media_source_path_is_authoritative( $selected ), 'Removing the alias must restore the independent changed-hash fixture precondition.' );
+	$pass( 'exact generated output newly referenced as another attachment full source is protected despite unchanged bytes' );
+	$original = file_get_contents( $selected );
+	$mtime    = filemtime( $selected );
 	$assert( strlen( $original ) > 40, 'Changed-source fixture is too short.' );
 	$changed                           = $original;
 	$changed[ strlen( $changed ) - 1 ] = chr( ord( $changed[ strlen( $changed ) - 1 ] ) ^ 1 );
@@ -367,6 +400,10 @@ try {
 	update_option( YoOhw_Media_Optimizer::OPTION_KEY, $options, false );
 	foreach ( $jobs as $job_id ) {
 		yotm_job_delete( $job_id );
+	}
+	if ( isset( $fixture_ids['source_alias'] ) ) {
+		delete_post_meta( $fixture_ids['source_alias'], '_wp_attached_file' );
+		delete_post_meta( $fixture_ids['source_alias'], '_wp_attachment_metadata' );
 	}
 	foreach ( $fixture_ids as $fixture_id ) {
 		wp_delete_attachment( $fixture_id, true );
