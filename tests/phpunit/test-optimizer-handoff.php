@@ -152,7 +152,7 @@ class YOTM_Optimizer_Handoff_Test extends WP_UnitTestCase {
 		$this->jobs[] = $job['id'];
 		$base         = trailingslashit( wp_get_upload_dir()['basedir'] );
 		foreach ( array(
-			'deleted' => 'delete_reconciled',
+			'done'    => 'delete_reconciled',
 			'skipped' => '',
 			'failed'  => '',
 		) as $status => $outcome ) {
@@ -201,10 +201,10 @@ class YOTM_Optimizer_Handoff_Test extends WP_UnitTestCase {
 		$out = yotm_optimizer_prune_handoff( $job['token'] );
 		$this->assertIsArray( $out );
 		$this->assertCount( 1, $out['items'] );
-		$this->assertSame( 'example-deleted-150x150.jpg', $out['items'][0]['path'] );
+		$this->assertSame( 'example-done-150x150.jpg', $out['items'][0]['path'] );
 		$this->assertSame( str_repeat( 'a', 64 ), $out['items'][0]['sha256'] );
 		$this->assertSame( $job, yotm_job_get_by_id( $job['id'] ) );
-		$this->assertSame( $out['items'], yotm_optimizer_prune_handoff( $job['token'], 1, hash( 'sha256', 'deleted' ) )['items'] );
+		$this->assertSame( $out['items'], yotm_optimizer_prune_handoff( $job['token'], 1, hash( 'sha256', 'done' ) )['items'] );
 		$this->assertWPError( yotm_optimizer_prune_handoff( $job['token'], 1, hash( 'sha256', 'skipped' ) ) );
 		$this->assertWPError( yotm_optimizer_prune_handoff( $job['token'], 1, '../untrusted' ) );
 	}

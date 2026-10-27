@@ -220,7 +220,7 @@ function yotm_optimizer_prune_handoff( $token, $page = 1, $item_key = '' ) {
 	if ( 'prune' !== $job['type'] || 'completed' !== $job['status'] || $job['expires_at'] < gmdate( 'Y-m-d H:i:s' ) || ! empty( $job['payload']['recovery_only'] ) || yotm_job_has_terminal_recovery_evidence( $job['id'] ) || yotm_job_has_recovery_journals( $job['id'] ) ) {
 		return new WP_Error( 'yotm_optimizer_prune_unavailable', __( 'Use an available completed Prune result without pending recovery. Sidecar cleanup requires a separate preview and approval in Media Optimizer.', 'thumbnail-manager' ) );
 	}
-	$data = yotm_job_get_item_rows_page( $job['id'], max( 1, absint( $page ) ), 100, '', array( 'deleted' ) );
+	$data = yotm_job_get_item_rows_page( $job['id'], max( 1, absint( $page ) ), 100, '', array( 'done', 'deleted' ) );
 	if ( is_wp_error( $data ) ) {
 		return $data;
 	}
@@ -229,7 +229,7 @@ function yotm_optimizer_prune_handoff( $token, $page = 1, $item_key = '' ) {
 			return new WP_Error( 'yotm_optimizer_prune_item', __( 'The deleted source evidence is unavailable.', 'thumbnail-manager' ) );
 		}
 		$row = yotm_job_get_item_by_key( $job['id'], $item_key );
-		if ( ! is_array( $row ) || 'deleted' !== $row['status'] ) {
+		if ( ! is_array( $row ) || ! in_array( $row['status'], array( 'done', 'deleted' ), true ) ) {
 			return new WP_Error( 'yotm_optimizer_prune_item', __( 'The deleted source evidence is unavailable.', 'thumbnail-manager' ) );
 		}
 		$data['items'] = array( $row );
