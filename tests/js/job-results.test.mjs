@@ -89,6 +89,9 @@ test('retry sends only explicitly checked keys and starts the new token', () => 
   const resumes = harness.calls.filter(call => call.action === 'resume');
   assert.equal(resumes.length, 1);
   assert.equal(resumes[0].token, 'new-token');
+  assert.ok(!harness.nodes.get('.yotm-wrap').classes.has('yo-report-open'));
+  assert.ok(harness.nodes.get('#yotm_job_report').classes.has('yo-hidden'));
+  assert.equal(harness.calls.filter(call => call.action === 'yotm_job_results').length, 1);
 });
 
 test('JSON export uses public result pages and never starts processing', () => {
@@ -179,4 +182,18 @@ test('empty filters explain the view and selected-item feedback stays separate f
   assert.equal(selected.nodes.get('#yotm_result_selection_count').content, '1 / 100 selected');
   assert.equal(selected.nodes.get('#yotm_result_retry').attributes.disabled, false);
   assert.deepEqual(selected.calls.map(call => call.action), ['yotm_job_results']);
+});
+
+
+test('continuing an active job reveals its workflow controls for every job type', () => {
+  for (const type of ['regenerate', 'prune', 'recommendation']) {
+    const harness = fixture({type, status: 'running'});
+    harness.window.YOTMResults.open('source-token');
+    assert.match(harness.nodes.get('#yotm_job_report').content, /id="yotm_result_resume"/);
+    harness.handlers.get('click:#yotm_result_resume')();
+    assert.ok(!harness.nodes.get('.yotm-wrap').classes.has('yo-report-open'));
+    assert.ok(harness.nodes.get('#yotm_job_report').classes.has('yo-hidden'));
+    assert.deepEqual(harness.calls.map(call => call.action), ['yotm_job_results', 'resume']);
+    assert.equal(harness.calls.at(-1).token, 'source-token');
+  }
 });

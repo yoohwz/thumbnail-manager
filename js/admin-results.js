@@ -128,6 +128,13 @@
       if (requestId === generation) { $report.html(backButton() + '<h2 id="yotm_report_heading">' + text('resultTitle', 'Saved job results') + '</h2>' + core.htmlNotice('notice-error', core.responseError(xhr.responseJSON, t('healthLoadFailed', 'Could not load thumbnail results.')))); }
     });
   }
+  function closeReport() {
+    ++generation;
+    reportOpen = false;
+    $report.addClass('yo-hidden');
+    $('.yotm-wrap').removeClass('yo-report-open');
+    if (returnFocus && returnFocus.isConnected && typeof returnFocus.focus === 'function') { returnFocus.focus(); } else { $('#yotm_recent_jobs > summary').trigger('focus'); }
+  }
   function exportReport() {
     if (!current || exporting) { return; }
     exporting = true;
@@ -185,16 +192,16 @@
       if (!response || !response.success || !response.data) { $('#yotm_result_message').html(core.htmlNotice('notice-error', core.responseError(response, t('resultRetryFailed', 'Could not prepare retry.')))); $('#yotm_result_retry').prop('disabled', false); return; }
       const data = response.data;
       core.rememberJob(source.type, data.token);
+      closeReport();
       core.resumeWorkflow(source.type, data.token);
       selected = new Set();
       core.loadRecentJobs();
-      open(data.token);
     }).fail(function(xhr){ $('#yotm_result_message').html(core.htmlNotice('notice-error', core.responseError(xhr.responseJSON, t('resultRetryFailed', 'Could not prepare retry.')))); $('#yotm_result_retry').prop('disabled', false); });
   });
-  $report.on('click', '#yotm_result_resume', function(){ if (current) { core.resumeWorkflow(current.job.type, current.job.token); } });
+  $report.on('click', '#yotm_result_resume', function(){ if (current) { closeReport(); core.resumeWorkflow(current.job.type, current.job.token); } });
   $report.on('click', '#yotm_result_export', exportReport);
   $report.on('click', '#yotm_result_refresh', function(){ if (current) { open(current.job.token, current.page, current.filter); } });
-  $report.on('click', '#yotm_result_close', function(){ ++generation; reportOpen = false; $report.addClass('yo-hidden'); $('.yotm-wrap').removeClass('yo-report-open'); if (returnFocus && returnFocus.isConnected && typeof returnFocus.focus === 'function') { returnFocus.focus(); } else { $('#yotm_recent_jobs > summary').trigger('focus'); } });
+  $report.on('click', '#yotm_result_close', closeReport);
   $('#yotm_regen_results, #yotm_recommend_results, #yotm_prune_results').on('click', '.yotm-open-report', function(){ open($(this).attr('data-token')); });
   window.YOTMResults = Object.freeze({open: open});
 })(jQuery, window.YOTMAdmin);
