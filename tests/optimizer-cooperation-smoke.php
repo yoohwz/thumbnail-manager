@@ -54,6 +54,7 @@ $fixture_ids   = array();
 $dir           = trailingslashit( wp_get_upload_dir()['basedir'] ) . 'yotm-optimizer-cooperation-' . wp_generate_uuid4();
 $filter_hits   = 0;
 $loss_filter   = null;
+$commit_filter = null;
 $child         = null;
 $other_user    = 0;
 $pipes         = array();
@@ -374,6 +375,40 @@ try {
 		$assert( is_file( $fixture_path ) && hash_file( 'sha256', $fixture_path ) === $hash, 'Lost ownership changed an existing live fixture.' );
 	}
 	$pass( 'ownership loss before TM promotion stops live writes/rollback and retains regeneration recovery evidence' );
+
+	// A failed final metadata write must recheck ownership before trying to restore old metadata.
+	$commit_calls   = 0;
+	$commit_result  = '';
+	$end_result     = null;
+	$commit_journal = $item['payload']['regeneration_journal'];
+	$commit_journal['final_metadata']['cooperation_failed_commit'] = 'must-not-persist';
+	$before_commit_files = $files( $dir );
+	$before_commit_item  = yotm_job_get_item_by_key( $job['id'], hash( 'sha256', 'attachment:' . $fixture_id ) );
+	$commit_filter       = static function ( $check, $attachment_id, $meta_key ) use ( $fixture_id, $optimizer, &$commit_calls, &$end_result ) {
+		if ( $fixture_id === (int) $attachment_id && '_wp_attachment_metadata' === $meta_key ) {
+			++$commit_calls;
+			if ( 1 === $commit_calls ) {
+				$end_result = $optimizer->end_thumbnail_manager_mutation( $GLOBALS['yotm_optimizer_scope']['token'] );
+			}
+			return false;
+		}
+		return $check;
+	};
+	add_filter( 'update_post_metadata', $commit_filter, PHP_INT_MAX, 3 );
+	$commit_guard = yotm_with_optimizer_guard(
+		static function () use ( $fixture_id, $commit_journal, $metadata, &$commit_result ) {
+			$commit_result = yotm_regenerate_commit_metadata( $fixture_id, $commit_journal, $metadata );
+			return $commit_result;
+		}
+	);
+	remove_filter( 'update_post_metadata', $commit_filter, PHP_INT_MAX );
+	$commit_filter = null;
+	$assert( true === $end_result, 'Fault injection must actually release the real optimizer token during the failed final write.' );
+	$assert( 1 === $commit_calls && 'incomplete' === $commit_result && is_wp_error( $commit_guard ), 'Lost metadata-commit ownership must stop before a second old-metadata restoration write.' );
+	$assert( get_post_meta( $fixture_id, '_wp_attachment_metadata', true ) === $metadata, 'Failed metadata commit changed the old metadata.' );
+	$assert( yotm_job_get_item_by_key( $job['id'], hash( 'sha256', 'attachment:' . $fixture_id ) ) === $before_commit_item, 'Failed metadata commit must retain the unchanged persisted recovery journal.' );
+	$assert( $files( $dir ) === $before_commit_files, 'Lost metadata-commit ownership must not roll back or remove staged/live files.' );
+	$pass( 'token loss while final metadata write is refused blocks the second restore write and file rollback, retaining recovery evidence' );
 	echo 'PASS — ' . (int) $assertions . " runtime assertions; both current plugins active; real GD PNG/WebP path.\n";
 	echo "NOT RUN — browser HTTP/nonce/capability transport, multisite switch, hostile filesystem races, process death after promotion and full codec matrix; covered separately where applicable.\n";
 } finally {
@@ -388,6 +423,9 @@ try {
 	}
 	if ( null !== $loss_filter ) {
 		remove_filter( 'wp_update_attachment_metadata', $loss_filter, PHP_INT_MAX );
+	}
+	if ( null !== $commit_filter ) {
+		remove_filter( 'update_post_metadata', $commit_filter, PHP_INT_MAX );
 	}
 	yotm_job_release_all_workers();
 	yotm_media_source_shutdown_cleanup();
