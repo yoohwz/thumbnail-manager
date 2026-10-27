@@ -591,8 +591,15 @@ function yotm_regenerate_destination_prestate( $entry, $snapshot, $old_owners, $
  * @return bool
  */
 function yotm_regenerate_rollback( $journal ) {
+	$checkpoint = yotm_optimizer_checkpoint();
+	if ( is_wp_error( $checkpoint ) ) {
+		return false;
+	}
 	$complete = true;
 	foreach ( array_reverse( (array) ( $journal['destinations'] ?? array() ) ) as $entry ) {
+		if ( is_wp_error( yotm_optimizer_checkpoint() ) ) {
+			return false;
+		}
 		$path = (string) ( $entry['destination'] ?? '' );
 		if ( empty( $entry['promoted'] ) ) {
 			continue;
@@ -619,6 +626,10 @@ function yotm_regenerate_rollback( $journal ) {
  * @return bool
  */
 function yotm_regenerate_promote_destination( &$entry ) {
+	$checkpoint = yotm_optimizer_checkpoint();
+	if ( is_wp_error( $checkpoint ) ) {
+		return false;
+	}
 	if ( ! @rename( $entry['source'], $entry['destination'] ) || ! yotm_regenerate_file_hash_matches( $entry['destination'], $entry['promoted_hash'] ) ) {
 		$entry['promoted'] = yotm_regenerate_file_hash_matches( $entry['destination'], $entry['promoted_hash'] );
 		return false;
@@ -662,7 +673,15 @@ function yotm_regenerate_recovery_metadata_state( $journal ) {
  * @return true|WP_Error
  */
 function yotm_regenerate_recover_destinations( $journal ) {
+	$checkpoint = yotm_optimizer_checkpoint();
+	if ( is_wp_error( $checkpoint ) ) {
+		return $checkpoint;
+	}
 	foreach ( $journal['destinations'] as $slug => $entry ) {
+		$checkpoint = yotm_optimizer_checkpoint();
+		if ( is_wp_error( $checkpoint ) ) {
+			return $checkpoint;
+		}
 		$owners = yotm_media_reference_path_owners( $entry['destination'] ?? '' );
 		if ( is_wp_error( $owners ) || ! empty( $owners['protected'] ) ) {
 			return is_wp_error( $owners ) ? $owners : new WP_Error( 'yotm_regenerate_recovery_protected', __( 'Recovery found a newly protected destination.', 'thumbnail-manager' ) );
@@ -707,10 +726,17 @@ function yotm_regenerate_recover_destinations( $journal ) {
  * @return string Either committed, restored, or incomplete.
  */
 function yotm_regenerate_commit_metadata( $attachment_id, $journal, $old_metadata ) {
+	$checkpoint = yotm_optimizer_checkpoint();
+	if ( is_wp_error( $checkpoint ) ) {
+		return 'incomplete';
+	}
 	$written  = update_post_meta( $attachment_id, '_wp_attachment_metadata', $journal['final_metadata'] );
 	$raw_rows = yotm_media_reference_raw_postmeta_rows( $attachment_id, '_wp_attachment_metadata' );
 	$raw      = is_wp_error( $raw_rows ) ? array() : array_column( $raw_rows, 'value' );
 	if ( ( false === $written && ( 1 !== count( $raw ) || $raw[0] !== $journal['final_metadata'] ) ) || 1 !== count( $raw ) || $raw[0] !== $journal['final_metadata'] ) {
+		if ( is_wp_error( yotm_optimizer_checkpoint() ) ) {
+			return 'incomplete';
+		}
 		update_post_meta( $attachment_id, '_wp_attachment_metadata', $old_metadata );
 		$restored_rows = yotm_media_reference_raw_postmeta_rows( $attachment_id, '_wp_attachment_metadata' );
 		$restored_raw  = is_wp_error( $restored_rows ) ? array() : array_column( $restored_rows, 'value' );
@@ -729,6 +755,10 @@ function yotm_regenerate_commit_metadata( $attachment_id, $journal, $old_metadat
  * @return true|WP_Error
  */
 function yotm_regenerate_cleanup_obsolete( $snapshot, $final_metadata ) {
+	$checkpoint = yotm_optimizer_checkpoint();
+	if ( is_wp_error( $checkpoint ) ) {
+		return $checkpoint;
+	}
 	$old = yotm_regenerate_metadata_file_map( $snapshot['full'], $snapshot['metadata'] );
 	$new = yotm_regenerate_metadata_file_map( $snapshot['full'], $final_metadata );
 	foreach ( array_diff_key( $old, $new ) as $path ) {
@@ -750,6 +780,10 @@ function yotm_regenerate_cleanup_obsolete( $snapshot, $final_metadata ) {
 			if ( is_link( $path ) || ! is_file( $path ) ) {
 				return new WP_Error( 'yotm_regenerate_cleanup_failed', __( 'An obsolete generated file could not be deleted safely.', 'thumbnail-manager' ) );
 			}
+			$checkpoint = yotm_optimizer_checkpoint();
+			if ( is_wp_error( $checkpoint ) ) {
+				return $checkpoint;
+			}
 			wp_delete_file( $path );
 			if ( false !== @lstat( $path ) ) {
 				return new WP_Error( 'yotm_regenerate_cleanup_failed', __( 'An obsolete generated file could not be deleted safely.', 'thumbnail-manager' ) );
@@ -762,6 +796,23 @@ function yotm_regenerate_cleanup_obsolete( $snapshot, $final_metadata ) {
 }
 
 /**
+ * Run the existing operation under optional optimizer exclusion.
+ *
+ * @param mixed $attachment_id Existing operation argument.
+ * @param mixed $only_missing Existing operation argument.
+ * @param mixed $force_all Existing operation argument.
+ * @return mixed Existing operation result.
+ */
+function yotm_regenerate_attachment( $attachment_id, $only_missing, $force_all ) {
+	$result = yotm_with_optimizer_guard(
+		static function () use ( $attachment_id, $only_missing, $force_all ) {
+			return yotm_regenerate_attachment_owned( $attachment_id, $only_missing, $force_all );
+		}
+	);
+	return is_wp_error( $result ) ? yotm_regenerate_failure( $result, true ) : $result;
+}
+
+/**
  * Regenerate one attachment with an original-image source for force mode.
  *
  * @param int  $attachment_id Attachment ID.
@@ -769,7 +820,7 @@ function yotm_regenerate_cleanup_obsolete( $snapshot, $final_metadata ) {
  * @param bool $force_all Force full metadata regeneration.
  * @return array{status:string,message:string}
  */
-function yotm_regenerate_attachment( $attachment_id, $only_missing, $force_all ) {
+function yotm_regenerate_attachment_owned( $attachment_id, $only_missing, $force_all ) {
 	if ( $force_all ) {
 		return yotm_regenerate_failure( __( 'Force regeneration requires a persistent claimed job item.', 'thumbnail-manager' ) );
 	}

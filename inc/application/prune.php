@@ -675,6 +675,23 @@ function yotm_prune_approve_application( $token, $manifest_hash, $confirmed ) {
 }
 
 /**
+ * Run the existing operation under optional optimizer exclusion.
+ *
+ * @param mixed $token Existing operation argument.
+ * @param mixed $manifest_hash Existing operation argument.
+ * @param mixed $batch Existing operation argument.
+ * @return mixed Existing operation result.
+ */
+function yotm_prune_delete_application( $token, $manifest_hash, $batch ) {
+	$result = yotm_with_optimizer_guard(
+		static function () use ( $token, $manifest_hash, $batch ) {
+			return yotm_prune_delete_application_owned( $token, $manifest_hash, $batch );
+		}
+	);
+	return is_wp_error( $result ) ? yotm_regenerate_application_error( array( 'msg' => $result->get_error_message() ), 409 ) : $result;
+}
+
+/**
  * Delete one bounded batch from an approved prune manifest.
  *
  * @param string $token Persistent job token.
@@ -682,7 +699,7 @@ function yotm_prune_approve_application( $token, $manifest_hash, $confirmed ) {
  * @param int    $batch Maximum work items for this request.
  * @return array Application outcome.
  */
-function yotm_prune_delete_application( $token, $manifest_hash, $batch ) {
+function yotm_prune_delete_application_owned( $token, $manifest_hash, $batch ) {
 	$batch = max( 1, min( 500, $batch ) );
 	$job   = yotm_job_get( $token );
 
@@ -1665,6 +1682,25 @@ function yotm_prune_validate_delete_meta( $meta ) {
 }
 
 /**
+ * Run the existing operation under optional optimizer exclusion.
+ *
+ * @param mixed $item Existing operation argument.
+ * @param mixed $job Existing operation argument.
+ * @param mixed $worker Existing operation argument.
+ * @param mixed $uploads_base Existing operation argument.
+ * @param mixed $barrier Existing operation argument.
+ * @return mixed Existing operation result.
+ */
+function yotm_process_claimed_prune_item( $item, $job, $worker, $uploads_base, $barrier = null ) {
+	$result = yotm_with_optimizer_guard(
+		static function () use ( $item, $job, $worker, $uploads_base, $barrier ) {
+			return yotm_process_claimed_prune_item_owned( $item, $job, $worker, $uploads_base, $barrier );
+		}
+	);
+	return $result;
+}
+
+/**
  * Execute one claimed prune deletion behind worker and item ownership fences.
  *
  * The optional barrier is used by the cross-process smoke test to pause at the
@@ -1678,7 +1714,7 @@ function yotm_prune_validate_delete_meta( $meta ) {
  * @param callable|null $barrier Optional pre-delete barrier.
  * @return array|WP_Error
  */
-function yotm_process_claimed_prune_item( $item, $job, $worker, $uploads_base, $barrier = null ) {
+function yotm_process_claimed_prune_item_owned( $item, $job, $worker, $uploads_base, $barrier = null ) {
 	if ( ! yotm_job_refresh_worker( $worker ) || ! yotm_job_refresh_item_claim( $item ) ) {
 		return new WP_Error( 'yotm_job_worker_stale', __( 'This job worker no longer owns the current batch.', 'thumbnail-manager' ) );
 	}
@@ -1962,6 +1998,9 @@ function yotm_delete_prune_item_recoverable( &$item, $payload, $uploads_base, $r
 	}//end if
 
 	$result = yotm_delete_prune_item( $payload, $uploads_base );
+	if ( is_wp_error( $result ) ) {
+		return $result;
+	}
 	if ( empty( $result['deleted'] ) ) {
 		return $result;
 	}

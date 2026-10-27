@@ -43,6 +43,7 @@ class Yo_Thumbnail_Manager {
 		include_once plugin_dir_path( __FILE__ ) . 'inc/infrastructure/database.php';
 		include_once plugin_dir_path( __FILE__ ) . 'inc/infrastructure/options.php';
 		include_once plugin_dir_path( __FILE__ ) . 'inc/job-storage.php';
+		include_once plugin_dir_path( __FILE__ ) . 'inc/media/optimizer-compatibility.php';
 		include_once plugin_dir_path( __FILE__ ) . 'inc/media/paths.php';
 		include_once plugin_dir_path( __FILE__ ) . 'inc/media/attachments.php';
 		include_once plugin_dir_path( __FILE__ ) . 'inc/media/registered-sizes.php';

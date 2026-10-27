@@ -240,6 +240,10 @@ function yotm_thumbnail_health_rollback_journal( $journal ) {
  * @return bool
  */
 function yotm_thumbnail_health_promote_destination( &$entry ) {
+	$checkpoint = yotm_optimizer_checkpoint();
+	if ( is_wp_error( $checkpoint ) ) {
+		return false;
+	}
 	$source_node            = yotm_thumbnail_health_file_node( $entry['source'] );
 	$entry['promoted_node'] = $source_node;
 	// phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- Atomic no-clobber publication on the same filesystem; failure preserves the existing destination.

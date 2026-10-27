@@ -360,7 +360,7 @@
     request('yotm_jobs_recent').done(function(response){
       if (response && response.success && response.data) {
         renderRecentJobs(response.data.jobs || []);
-        resumeDiscoveredJob(recentActiveJob);
+        if (!config.resultToken) { resumeDiscoveredJob(recentActiveJob); }
       }
     });
   }
@@ -390,6 +390,7 @@
       return;
     }
     started = true;
+    if (config.resultToken) { loadRecentJobs(); return; }
 
     const storedPrune = recallJob('prune');
     const storedRegen = recallJob('regenerate');

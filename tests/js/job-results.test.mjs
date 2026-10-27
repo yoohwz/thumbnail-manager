@@ -47,7 +47,7 @@ function fixture(options = {}) {
     rememberJob(type, token) { calls.push({action: 'remember', type, token}); },
     loadRecentJobs() { calls.push({action: 'recent'}); }
   };
-  const window = {YOTMAdmin: core, Blob: class {constructor(parts) { blobs.push(parts.join('')); }}, URL: {createObjectURL() { return 'blob:test'; }, revokeObjectURL() {}}, setTimeout(callback) { callback(); }};
+  const window = {YOTM: options.config, YOTMAdmin: core, Blob: class {constructor(parts) { blobs.push(parts.join('')); }}, URL: {createObjectURL() { return 'blob:test'; }, revokeObjectURL() {}}, setTimeout(callback) { callback(); }};
   const document = {createElement() { return {click() { downloads.push(this.download); }}; }};
   vm.runInNewContext(source, {jQuery: $, window, document, Set, JSON, Date});
   return {window, calls, nodes, handlers, $, report, blobs, downloads};
@@ -199,4 +199,12 @@ test('continuing an active job reveals its workflow controls for every job type'
     assert.equal(harness.calls.at(-2).tab, type === 'recommendation' ? 'recommendations' : type);
     assert.equal(harness.calls.at(-1).token, 'source-token');
   }
+});
+
+
+test('optimizer handoff is only a preview link and source deep links remain read-only', () => {
+  const harness = fixture({config: {resultToken: 'source-token'}, respond(action, data, report) { return {success: true, data: {...structuredClone(report), optimizer_url: 'https://example.org/wp-admin/upload.php?page=yoohw-media-optimizer&yotm_job=source-token'}}; }});
+  assert.deepEqual(harness.calls.map(call => call.action), ['yotm_job_results']);
+  assert.match(harness.nodes.get('#yotm_job_report').content, /Create WebP\/AVIF for completed thumbnails/);
+  assert.match(harness.nodes.get('#yotm_job_report').content, /Original images and other thumbnail sizes are excluded/);
 });
