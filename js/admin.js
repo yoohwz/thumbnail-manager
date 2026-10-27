@@ -298,6 +298,10 @@
     }[type] || type;
   }
 
+  function resultActions(token) {
+    return token ? '<p><button type="button" class="button yotm-open-report" data-token="' + escapeHtml(token) + '">' + escapeHtml(t('viewResultsReport', 'View results / download report')) + '</button></p>' : '';
+  }
+
   function jobStatusLabel(status) {
     return {
       scanning: t('statusScanning', 'Scanning'),
@@ -435,6 +439,7 @@
     rememberJob: rememberJob,
     request: request,
     responseError: responseError,
+    resultActions: resultActions,
     t: t
   });
 })(jQuery);

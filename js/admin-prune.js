@@ -289,6 +289,7 @@
 
   function renderPruneReview(data) {
     pruneReviewData = data;
+    if (core.resultActions) { $pruneResults.append(core.resultActions(data.token || pruneToken)); }
     pruneTotal = parseInt(data.total || 0, 10);
     pruneManifest = data.manifest_hash || '';
     $('#yotm_review_count').text(pruneTotal.toLocaleString());
@@ -417,7 +418,7 @@
       }
       pruneRunning = false;
       if (!parseInt(data.total || 0, 10)) {
-        $pruneResults.html(htmlNotice('notice-warning', t('noMatchingThumbnails', 'No matching thumbnails found.')));
+        $pruneResults.html(htmlNotice('notice-warning', t('noMatchingThumbnails', 'No matching thumbnails found.')) + (core.resultActions ? core.resultActions(token) : ''));
         clearPruneJob({keepResults: true});
         setPruneStep('completed');
         loadRecentJobs();
@@ -508,7 +509,7 @@
       if (data.failed) {
         message += ' ' + t('failedFiles', 'Failed files:') + ' ' + data.failed;
       }
-      $pruneResults.html(htmlNotice(data.failed ? 'notice-warning' : 'notice-success', message) + errorDetails(data.errors));
+      $pruneResults.html(htmlNotice(data.failed ? 'notice-warning' : 'notice-success', message) + errorDetails(data.errors) + (core.resultActions ? core.resultActions(token) : ''));
       clearPruneJob({keepResults: true, keepProgress: true});
       setPruneStep('completed');
       $pruneResults.trigger('focus');

@@ -94,6 +94,7 @@ function yotm_admin_enqueue_assets( $hook ) {
 				? yotm_recommend_registered_sizes_signature( yotm_get_registered_sizes() )
 				: '',
 			'i18n'                     => array(
+				'viewResultsReport'               => __( 'View results / download report', 'thumbnail-manager' ),
 				'resultQueued'                    => __( 'Queued', 'thumbnail-manager' ),
 				'resultRefresh'                   => __( 'Refresh results', 'thumbnail-manager' ),
 				'resultInspected'                 => __( 'Inspected successfully:', 'thumbnail-manager' ),

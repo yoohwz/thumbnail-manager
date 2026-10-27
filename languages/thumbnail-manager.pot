@@ -2782,3 +2782,6 @@ msgstr ""
 #: inc/media/thumbnail-health.php:93
 msgid "This size is no longer registered. Its existing files were preserved."
 msgstr ""
+
+msgid "View results / download report"
+msgstr ""

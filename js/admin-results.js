@@ -139,5 +139,6 @@
   $report.on('click', '#yotm_result_export', exportReport);
   $report.on('click', '#yotm_result_refresh', function(){ if (current) { open(current.job.token, current.page, current.filter); } });
   $report.on('click', '#yotm_result_close', function(){ ++generation; $report.addClass('yo-hidden'); });
+  $('#yotm_regen_results, #yotm_recommend_results, #yotm_prune_results').on('click', '.yotm-open-report', function(){ open($(this).attr('data-token')); });
   window.YOTMResults = Object.freeze({open: open});
 })(jQuery, window.YOTMAdmin);

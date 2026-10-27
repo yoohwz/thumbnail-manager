@@ -156,6 +156,7 @@
     }
 
     $recommendResults.html(notice + renderRecommendationReport(data));
+    if (core.resultActions) { $recommendResults.append(core.resultActions(recommendToken)); }
     $('#yotm_apply_recommendations').toggleClass('yo-hidden', !recommendationCanApply).prop('disabled', !recommendationCanApply);
     $('#yotm_recommend_go_prune').removeClass('yo-hidden');
     $recommendStat.text(t('recommendationScanCompleted', 'Scan completed.'));

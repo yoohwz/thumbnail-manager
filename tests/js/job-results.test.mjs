@@ -125,3 +125,12 @@ test('export from a filtered page uses the full export pagination metadata', () 
   assert.equal(exported.filter, '');
   assert.equal(exported.items.length, 101);
 });
+
+
+test('the action beside current results opens only the public saved report', () => {
+  const harness = fixture();
+  const button = harness.$('#result-button');
+  button.attributes['data-token'] = 'source-token';
+  harness.handlers.get('click:.yotm-open-report').call(button);
+  assert.deepEqual(harness.calls.map(call => call.action), ['yotm_job_results']);
+});
