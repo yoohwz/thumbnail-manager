@@ -1046,7 +1046,8 @@ function yotm_job_get_audit( $token ) {
 	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Current owner audit lookup must reflect retained state.
 	$row   = $wpdb->get_row(
 		$wpdb->prepare(
-			"SELECT * FROM {$tables['jobs']} WHERE token = %s AND blog_id = %d AND user_id = %d",
+			'SELECT * FROM %i WHERE token = %s AND blog_id = %d AND user_id = %d',
+			$tables['jobs'],
 			sanitize_text_field( $token ),
 			get_current_blog_id(),
 			get_current_user_id()

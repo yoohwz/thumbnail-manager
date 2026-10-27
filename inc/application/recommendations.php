@@ -361,7 +361,7 @@ function yotm_recommend_statistics( $job_id, $payload ) {
 	global $wpdb;
 	$tables = yotm_job_table_names();
 	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Plugin-owned table; bounded aggregate result.
-	$rows = $wpdb->get_results( $wpdb->prepare( "SELECT payload, COUNT(*) file_count, SUM(bytes) byte_count FROM {$tables['items']} WHERE job_id=%d AND status='recommend_observed' GROUP BY payload", $job_id ), ARRAY_A );
+	$rows = $wpdb->get_results( $wpdb->prepare( "SELECT payload, COUNT(*) file_count, SUM(bytes) byte_count FROM %i WHERE job_id=%d AND status='recommend_observed' GROUP BY payload", $tables['items'], $job_id ), ARRAY_A );
 	if ( '' !== (string) $wpdb->last_error ) {
 		return new WP_Error( 'yotm_recommend_statistics_failed', __( 'Could not read file observations.', 'thumbnail-manager' ) );
 	}

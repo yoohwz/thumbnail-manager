@@ -1195,7 +1195,8 @@ function yotm_job_has_terminal_recovery_evidence( $job_id ) {
 	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Recovery evidence must reflect persistent state.
 	$found = $wpdb->get_var(
 		$wpdb->prepare(
-			"SELECT 1 FROM {$tables['items']} WHERE job_id = %d AND status IN ('failed','skipped') AND (payload LIKE %s OR payload LIKE %s) LIMIT 1",
+			"SELECT 1 FROM %i WHERE job_id = %d AND status IN ('failed','skipped') AND (payload LIKE %s OR payload LIKE %s) LIMIT 1",
+			$tables['items'],
 			absint( $job_id ),
 			'%' . $wpdb->esc_like( '"regeneration_journal"' ) . '%',
 			'%' . $wpdb->esc_like( '"prune_operation_journal_v1"' ) . '%'
@@ -1221,14 +1222,16 @@ function yotm_job_worker_add_selection_item( $worker, $item_key, $payload, $sele
 		return false;
 	}
 	$sql = $wpdb->prepare(
-		"INSERT IGNORE INTO {$tables['items']} (job_id,item_key,status,payload,error,bytes,created_at,updated_at)
-		SELECT id,%s,'queued',%s,'',0,%s,%s FROM {$tables['jobs']}
+		"INSERT IGNORE INTO %i (job_id,item_key,status,payload,error,bytes,created_at,updated_at)
+		SELECT id,%s,'queued',%s,'',0,%s,%s FROM %i
 		WHERE id=%d AND status='running' AND phase='selection' AND BINARY payload=BINARY %s
 		AND worker_token=%s AND worker_generation=%d AND expires_at >= %s AND worker_lease_expires_at >= %s",
+		$tables['items'],
 		$item_key,
 		wp_json_encode( $payload ),
 		$now,
 		$now,
+		$tables['jobs'],
 		absint( $worker['job_id'] ?? 0 ),
 		wp_json_encode( $selection_payload ),
 		sanitize_text_field( $worker['token'] ?? '' ),
