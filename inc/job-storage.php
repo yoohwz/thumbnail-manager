@@ -100,6 +100,8 @@ function yotm_job_public_data( $job ) {
 		'scope_label',
 		'only_missing',
 		'operation',
+		'selected_sizes',
+		'retry_of',
 		'inspected_at',
 		'report_token',
 		'force_all',

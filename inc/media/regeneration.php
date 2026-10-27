@@ -177,6 +177,59 @@ function yotm_regenerate_preflight( $attachment_id, $repair = false ) {
 }
 
 /**
+ * Resolve current permitted definitions within an explicit job-local scope.
+ *
+ * @param array $snapshot Validated attachment snapshot with selected_sizes.
+ * @return array|WP_Error
+ */
+function yotm_regenerate_scoped_sizes( $snapshot ) {
+	$registered = wp_get_registered_image_subsizes();
+	// phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Existing generation permission surface.
+	$sizes = apply_filters( 'intermediate_image_sizes_advanced', $registered, $snapshot['metadata'], $snapshot['attachment_id'] );
+	if ( ! is_array( $sizes ) ) {
+		return new WP_Error( 'yotm_regenerate_sizes_invalid', __( 'The filtered image-size definition is invalid.', 'thumbnail-manager' ) );
+	}
+	return array_intersect_key( yotm_apply_enabled_size_policy( $sizes ), $registered, array_flip( $snapshot['selected_sizes'] ) );
+}
+
+/**
+ * Prove scoped metadata and destination preservation, including recovery.
+ *
+ * @param array $old Original metadata.
+ * @param array $final_metadata Exact final metadata.
+ * @param array $selected_sizes Job-local scope.
+ * @param array $destinations Exact staged or journal destination map.
+ * @return true|WP_Error
+ */
+function yotm_regenerate_validate_scope( $old, $final_metadata, $selected_sizes, $destinations ) {
+	if ( ! is_array( $selected_sizes ) || empty( $selected_sizes ) || array_diff( array_keys( $destinations ), $selected_sizes ) ) {
+		return new WP_Error( 'yotm_regenerate_scope_invalid', __( 'The regeneration size scope is invalid.', 'thumbnail-manager' ) );
+	}
+	if ( ! is_array( $old['sizes'] ?? array() ) || ! is_array( $final_metadata['sizes'] ?? array() ) ) {
+		return new WP_Error( 'yotm_regenerate_scope_metadata', __( 'The scoped thumbnail metadata is malformed.', 'thumbnail-manager' ) );
+	}
+	$preserved_old            = $old;
+	$preserved_final          = $final_metadata;
+	$preserved_old['sizes']   = $preserved_old['sizes'] ?? array();
+	$preserved_final['sizes'] = $preserved_final['sizes'] ?? array();
+	foreach ( $destinations as $slug => $entry ) {
+		if ( ! isset( $final_metadata['sizes'][ $slug ] ) ) {
+			return new WP_Error( 'yotm_regenerate_scope_target_removed', __( 'A metadata filter removed a selected generated size.', 'thumbnail-manager' ) );
+		}
+		unset( $preserved_old['sizes'][ $slug ], $preserved_final['sizes'][ $slug ] );
+		foreach ( (array) ( $old['sizes'] ?? array() ) as $old_slug => $size ) {
+			if ( ! isset( $destinations[ $old_slug ] ) && is_array( $size ) && wp_basename( $entry['destination'] ) === ( $size['file'] ?? '' ) ) {
+				return new WP_Error( 'yotm_regenerate_scope_alias', __( 'A selected destination is shared with an unselected size. Existing thumbnails were preserved.', 'thumbnail-manager' ) );
+			}
+		}
+	}
+	if ( $preserved_old !== $preserved_final ) {
+		return new WP_Error( 'yotm_regenerate_scope_metadata', __( 'A metadata filter changed data outside the selected sizes. Existing thumbnails were preserved.', 'thumbnail-manager' ) );
+	}
+	return true;
+}
+
+/**
  * Recursively remove only a validated private Force staging directory.
  *
  * @param string $stage Staging path.
@@ -238,11 +291,22 @@ function yotm_regenerate_stage_outputs( $snapshot ) {
 	}
 	if ( ! empty( $snapshot['repair'] ) ) {
 		$sizes = $snapshot['requested_sizes'] ?? array();
+	} elseif ( null !== ( $snapshot['selected_sizes'] ?? null ) ) {
+		$permitted = yotm_regenerate_scoped_sizes( $snapshot );
+		$sizes     = $permitted;
 	} else {
 		$sizes = wp_get_registered_image_subsizes();
 		// phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Core-compatible generation surface.
 		$sizes = apply_filters( 'intermediate_image_sizes_advanced', $sizes, $snapshot['metadata'], $snapshot['attachment_id'] );
 		$sizes = yotm_apply_enabled_size_policy( $sizes );
+	}
+	if ( null !== ( $snapshot['selected_sizes'] ?? null ) ) {
+		$permitted = $permitted ?? yotm_regenerate_scoped_sizes( $snapshot );
+		if ( is_wp_error( $permitted ) ) {
+			yotm_regenerate_remove_stage( $stage, $parent );
+			return $permitted;
+		}
+		$sizes = ! empty( $snapshot['repair'] ) ? array_intersect_key( $sizes, $permitted ) : $permitted;
 	}
 	if ( ! is_array( $sizes ) ) {
 		yotm_regenerate_remove_stage( $stage, $parent );
@@ -296,8 +360,9 @@ function yotm_regenerate_stage_outputs( $snapshot ) {
 	}
 
 	return array(
-		'stage'   => $stage,
-		'outputs' => $validated,
+		'stage'              => $stage,
+		'outputs'            => $validated,
+		'scoped_definitions' => $permitted ?? null,
 	);
 }
 
@@ -314,8 +379,9 @@ function yotm_regenerate_finalize_metadata( $snapshot, $staged ) {
 		return new WP_Error( 'yotm_regenerate_full_dimensions', __( 'Current full-image dimensions could not be verified.', 'thumbnail-manager' ) );
 	}
 	$repair   = ! empty( $snapshot['repair'] );
+	$scoped   = null !== ( $snapshot['selected_sizes'] ?? null );
 	$proposed = $snapshot['metadata'];
-	if ( ! $repair ) {
+	if ( ! $repair && ! $scoped ) {
 		$proposed['width']    = (int) $dimensions[0];
 		$proposed['height']   = (int) $dimensions[1];
 		$proposed['filesize'] = filesize( $snapshot['full'] );
@@ -355,14 +421,14 @@ function yotm_regenerate_finalize_metadata( $snapshot, $staged ) {
 			return new WP_Error( 'yotm_regenerate_protected_metadata', __( 'A metadata filter changed a protected attachment file declaration.', 'thumbnail-manager' ) );
 		}
 	}
-	if ( ! $repair && ( (int) ( $final['width'] ?? 0 ) !== $proposed['width'] || (int) ( $final['height'] ?? 0 ) !== $proposed['height'] || (int) ( $final['filesize'] ?? 0 ) !== $proposed['filesize'] ) ) {
+	if ( ! $repair && ! $scoped && ( (int) ( $final['width'] ?? 0 ) !== $proposed['width'] || (int) ( $final['height'] ?? 0 ) !== $proposed['height'] || (int) ( $final['filesize'] ?? 0 ) !== $proposed['filesize'] ) ) {
 		return new WP_Error( 'yotm_regenerate_full_metadata', __( 'A metadata filter changed verified current-full properties.', 'thumbnail-manager' ) );
 	}
 
 	$map  = array();
 	$seen = array();
 	foreach ( $final['sizes'] as $slug => &$size ) {
-		if ( $repair && ! isset( $staged['outputs'][ $slug ] ) ) {
+		if ( ( $repair || $scoped ) && ! isset( $staged['outputs'][ $slug ] ) ) {
 			continue;
 		}
 		$slug     = sanitize_key( $slug );
@@ -408,6 +474,15 @@ function yotm_regenerate_finalize_metadata( $snapshot, $staged ) {
 	}//end foreach
 	unset( $size );
 
+	if ( $scoped && array_diff_key( $staged['outputs'], $map ) ) {
+		return new WP_Error( 'yotm_regenerate_scope_target_removed', __( 'A metadata filter removed a selected generated size.', 'thumbnail-manager' ) );
+	}
+	if ( $scoped ) {
+		$scope_valid = yotm_regenerate_validate_scope( $snapshot['metadata'], $final, $snapshot['selected_sizes'], $map );
+		if ( is_wp_error( $scope_valid ) ) {
+			return $scope_valid;
+		}
+	}
 	return array(
 		'metadata' => $final,
 		'map'      => $map,
@@ -460,6 +535,9 @@ function yotm_regenerate_destination_prestate( $entry, $snapshot, $old_owners, $
 	foreach ( $owners['generated'] as $owner ) {
 		$key            = absint( $owner['attachment_id'] ?? 0 ) . ':' . sanitize_key( $owner['size'] ?? '' ) . ':' . (string) ( $owner['filename'] ?? '' );
 		$actual[ $key ] = true;
+		if ( null !== ( $snapshot['selected_sizes'] ?? null ) && ! in_array( $owner['size'] ?? '', $snapshot['selected_sizes'], true ) ) {
+			return new WP_Error( 'yotm_regenerate_scope_owner', __( 'An unselected size owns this destination. Its file was preserved.', 'thumbnail-manager' ) );
+		}
 		if ( (int) $owner['attachment_id'] !== (int) $snapshot['attachment_id'] || ! in_array( $key, $expected, true ) ) {
 			return new WP_Error( 'yotm_regenerate_destination_owned', __( 'Another or unexpected generated-file reference owns this destination.', 'thumbnail-manager' ) );
 		}

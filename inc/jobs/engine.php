@@ -1029,3 +1029,34 @@ function yotm_job_recovery_terminal_status( $job ) {
 
 	return 'cancelled' === $status ? 'cancelled' : 'expired';
 }
+
+/**
+ * Read an owned audit row without expiring, resuming or changing it.
+ *
+ * @param string $token Job token.
+ * @return array|WP_Error
+ */
+function yotm_job_get_audit( $token ) {
+	global $wpdb;
+	$ready = yotm_job_storage_ready();
+	if ( is_wp_error( $ready ) ) {
+		return $ready;
+	}
+	$tables = yotm_job_table_names();
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Current owner audit lookup must reflect retained state.
+	$row   = $wpdb->get_row(
+		$wpdb->prepare(
+			'SELECT * FROM %i WHERE token = %s AND blog_id = %d AND user_id = %d',
+			$tables['jobs'],
+			sanitize_text_field( $token ),
+			get_current_blog_id(),
+			get_current_user_id()
+		)
+	);
+	$error = yotm_job_last_database_error();
+	if ( is_wp_error( $error ) ) {
+		return $error;
+	}
+	$job = yotm_job_normalize_row( $row );
+	return $job ? $job : new WP_Error( 'yotm_report_missing', __( 'This saved result is unavailable or has been removed after retention. Run a new check or scan.', 'thumbnail-manager' ) );
+}

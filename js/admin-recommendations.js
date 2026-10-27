@@ -12,6 +12,8 @@
   const forgetJob = core.forgetJob;
   const getJobStatus = core.getJobStatus;
   const htmlNotice = core.htmlNotice;
+  const formatBytes = core.formatBytes;
+  const formatTemplate = core.formatTemplate;
   const isMissingJobStatus = core.isMissingJobStatus;
   const isJobStopping = core.isJobStopping;
   const stopPreparation = core.stopPreparation;
@@ -79,17 +81,51 @@
     return html + '</ul>';
   }
 
+  function renderContentSamples(samples) {
+    if (!Array.isArray(samples) || !samples.length) { return ''; }
+    let html = '<ul class="yo-evidence-list">';
+    samples.slice(0, 5).forEach(function(sample){
+      if (!sample || typeof sample.url !== 'string' || !/^https?:\/\//i.test(sample.url)) { return; }
+      const hints = Array.isArray(sample.kinds) ? sample.kinds.map(function(kind){
+        return {class_size_hint: t('contentClassHint', 'Size class hint'), json_size_hint: t('contentJsonHint', 'Size setting hint')}[kind] || '';
+      }).filter(Boolean).join(', ') : '';
+      html += '<li><a href="' + escapeHtml(sample.url) + '">' + escapeHtml(sample.title || '#' + sample.post_id) + '</a>' + (hints ? ' — ' + escapeHtml(hints) : '') + '</li>';
+    });
+    return html + '</ul>';
+  }
+
+  function renderScanCoverage(data) {
+    let html = '<p class="description">' + escapeHtml(t('recommendationEvidenceLimits', 'Content evidence samples show size-name hints in post content, not verified image usage. Policy protections are separate. Dynamic theme, plugin, custom-field and external usage is not observed.')) + '</p>';
+    html += '<p class="description">' + escapeHtml(t('recommendationSampleLimits', 'Up to five accessible content examples are shown per size. The scan covers IDs present when it began; new or changed content may be missed.')) + '</p>';
+    const stats = data.statistics;
+    if (!stats || stats.schema_version !== 1 || !stats.complete) {
+      return html + '<p class="description">' + escapeHtml(t('recommendationLegacyStatistics', 'Unique file statistics are unavailable for this saved scan. Run a new scan; legacy footprint totals may count shared references more than once.')) + '</p>';
+    }
+    html += '<p class="description yo-recommend-statistics">' + escapeHtml(formatTemplate(t('recommendationStatistics', 'Attachments scanned: %1$s. Metadata entries: %2$s. Unique checked files: %3$s (%4$s). Missing files: %5$s. Unreadable files: %6$s. Unverified metadata entries: %7$s.'), {
+      '%1$s': stats.attachments_scanned, '%2$s': stats.metadata_entries, '%3$s': stats.checked_files,
+      '%4$s': formatBytes(stats.checked_bytes), '%5$s': stats.missing_files, '%6$s': stats.unreadable_files, '%7$s': stats.unverified_entries
+    })) + '</p><p class="description">' + escapeHtml(t('recommendationStatisticsLimits', 'File totals cover unique canonical paths referenced by registered-size metadata, observed during the scan. They are not a live snapshot or a complete uploads inventory. Per-size bytes count metadata references and may overlap.')) + '</p>';
+    return html;
+  }
+
   function renderRecommendationTable(items) {
     if (!Array.isArray(items) || !items.length) {
       return htmlNotice('notice-warning', t('noRecommendationData', 'No recommendation data found.'));
     }
-    let html = '<div class="yo-table-scroll"><table class="widefat striped"><thead><tr><th>' + escapeHtml(t('size', 'Size')) + '</th><th>' + escapeHtml(t('dimensions', 'Dimensions')) + '</th><th>' + escapeHtml(t('status', 'Status')) + '</th><th>' + escapeHtml(t('confidence', 'Keep confidence')) + '</th><th>' + escapeHtml(t('evidence', 'Evidence')) + '</th><th>' + escapeHtml(t('reason', 'Reason')) + '</th><th>' + escapeHtml(t('recommendation', 'Recommendation')) + '</th></tr></thead><tbody>';
+    let html = '<div class="yo-table-scroll"><table class="widefat striped"><thead><tr><th>' + escapeHtml(t('size', 'Size')) + '</th><th>' + escapeHtml(t('dimensions', 'Dimensions')) + '</th><th>' + escapeHtml(t('status', 'Status')) + '</th><th>' + escapeHtml(t('confidence', 'Keep confidence')) + '</th><th>' + escapeHtml(t('evidence', 'Evidence')) + '</th><th>' + escapeHtml(t('metadataEntries', 'Metadata entries')) + '</th><th>' + escapeHtml(t('referenceBytes', 'Readable reference bytes')) + '</th><th>' + escapeHtml(t('reason', 'Reason')) + '</th><th>' + escapeHtml(t('recommendation', 'Recommendation')) + '</th></tr></thead><tbody>';
     items.forEach(function(item){
       const badgeClass = item.status === 'detected_reference' || item.status === 'used' || item.status === 'protected' ? 'yo-safe' : (item.status === 'danger' ? 'yo-danger' : 'yo-warning');
-      html += '<tr><td><strong>' + escapeHtml(item.name || '') + '</strong></td><td>' + escapeHtml(item.dimensions || '—') + '</td><td><span class="yo-badge ' + badgeClass + '">' + escapeHtml(item.label || item.status || t('unknown', 'Unknown')) + '</span></td><td>' + escapeHtml(recommendationConfidenceLabel(item.confidence)) + '</td><td>' + renderRecommendationEvidence(item.evidence) + '</td><td>' + escapeHtml(item.reason || '') + '</td><td>' + escapeHtml(item.recommendation || '') + '</td></tr>';
+      html += '<tr><td><strong>' + escapeHtml(item.name || '') + '</strong></td><td>' + escapeHtml(item.dimensions || '—') + '</td><td><span class="yo-badge ' + badgeClass + '">' + escapeHtml(item.label || item.status || t('unknown', 'Unknown')) + '</span></td><td>' + escapeHtml(recommendationConfidenceLabel(item.confidence)) + '</td><td>' + renderRecommendationEvidence(item.evidence) + renderContentSamples(item.content_samples) + '</td><td>' + escapeHtml(item.generated_count || 0) + '</td><td>' + escapeHtml(formatBytes(item.bytes)) + '</td><td>' + escapeHtml(item.reason || '') + '</td><td>' + escapeHtml(item.recommendation || '') + '</td></tr>';
     });
     return html + '</tbody></table></div>';
   }
+
+  function renderRecommendationReport(result) {
+    const data = result || {};
+    return renderScanCoverage(data) + renderRecommendationTable(data.items);
+  }
+
+  window.YOTMRecommendationReport = renderRecommendationReport;
 
   function renderRecommendationResult(result) {
     const data = result || {};
@@ -119,7 +155,8 @@
       notice = htmlNotice('notice-info', t('conservativeApplyReady', 'Safe recommendations are ready. Unknown sizes will keep their current setting.'));
     }
 
-    $recommendResults.html(notice + renderRecommendationTable(items));
+    $recommendResults.html(notice + renderRecommendationReport(data));
+    if (core.resultActions) { $recommendResults.append(core.resultActions(recommendToken)); }
     $('#yotm_apply_recommendations').toggleClass('yo-hidden', !recommendationCanApply).prop('disabled', !recommendationCanApply);
     $('#yotm_recommend_go_prune').removeClass('yo-hidden');
     $recommendStat.text(t('recommendationScanCompleted', 'Scan completed.'));

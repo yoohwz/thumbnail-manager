@@ -61,6 +61,7 @@ class Yo_Thumbnail_Manager {
 		include_once plugin_dir_path( __FILE__ ) . 'inc/application/thumbnail-health.php';
 		include_once plugin_dir_path( __FILE__ ) . 'inc/application/recommendations.php';
 		include_once plugin_dir_path( __FILE__ ) . 'inc/application/size-management.php';
+		include_once plugin_dir_path( __FILE__ ) . 'inc/application/job-results.php';
 		include_once plugin_dir_path( __FILE__ ) . 'inc/admin-menu.php';
 		include_once plugin_dir_path( __FILE__ ) . 'inc/regenerate-transaction.php';
 		include_once plugin_dir_path( __FILE__ ) . 'inc/handle-jobs.php';

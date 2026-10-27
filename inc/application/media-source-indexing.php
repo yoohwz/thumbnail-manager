@@ -19,7 +19,7 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 function yotm_application_media_source_index_batch( $job, $limit, $worker ) {
 	$payload    = $job['payload'];
-	$next_phase = in_array( $payload['selector'] ?? '', array( 'attached_meta_v2', 'health_report_v1' ), true )
+	$next_phase = in_array( $payload['selector'] ?? '', array( 'attached_meta_v2', 'health_report_v1', 'retry_selection_v1' ), true )
 		? 'selection'
 		: ( 'regenerate' === ( $job['type'] ?? '' ) ? 'regenerate' : 'metadata' );
 	if ( empty( $payload['source_index_initialized'] ) ) {

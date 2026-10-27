@@ -2467,3 +2467,324 @@ msgstr ""
 #: inc/admin/assets.php
 msgid "The job has expired. No new work will be started."
 msgstr ""
+
+#: inc/admin/assets.php:97
+msgid "Queued"
+msgstr ""
+
+#: inc/admin/assets.php:98
+msgid "Refresh results"
+msgstr ""
+
+#: inc/admin/assets.php:99
+msgid "Inspected successfully:"
+msgstr ""
+
+#: inc/admin/assets.php:100
+msgid "files"
+msgstr ""
+
+#: inc/admin/assets.php:101
+msgid "images"
+msgstr ""
+
+#: inc/admin/assets.php:102
+msgid "scan records"
+msgstr ""
+
+#: inc/admin/assets.php:103
+msgid "Up to five accessible content examples are shown per size. The scan covers IDs present when it began; new or changed content may be missed."
+msgstr ""
+
+#: inc/admin/assets.php:104
+msgid "Preserved because current size policy excludes them:"
+msgstr ""
+
+#: inc/admin/assets.php:105
+msgid "Show results"
+msgstr ""
+
+#: inc/admin/assets.php:106
+msgid "All items"
+msgstr ""
+
+#: inc/admin/assets.php:107
+msgid "Unsuccessful items"
+msgstr ""
+
+#: inc/admin/assets.php:108
+msgid "Failed"
+msgstr ""
+
+#: inc/admin/assets.php:109
+msgid "Skipped"
+msgstr ""
+
+#: inc/admin/assets.php:110
+msgid "Download JSON report"
+msgstr ""
+
+#: inc/admin/assets.php:111
+msgid "Close results"
+msgstr ""
+
+#: inc/admin/assets.php:112
+msgid "Default size policy for this run"
+msgstr ""
+
+#: inc/admin/assets.php:113
+msgid "Saved job results"
+msgstr ""
+
+#: inc/admin/assets.php:114
+msgid "Successful:"
+msgstr ""
+
+#: inc/admin/assets.php:115
+msgid "Candidate bytes (estimate):"
+msgstr ""
+
+#: inc/admin/assets.php:116
+msgid "Recorded bytes freed:"
+msgstr ""
+
+#: inc/admin/assets.php:117
+msgid "Started (UTC):"
+msgstr ""
+
+#: inc/admin/assets.php:118
+msgid "Updated (UTC):"
+msgstr ""
+
+#: inc/admin/assets.php:119
+msgid "Saved deadline (UTC):"
+msgstr ""
+
+#: inc/admin/assets.php:120
+msgid "Items matching this filter:"
+msgstr ""
+
+#: inc/admin/assets.php:121
+msgid "Select for retry"
+msgstr ""
+
+#: inc/admin/assets.php:122
+msgid "File"
+msgstr ""
+
+#: inc/admin/assets.php:123
+msgid "Retry selected items in a new job"
+msgstr ""
+
+#: inc/admin/assets.php:124
+msgid "Continue active job"
+msgstr ""
+
+#: inc/admin/assets.php:125
+msgid "This saved result is unavailable. Run a new check or scan."
+msgstr ""
+
+#: inc/admin/assets.php:126
+msgid "Export failed. Saved results are unchanged; reopen them and try again."
+msgstr ""
+
+#: inc/admin/assets.php:127
+msgid "Export contains the first 10,000 items. The saved summary covers the full job; use the on-screen filters to inspect other items."
+msgstr ""
+
+#: inc/admin/assets.php:128
+msgid "Export reads saved pages in order. An active job can change while it is being exported; use a terminal job for a stable result."
+msgstr ""
+
+#: inc/admin/assets.php:129
+msgid "Report downloaded."
+msgstr ""
+
+#: inc/admin/assets.php:130
+msgid "Could not prepare retry."
+msgstr ""
+
+#: inc/admin/assets.php:139
+#: inc/application/regenerate.php:72
+msgid "Choose at least one enabled thumbnail size."
+msgstr ""
+
+#: inc/admin/assets.php:140
+msgid "Selected sizes:"
+msgstr ""
+
+#: inc/admin/assets.php:141
+msgid "This size is no longer registered; existing files were preserved."
+msgstr ""
+
+#: inc/admin/assets.php:265
+msgid "Size class hint"
+msgstr ""
+
+#: inc/admin/assets.php:266
+msgid "Size setting hint"
+msgstr ""
+
+#: inc/admin/assets.php:267
+msgid "Metadata entries"
+msgstr ""
+
+#: inc/admin/assets.php:268
+msgid "Readable reference bytes"
+msgstr ""
+
+#: inc/admin/assets.php:269
+msgid "Content evidence samples show size-name hints in post content, not verified image usage. Policy protections are separate. Dynamic theme, plugin, custom-field and external usage is not observed."
+msgstr ""
+
+#: inc/admin/assets.php:270
+msgid "Unique file statistics are unavailable for this saved scan. Run a new scan; legacy footprint totals may count shared references more than once."
+msgstr ""
+
+#. translators: 1: scanned attachments, 2: metadata entries, 3: unique checked files, 4: readable bytes, 5: missing files, 6: unreadable files, 7: unverified entries.
+#: inc/admin/assets.php:272
+msgid "Attachments scanned: %1$s. Metadata entries: %2$s. Unique checked files: %3$s (%4$s). Missing files: %5$s. Unreadable files: %6$s. Unverified metadata entries: %7$s."
+msgstr ""
+
+#: inc/admin/assets.php:273
+msgid "File totals cover unique canonical paths referenced by registered-size metadata, observed during the scan. They are not a live snapshot or a complete uploads inventory. Per-size bytes count metadata references and may overlap."
+msgstr ""
+
+#: inc/admin/view.php:155
+msgid "Thumbnail sizes for this job"
+msgstr ""
+
+#: inc/admin/view.php:156
+msgid "All enabled sizes"
+msgstr ""
+
+#: inc/admin/view.php:157
+msgid "Choose sizes"
+msgstr ""
+
+#: inc/admin/view.php:159
+msgid "Select one or more enabled sizes"
+msgstr ""
+
+#: inc/admin/view.php:166
+msgid "This selection applies only to this job. Future upload settings stay unchanged. Sizes disabled or unregistered later are preserved."
+msgstr ""
+
+#: inc/application/job-results.php:82
+msgid "Review the reason, resolve the source, permission or storage issue, then retry selected items. A new attempt checks current conditions."
+msgstr ""
+
+#: inc/application/job-results.php:99
+msgid "Saved observations describe this run, not the current state of media. Opening this result starts no processing. Times are UTC."
+msgstr ""
+
+#: inc/application/job-results.php:100
+msgid "Recent results are normally retained for seven days after completion or stopping; the saved deadline is shown. Export before that deadline to retain a copy."
+msgstr ""
+
+#: inc/application/job-results.php:103
+msgid "Some unsuccessful items retain media recovery evidence. Export this report and inspect the original recovery state before starting a fresh attempt."
+msgstr ""
+
+#: inc/application/job-results.php:106
+msgid "This run is unfinished, stopped or expired. Its results may be partial. Resume only a valid active job, or start a new check or scan."
+msgstr ""
+
+#: inc/application/job-results.php:109
+msgid "Detailed item results are unavailable for this older job. Only its saved summary can be exported. Run a new check for current details."
+msgstr ""
+
+#: inc/application/job-results.php:112
+msgid "No complete recommendation result was saved. Start a new scan to obtain recommendations and coverage details."
+msgstr ""
+
+#: inc/application/job-results.php:115
+msgid "Prune bytes are candidate estimates before deletion and recorded bytes freed after deletion. A retry creates a new preview requiring fresh approval."
+msgstr ""
+
+#: inc/application/job-results.php:130
+msgid "Retry requires an available completed or stopped job without pending recovery. Continue an active job instead."
+msgstr ""
+
+#: inc/application/job-results.php:133
+msgid "Select between 1 and 100 unsuccessful items per attempt."
+msgstr ""
+
+#: inc/application/job-results.php:138
+msgid "Invalid retry selection."
+msgstr ""
+
+#: inc/application/job-results.php:142
+msgid "Only unsuccessful items from this job without unresolved recovery can be retried."
+msgstr ""
+
+#: inc/application/job-results.php:171
+msgid "Selected unsuccessful images"
+msgstr ""
+
+#: inc/application/recommendations.php:348
+msgid "Could not retain file observations. Retry this scan batch."
+msgstr ""
+
+#: inc/application/recommendations.php:366
+msgid "Could not read file observations."
+msgstr ""
+
+#: inc/application/regenerate.php:76
+msgid "Choose only currently registered and enabled thumbnail sizes."
+msgstr ""
+
+#: inc/application/regenerate.php:858
+msgid "No selected sizes are currently permitted or needed. Existing thumbnails were preserved."
+msgstr ""
+
+#: inc/application/regenerate.php:893
+msgid "Selected size permissions changed. Existing thumbnails were preserved; run a new job."
+msgstr ""
+
+#: inc/application/regenerate.php:932
+msgid "Selected size permissions changed before promotion. Existing thumbnails were preserved."
+msgstr ""
+
+#: inc/application/regenerate.php:971
+msgid "Selected size permissions changed before saving metadata. Existing thumbnails were preserved."
+msgstr ""
+
+#: inc/jobs/engine.php:1060
+msgid "This saved result is unavailable or has been removed after retention. Run a new check or scan."
+msgstr ""
+
+#: inc/media/regeneration.php:206
+msgid "The regeneration size scope is invalid."
+msgstr ""
+
+#: inc/media/regeneration.php:209
+msgid "The scoped thumbnail metadata is malformed."
+msgstr ""
+
+#: inc/media/regeneration.php:217
+#: inc/media/regeneration.php:478
+msgid "A metadata filter removed a selected generated size."
+msgstr ""
+
+#: inc/media/regeneration.php:222
+msgid "A selected destination is shared with an unselected size. Existing thumbnails were preserved."
+msgstr ""
+
+#: inc/media/regeneration.php:227
+msgid "A metadata filter changed data outside the selected sizes. Existing thumbnails were preserved."
+msgstr ""
+
+#: inc/media/regeneration.php:539
+msgid "An unselected size owns this destination. Its file was preserved."
+msgstr ""
+
+#: inc/media/thumbnail-health.php:93
+msgid "This size is no longer registered. Its existing files were preserved."
+msgstr ""
+
+msgid "View results / download report"
+msgstr ""
+
+msgid "The saved retry selection is unavailable. Stop this job and select unsuccessful items again."
+msgstr ""

@@ -221,9 +221,10 @@ function yotm_job_update_mutable_item_payload( $item_id, $payload ) {
  * @param int    $page Current page.
  * @param int    $per_page Items per page.
  * @param string $search Optional opaque payload search.
+ * @param array  $statuses Optional exact statuses.
  * @return array{items:array,total:int,pages:int,page:int}|WP_Error
  */
-function yotm_job_get_item_rows_page( $job_id, $page = 1, $per_page = 25, $search = '' ) {
+function yotm_job_get_item_rows_page( $job_id, $page = 1, $per_page = 25, $search = '', $statuses = array() ) {
 	global $wpdb;
 
 	$tables   = yotm_job_table_names();
@@ -236,6 +237,11 @@ function yotm_job_get_item_rows_page( $job_id, $page = 1, $per_page = 25, $searc
 	if ( '' !== $search ) {
 		$where .= ' AND payload LIKE %s';
 		$args[] = '%' . $wpdb->esc_like( $search ) . '%';
+	}
+
+	if ( ! empty( $statuses ) ) {
+		$where .= ' AND status IN (' . implode( ',', array_fill( 0, count( $statuses ), '%s' ) ) . ')';
+		$args   = array_merge( $args, array_map( 'sanitize_key', $statuses ) );
 	}
 
 	// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Plugin-owned table/WHERE fragments and their bounded arguments are assembled above.
@@ -1172,4 +1178,67 @@ function yotm_job_sum_item_bytes( $job_id ) {
 	$tables = yotm_job_table_names();
 
 	return (int) $wpdb->get_var( $wpdb->prepare( "SELECT COALESCE(SUM(bytes),0) FROM {$tables['items']} WHERE job_id = %d", absint( $job_id ) ) );
+}
+
+/**
+ * Fail closed before a fresh retry when terminal unsuccessful rows retain journals.
+ *
+ * Completed media journals stay audit-only; ambiguous unsuccessful journals need
+ * inspection in the original job instead of a new destructive attempt.
+ *
+ * @param int $job_id Source ID.
+ * @return bool
+ */
+function yotm_job_has_terminal_recovery_evidence( $job_id ) {
+	global $wpdb;
+	$tables = yotm_job_table_names();
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Recovery evidence must reflect persistent state.
+	$found = $wpdb->get_var(
+		$wpdb->prepare(
+			"SELECT 1 FROM %i WHERE job_id = %d AND status IN ('failed','skipped') AND (payload LIKE %s OR payload LIKE %s) LIMIT 1",
+			$tables['items'],
+			absint( $job_id ),
+			'%' . $wpdb->esc_like( '"regeneration_journal"' ) . '%',
+			'%' . $wpdb->esc_like( '"prune_operation_journal_v1"' ) . '%'
+		)
+	);
+	return '' !== (string) $wpdb->last_error || (bool) $found;
+}
+
+/**
+ * Insert a queued selection item behind the exact worker and payload snapshot.
+ *
+ * @param array  $worker Current selection worker.
+ * @param string $item_key Stable selected identity.
+ * @param array  $payload Selected item data.
+ * @param array  $selection_payload Unchanged job selection, including selector.
+ * @return bool True only for a new insertion by the exact live worker.
+ */
+function yotm_job_worker_add_selection_item( $worker, $item_key, $payload, $selection_payload ) {
+	global $wpdb;
+	$tables = yotm_job_table_names();
+	$now    = gmdate( 'Y-m-d H:i:s' );
+	if ( ! preg_match( '/^[a-f0-9]{64}$/', (string) $item_key ) ) {
+		return false;
+	}
+	$sql = $wpdb->prepare(
+		"INSERT IGNORE INTO %i (job_id,item_key,status,payload,error,bytes,created_at,updated_at)
+		SELECT id,%s,'queued',%s,'',0,%s,%s FROM %i
+		WHERE id=%d AND status='running' AND phase='selection' AND BINARY payload=BINARY %s
+		AND worker_token=%s AND worker_generation=%d AND expires_at >= %s AND worker_lease_expires_at >= %s",
+		$tables['items'],
+		$item_key,
+		wp_json_encode( $payload ),
+		$now,
+		$now,
+		$tables['jobs'],
+		absint( $worker['job_id'] ?? 0 ),
+		wp_json_encode( $selection_payload ),
+		sanitize_text_field( $worker['token'] ?? '' ),
+		absint( $worker['generation'] ?? 0 ),
+		$now,
+		$now
+	);
+	// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Authoritative worker-fenced queue insertion is prepared above and must bypass object caching.
+	return 1 === $wpdb->query( $sql );
 }

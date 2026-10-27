@@ -88,6 +88,7 @@
       file_missing: t('healthFileMissing', 'Thumbnail file is missing.'),
       metadata_missing: t('healthMetadataMissing', 'Thumbnail metadata is missing.'),
       source_size_not_resizable: t('healthSourceTooSmall', 'This size is not needed for the source image dimensions.'),
+      size_no_longer_registered: t('healthSizeUnregistered', 'This size is no longer registered; existing files were preserved.'),
       size_not_enabled: t('healthSizeNotEnabled', 'This thumbnail size is currently disabled.'),
       unsafe_thumbnail_path: t('healthUnsafePath', 'The thumbnail path could not be verified safely.'),
       invalid_size_definition: t('healthInvalidDefinition', 'This thumbnail size has an invalid definition.'),
@@ -158,7 +159,8 @@
         reportToken = token;
         $repair.removeClass('yo-hidden').prop('disabled', !!regenToken);
       }
-      let html = '<p>' + escapeHtml(t('healthCoverage', 'Only currently enabled sizes and local upload files were checked. Frontend pages and CDN copies are outside this report.')) + '</p>';
+      let html = data.selected_sizes ? '<p><strong>' + escapeHtml(t('selectedSizesLabel', 'Selected sizes:')) + '</strong> ' + escapeHtml(data.selected_sizes.join(', ')) + '</p>' : '';
+      html += '<p>' + escapeHtml(t('healthCoverage', 'Only currently enabled sizes and local upload files were checked. Frontend pages and CDN copies are outside this report.')) + '</p>';
       if (data.scope_label) {
         html += '<p><strong>' + escapeHtml(t('scope', 'Scope:')) + '</strong> ' + escapeHtml(data.scope_label) + '</p>';
       }
@@ -202,6 +204,7 @@
     const scope = $('input[name="yotm_regen_scope"]:checked').val();
     $('#yotm_regen_subpath_wrap').toggleClass('yo-hidden', scope !== 'subpath');
     $('#yotm_regen_ids_wrap').toggleClass('yo-hidden', scope !== 'ids');
+    $('#yotm_regen_selected_sizes_wrap').toggleClass('yo-hidden', $('input[name="yotm_regen_size_scope"]:checked').val() !== 'selected');
   }
 
   function toggleRegenModeNote() {
@@ -211,7 +214,7 @@
   }
 
   function lockRegenControls(locked) {
-    $('input[name="yotm_regen_scope"], #yotm_regen_subpath, #yotm_regen_attachment_ids, #yotm_regen_choose, input[name="yotm_regen_mode"]').prop('disabled', !!locked);
+    $('input[name="yotm_regen_scope"], #yotm_regen_subpath, #yotm_regen_attachment_ids, #yotm_regen_choose, input[name="yotm_regen_mode"], input[name="yotm_regen_size_scope"], #yotm_regen_selected_sizes').prop('disabled', !!locked);
   }
 
   function regenProgress(percent, label, indeterminate) {
@@ -251,7 +254,8 @@
       ? escapeHtml(String(t('scanningAttachmentRows', 'Scanning attachment rows… %s checked')).replace('%s', data.selection_scanned || 0))
       : escapeHtml(data.processed) + ' / ' + escapeHtml(data.total);
     const regenerated = data.operation === 'check' ? '' : '<p><strong>' + escapeHtml(t('regenerated', 'Regenerated:')) + '</strong> ' + escapeHtml(data.regenerated) + '</p>';
-    $regenResults.html('<p><strong>' + escapeHtml(t('scope', 'Scope:')) + '</strong> ' + escapeHtml(data.scope_label || t('allMedia', 'All media')) + '</p><p><strong>' + escapeHtml(t('processed', 'Processed:')) + '</strong> ' + processed + '</p>' + regenerated + '<p><strong>' + escapeHtml(t('skipped', 'Skipped:')) + '</strong> ' + escapeHtml(data.skipped) + '</p><p><strong>' + escapeHtml(t('failed', 'Failed:')) + '</strong> ' + escapeHtml(data.failed) + '</p>');
+    $regenResults.html((data.selected_sizes ? '<p><strong>' + escapeHtml(t('selectedSizesLabel', 'Selected sizes:')) + '</strong> ' + escapeHtml(data.selected_sizes.join(', ')) + '</p>' : '') + '<p><strong>' + escapeHtml(t('scope', 'Scope:')) + '</strong> ' + escapeHtml(data.scope_label || t('allMedia', 'All media')) + '</p><p><strong>' + escapeHtml(t('processed', 'Processed:')) + '</strong> ' + processed + '</p>' + regenerated + '<p><strong>' + escapeHtml(t('skipped', 'Skipped:')) + '</strong> ' + escapeHtml(data.skipped) + '</p><p><strong>' + escapeHtml(t('failed', 'Failed:')) + '</strong> ' + escapeHtml(data.failed) + '</p>');
+    if (core.resultActions) { $regenResults.append(core.resultActions(data.token)); }
   }
 
   function regenerateBatch() {
@@ -327,6 +331,12 @@
       $('#yotm_regen_selection_error').html(htmlNotice('notice-error', t('selectionEmpty', 'Choose at least one image from the Media Library.')));
       return;
     }
+    const selectedSizes = $('input[name="yotm_regen_size_scope"]:checked').val() === 'selected' ? ($('#yotm_regen_selected_sizes').val() || []) : null;
+    if (!opts.reportToken && selectedSizes && !selectedSizes.length) {
+      $('#yotm_regen_sizes_error').html(htmlNotice('notice-error', t('selectedSizesEmpty', 'Choose at least one enabled thumbnail size.')));
+      return;
+    }
+    $('#yotm_regen_sizes_error').empty();
     regenRunning = true;
     stopPreparation('regenerate', false);
     const requestId = ++prepareRequest;
@@ -347,6 +357,9 @@
       only_missing: mode === 'missing' ? 1 : 0,
       force_all: mode === 'force' ? 1 : 0
     };
+    if (!opts.reportToken && selectedSizes !== null) {
+      payload.selected_sizes = selectedSizes;
+    }
     if (!opts.reportToken && mode !== 'force') {
       payload.operation = 'check';
     }
@@ -461,7 +474,7 @@
     }
   }
   selectionCount();
-  $('input[name="yotm_regen_scope"]').on('change', toggleRegenScopeFields);
+  $('input[name="yotm_regen_scope"], input[name="yotm_regen_size_scope"]').on('change', toggleRegenScopeFields);
   $('input[name="yotm_regen_mode"]').on('change', toggleRegenModeNote);
   $regenRun.on('click', function(){ prepareRegenerate(); });
   function stopRegenerate(token) {

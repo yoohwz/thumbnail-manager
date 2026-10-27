@@ -113,15 +113,16 @@ function yotm_thumbnail_health_select_report_batch( $job, $worker ) {
 /**
  * Inspect or repair one claimed attachment and persist its public outcome.
  *
- * @param array  $item Claimed item.
- * @param array  $worker Worker lease.
- * @param string $operation Check or repair.
+ * @param array      $item Claimed item.
+ * @param array      $worker Worker lease.
+ * @param string     $operation Check or repair.
+ * @param array|null $selected_sizes Optional job-local size scope.
  * @return array
  */
-function yotm_thumbnail_health_process_item( $item, $worker, $operation ) {
+function yotm_thumbnail_health_process_item( $item, $worker, $operation, $selected_sizes = null ) {
 	$id = absint( $item['payload']['attachment_id'] ?? 0 );
 	if ( 'repair' === $operation ) {
-		$result = yotm_regenerate_force_attachment( $id, $item, $worker, true );
+		$result = yotm_regenerate_force_attachment( $id, $item, $worker, true, $selected_sizes );
 		if ( 'retry' === $result['status'] ) {
 			return $result;
 		}
@@ -137,7 +138,7 @@ function yotm_thumbnail_health_process_item( $item, $worker, $operation ) {
 			'message' => '',
 		);
 	}
-	$health                   = yotm_thumbnail_health_inspect( $id );
+	$health                   = yotm_thumbnail_health_inspect( $id, $selected_sizes );
 	$report                   = $health['report'];
 	$report['inspected_at']   = gmdate( 'Y-m-d H:i:s' );
 	$report['restored_sizes'] = array();
@@ -194,10 +195,11 @@ function yotm_thumbnail_health_results_application( $token, $page = 1, $per_page
 		}
 		$items[] = $report;
 	}
-	$data['items']        = $items;
-	$data['operation']    = $job['payload']['operation'];
-	$data['done']         = 'completed' === $job['status'];
-	$data['scope_label']  = $job['payload']['scope_label'] ?? '';
-	$data['inspected_at'] = $job['payload']['inspected_at'] ?? '';
+	$data['items']          = $items;
+	$data['operation']      = $job['payload']['operation'];
+	$data['selected_sizes'] = $job['payload']['selected_sizes'] ?? null;
+	$data['done']           = 'completed' === $job['status'];
+	$data['scope_label']    = $job['payload']['scope_label'] ?? '';
+	$data['inspected_at']   = $job['payload']['inspected_at'] ?? '';
 	return yotm_regenerate_application_success( $data );
 }

@@ -73,6 +73,9 @@ function yotm_recommend_prepare_application() {
 			'size_names'                    => $size_names,
 			'metadata_usage'                => $metadata_usage,
 			'content_usage'                 => $content_usage,
+			'content_samples'               => array(),
+			'statistics_schema_version'     => 1,
+			'attachments_scanned'           => 0,
 			'scan_phase'                    => 'metadata',
 			'attachment_after'              => 0,
 			'attachment_max'                => yotm_get_max_image_attachment_id(),
@@ -162,9 +165,13 @@ function yotm_recommend_batch_application( $token, $batch ) {
 		);
 
 		if ( ! empty( $ids ) ) {
-			yotm_recommend_scan_attachment_metadata_ids( $ids, $payload['metadata_usage'] );
-			$payload['attachment_after'] = max( array_map( 'absint', $ids ) );
-			$payload['scan_processed']   = (int) ( $payload['scan_processed'] ?? 0 ) + count( $ids );
+			$scanned = yotm_recommend_scan_attachment_metadata_ids( $ids, $payload['metadata_usage'], $worker );
+			if ( is_wp_error( $scanned ) ) {
+				return yotm_recommend_application_error( array( 'msg' => $scanned->get_error_message() ), 503 );
+			}
+			$payload['attachments_scanned'] = (int) ( $payload['attachments_scanned'] ?? 0 ) + count( $ids );
+			$payload['attachment_after']    = max( array_map( 'absint', $ids ) );
+			$payload['scan_processed']      = (int) ( $payload['scan_processed'] ?? 0 ) + count( $ids );
 			yotm_job_worker_update(
 				$worker,
 				array(
@@ -194,7 +201,7 @@ function yotm_recommend_batch_application( $token, $batch ) {
 	);
 
 	if ( ! empty( $ids ) ) {
-		$scanned = yotm_recommend_scan_content_ids( $ids, $payload['size_names'], $payload['content_usage'] );
+		$scanned = yotm_recommend_scan_content_ids( $ids, $payload['size_names'], $payload['content_usage'], $payload['content_samples'] );
 		if ( is_wp_error( $scanned ) ) {
 			return yotm_recommend_application_error( array( 'msg' => $scanned->get_error_message() ), 503 );
 		}
@@ -215,12 +222,22 @@ function yotm_recommend_batch_application( $token, $batch ) {
 		return yotm_recommend_application_success( yotm_build_recommendation_progress_response( $current, false ) );
 	}
 
+	$statistics = null;
+	if ( 1 === (int) ( $payload['statistics_schema_version'] ?? 0 ) ) {
+		$statistics = yotm_recommend_statistics( $job['id'], $payload );
+		if ( is_wp_error( $statistics ) ) {
+			return yotm_recommend_application_error( array( 'msg' => $statistics->get_error_message() ), 503 );
+		}
+	}
+
 	$payload['result']     = yotm_build_recommendation_result(
 		$payload['sizes'],
 		$payload['metadata_usage'],
 		$payload['content_usage'],
 		array(
 			'registered_sizes_signature' => $payload['registered_sizes_signature'] ?? '',
+			'content_samples'            => $payload['content_samples'] ?? array(),
+			'statistics'                 => $statistics,
 			'attachment_after'           => $payload['attachment_after'] ?? 0,
 			'attachment_max'             => $payload['attachment_max'] ?? 0,
 			'attachment_total'           => $payload['attachment_total'] ?? 0,
@@ -247,48 +264,135 @@ function yotm_recommend_batch_application( $token, $batch ) {
 /**
  * Scan attachment metadata for a bounded set of IDs.
  *
- * @param int[] $ids Attachment IDs.
- * @param array $usage Usage counters, passed by reference.
+ * @param int[]      $ids Attachment IDs.
+ * @param array      $usage Usage counters, passed by reference.
+ * @param array|null $worker Optional current worker for persisted observations.
+ * @return true|WP_Error
  */
-function yotm_recommend_scan_attachment_metadata_ids( $ids, &$usage ) {
+function yotm_recommend_scan_attachment_metadata_ids( $ids, &$usage, $worker = null ) {
 	$ids = array_values( array_filter( array_map( 'absint', (array) $ids ) ) );
-	if ( empty( $ids ) ) {
-		return;
-	}
-
 	update_meta_cache( 'post', $ids );
-
 	foreach ( $ids as $attachment_id ) {
-		$file = get_attached_file( $attachment_id );
-		if ( ! $file ) {
-			continue;
-		}
-
+		$file     = get_attached_file( $attachment_id );
 		$metadata = wp_get_attachment_metadata( $attachment_id );
-		if ( empty( $metadata['sizes'] ) || ! is_array( $metadata['sizes'] ) ) {
-			continue;
-		}
-
-		$upload_dir = trailingslashit( dirname( yotm_normalize_filesystem_path( $file ) ) );
-
-		foreach ( $metadata['sizes'] as $size_name => $size_data ) {
-			if ( ! isset( $usage[ $size_name ] ) || ! is_array( $size_data ) ) {
+		foreach ( (array) ( $metadata['sizes'] ?? array() ) as $size_name => $size_data ) {
+			if ( ! isset( $usage[ $size_name ] ) ) {
 				continue;
 			}
-
-			$filename = $size_data['file'] ?? ( $size_data['filename'] ?? '' );
-			if ( '' === $filename ) {
-				continue;
-			}
-
-			$path = $upload_dir . wp_basename( $filename );
 			++$usage[ $size_name ]['count'];
-			if ( is_file( $path ) && is_readable( $path ) ) {
-				$bytes                         = filesize( $path );
-				$usage[ $size_name ]['bytes'] += false === $bytes ? 0 : (int) $bytes;
+			$filename = is_array( $size_data ) ? ( $size_data['file'] ?? ( $size_data['filename'] ?? '' ) ) : '';
+			$path     = is_string( $file ) && '' !== $file && is_string( $filename ) && '' !== $filename && wp_basename( $filename ) === $filename
+				? yotm_media_source_canonical_path( trailingslashit( dirname( $file ) ) . $filename ) : new WP_Error( 'unverified' );
+			if ( is_wp_error( $path ) ) {
+				$usage[ $size_name ]['unverified_count'] = (int) ( $usage[ $size_name ]['unverified_count'] ?? 0 ) + 1;
+				continue;
+			}
+			clearstatcache( true, $path );
+			$state = 'missing';
+			$bytes = 0;
+			if ( file_exists( $path ) ) {
+				if ( ! is_file( $path ) ) {
+					$usage[ $size_name ]['unverified_count'] = (int) ( $usage[ $size_name ]['unverified_count'] ?? 0 ) + 1;
+					continue;
+				}
+				$observed_bytes = is_readable( $path ) ? filesize( $path ) : false;
+				$state          = false === $observed_bytes ? 'unreadable' : 'checked';
+				$bytes          = false === $observed_bytes ? 0 : max( 0, (int) $observed_bytes );
+			}
+			$usage[ $size_name ]['bytes'] += $bytes;
+			if ( is_array( $worker ) ) {
+				$stored = yotm_recommend_record_file_observation( $worker, $path, $state, $bytes );
+				if ( is_wp_error( $stored ) ) {
+					return $stored;
+				}
+			}
+		}//end foreach
+	}//end foreach
+	return true;
+}
+
+/**
+ * Store an inert, unique canonical-path observation behind the current worker.
+ * No filesystem path or destructive authority is stored in this evidence row.
+ *
+ * @param array  $worker Worker fence.
+ * @param string $path Canonical observed path.
+ * @param string $state Observation state.
+ * @param int    $bytes Readable bytes.
+ * @return true|WP_Error
+ */
+function yotm_recommend_record_file_observation( $worker, $path, $state, $bytes ) {
+	global $wpdb;
+	$tables = yotm_job_table_names();
+	$now    = gmdate( 'Y-m-d H:i:s' );
+	// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Plugin-owned table names.
+	$sql = $wpdb->prepare(
+		"INSERT IGNORE INTO {$tables['items']} (job_id,item_key,status,payload,error,bytes,created_at,updated_at)
+		SELECT id,%s,'recommend_observed',%s,'',%d,%s,%s FROM {$tables['jobs']}
+		WHERE id=%d AND type='recommendation' AND status='scanning' AND phase='metadata'
+		AND worker_token=%s AND worker_generation=%d AND expires_at >= %s",
+		hash( 'sha256', 'recommend-file:' . $path ),
+		wp_json_encode( array( 'observation' => $state ) ),
+		$bytes,
+		$now,
+		$now,
+		$worker['job_id'],
+		$worker['token'],
+		$worker['generation'],
+		$now
+	);
+	// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Prepared exact-worker inert observation.
+	$inserted = $wpdb->query( $sql );
+	if ( false === $inserted || ( 0 === $inserted && ! yotm_job_refresh_worker( $worker ) ) ) {
+		return new WP_Error( 'yotm_recommend_observation_failed', __( 'Could not retain file observations. Retry this scan batch.', 'thumbnail-manager' ) );
+	}
+	return true;
+}
+
+/**
+ * Aggregate retained observations without loading the path set into PHP memory.
+ *
+ * @param int   $job_id Job ID.
+ * @param array $payload Scan counters.
+ * @return array|WP_Error
+ */
+function yotm_recommend_statistics( $job_id, $payload ) {
+	global $wpdb;
+	$tables = yotm_job_table_names();
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Plugin-owned table; bounded aggregate result.
+	$rows = $wpdb->get_results( $wpdb->prepare( "SELECT payload, COUNT(*) file_count, SUM(bytes) byte_count FROM %i WHERE job_id=%d AND status='recommend_observed' GROUP BY payload", $tables['items'], $job_id ), ARRAY_A );
+	if ( '' !== (string) $wpdb->last_error ) {
+		return new WP_Error( 'yotm_recommend_statistics_failed', __( 'Could not read file observations.', 'thumbnail-manager' ) );
+	}
+	$stats = array(
+		'schema_version'      => 1,
+		'attachments_scanned' => absint( $payload['attachments_scanned'] ?? 0 ),
+		'metadata_entries'    => 0,
+		'checked_files'       => 0,
+		'checked_bytes'       => 0,
+		'missing_files'       => 0,
+		'unreadable_files'    => 0,
+		'unverified_entries'  => 0,
+		'complete'            => true,
+		'identity'            => 'canonical_path',
+		'limitations'         => array( 'registered_metadata_only', 'observed_during_scan_not_live_snapshot', 'canonical_paths_not_inode_identity' ),
+	);
+	foreach ( (array) ( $payload['metadata_usage'] ?? array() ) as $usage ) {
+		$stats['metadata_entries']   += absint( $usage['count'] ?? 0 );
+		$stats['unverified_entries'] += absint( $usage['unverified_count'] ?? 0 );
+	}
+	foreach ( $rows as $row ) {
+		$observation = json_decode( $row['payload'], true );
+		$state       = $observation['observation'] ?? '';
+		if ( in_array( $state, array( 'checked', 'missing', 'unreadable' ), true ) ) {
+			$stats[ $state . '_files' ] += absint( $row['file_count'] );
+			if ( 'checked' === $state ) {
+				$stats['checked_bytes'] += absint( $row['byte_count'] );
 			}
 		}
-	}//end foreach
+	}
+	return $stats;
 }
 
 /**
@@ -419,12 +523,13 @@ function yotm_recommend_content_matches_size( $content, $name ) {
 /**
  * Scan content references for a bounded set of post IDs.
  *
- * @param int[]    $post_ids Post IDs.
- * @param string[] $size_names Registered size names.
- * @param array    $usage Usage counters, passed by reference.
+ * @param int[]      $post_ids Post IDs.
+ * @param string[]   $size_names Registered size names.
+ * @param array      $usage Usage counters, passed by reference.
+ * @param array|null $samples Optional bounded evidence samples, passed by reference.
  * @return true|WP_Error
  */
-function yotm_recommend_scan_content_ids( $post_ids, $size_names, &$usage ) {
+function yotm_recommend_scan_content_ids( $post_ids, $size_names, &$usage, &$samples = null ) {
 	$content_map = yotm_recommend_load_content_map( $post_ids );
 	if ( is_wp_error( $content_map ) ) {
 		return $content_map;
@@ -450,6 +555,19 @@ function yotm_recommend_scan_content_ids( $post_ids, $size_names, &$usage ) {
 		foreach ( $matched as $name ) {
 			if ( array_key_exists( $name, $usage ) ) {
 				++$usage[ $name ];
+				if ( is_array( $samples ) && count( $samples[ $name ] ?? array() ) < 5 ) {
+					$kinds = array();
+					if ( 1 === preg_match( '/\\bsize-' . preg_quote( $name, '/' ) . '\\b/', $content ) ) {
+						$kinds[] = 'class_size_hint';
+					}
+					if ( 1 === preg_match( '/["\'](?:size|sizeSlug|image_size|thumbnail_size)["\']\\s*:\\s*["\']' . preg_quote( $name, '/' ) . '["\']/', $content ) ) {
+						$kinds[] = 'json_size_hint';
+					}
+					$samples[ $name ][ absint( $post_id ) ] = array(
+						'post_id' => absint( $post_id ),
+						'kinds'   => $kinds,
+					);
+				}
 			}
 		}
 	}//end foreach
@@ -663,6 +781,7 @@ function yotm_build_recommendation_result( $sizes, $metadata_usage, $content_usa
 			'evidence'        => yotm_recommend_build_evidence( $protected_type, $content_refs, $generated_count, $bytes ),
 			'generated_count' => $generated_count,
 			'content_refs'    => $content_refs,
+			'content_samples' => array_values( $coverage_context['content_samples'][ $name ] ?? array() ),
 			'bytes'           => $bytes,
 		);
 	}//end foreach
@@ -672,7 +791,13 @@ function yotm_build_recommendation_result( $sizes, $metadata_usage, $content_usa
 		$signature = yotm_recommend_registered_sizes_signature( $sizes );
 	}
 
+	$statistics = is_array( $coverage_context['statistics'] ?? null ) ? $coverage_context['statistics'] : null;
+	if ( $statistics ) {
+		$generated_bytes = $statistics['checked_bytes'];
+	}
+
 	return array(
+		'statistics'                 => $statistics,
 		'schema_version'             => YOTM_RECOMMENDATION_SCHEMA_VERSION,
 		'registered_sizes_signature' => $signature,
 		'items'                      => $items,
@@ -712,7 +837,43 @@ function yotm_build_recommendation_result( $sizes, $metadata_usage, $content_usa
  * @return array
  */
 function yotm_recommendation_result_for_response( $result ) {
-	$projected                     = is_array( $result ) ? $result : array();
+	$root_keys = array( 'schema_version', 'registered_sizes_signature', 'items', 'statistics', 'protected_count', 'detected_reference_count', 'unknown_count', 'generated_bytes', 'generated_bytes_human', 'coverage', 'keep_count', 'unused_count', 'savings' );
+	$projected = is_array( $result ) ? array_intersect_key( $result, array_flip( $root_keys ) ) : array();
+	if ( array_key_exists( 'items', $projected ) ) {
+		$projected['items'] = is_array( $projected['items'] ) ? array_values( $projected['items'] ) : array();
+	}
+	foreach ( (array) ( $projected['items'] ?? array() ) as $index => $item ) {
+		$allowed            = array( 'name', 'dimensions', 'status', 'confidence', 'apply_action', 'label', 'reason', 'recommendation', 'evidence', 'generated_count', 'content_refs', 'bytes' );
+		$public             = is_array( $item ) ? array_intersect_key( $item, array_flip( $allowed ) ) : array();
+		$public['evidence'] = array();
+		foreach ( array_slice( (array) ( $item['evidence'] ?? array() ), 0, 5 ) as $evidence ) {
+			if ( is_array( $evidence ) ) {
+				$public['evidence'][] = array_intersect_key( $evidence, array_flip( array( 'code', 'strength', 'count', 'bytes', 'description' ) ) );
+			}
+		}
+		$public['content_samples'] = array();
+		foreach ( array_slice( (array) ( $item['content_samples'] ?? array() ), 0, 5 ) as $sample ) {
+			$post_id = absint( $sample['post_id'] ?? 0 );
+			if ( ! $post_id ) {
+				continue;
+			}
+			// Core rechecks the current user's edit capability before returning a link.
+			$url = get_edit_post_link( $post_id, 'raw' );
+			if ( ! $url ) {
+				continue;
+			}
+			$public['content_samples'][] = array(
+				'post_id' => $post_id,
+				'title'   => get_the_title( $post_id ),
+				'url'     => esc_url_raw( $url, array( 'http', 'https' ) ),
+				'kinds'   => array_values( array_intersect( (array) ( $sample['kinds'] ?? array() ), array( 'class_size_hint', 'json_size_hint' ) ) ),
+			);
+		}
+		$projected['items'][ $index ] = $public;
+	}//end foreach
+	if ( is_array( $projected['statistics'] ?? null ) ) {
+		$projected['statistics'] = array_intersect_key( $projected['statistics'], array_flip( array( 'schema_version', 'attachments_scanned', 'metadata_entries', 'checked_files', 'checked_bytes', 'missing_files', 'unreadable_files', 'unverified_entries', 'complete', 'identity', 'limitations' ) ) );
+	}
 	$projected['recommended_keep'] = array_values( array_keys( yotm_get_registered_sizes() ) );
 
 	return $projected;
