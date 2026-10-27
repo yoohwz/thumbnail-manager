@@ -98,17 +98,21 @@ function yotm_job_ajax_cancel() {
 
 	$job = yotm_job_cancel( $job );
 	if ( is_wp_error( $job ) ) {
+		$data = array(
+			'msg'  => $job->get_error_message(),
+			'code' => $job->get_error_code(),
+		);
+		if ( 'yotm_job_cancel_busy' === $job->get_error_code() ) {
+			$data['retry_after_ms'] = 250;
+		}
 		wp_send_json_error(
-			array(
-				'msg'            => $job->get_error_message(),
-				'retry_after_ms' => 250,
-			),
+			$data,
 			409
 		);
 	}
 	wp_send_json_success(
 		array(
-			'cancelled' => true,
+			'cancelled' => 'cancelled' === $job['status'],
 			'job'       => yotm_job_public_data( $job ),
 		)
 	);

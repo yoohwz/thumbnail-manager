@@ -169,7 +169,7 @@ class YOTM_Admin_Adapters_Test extends WP_UnitTestCase {
 			'), 400 )',
 			'), 503 )',
 			"\n\t\t\t409\n\t\t);",
-			"'retry_after_ms' => 250",
+			"\$data['retry_after_ms'] = 250",
 		) as $needle ) {
 			$this->assertStringContainsString( $needle, $source, $needle );
 		}

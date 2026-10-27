@@ -124,6 +124,8 @@ function yotm_job_public_data( $job ) {
 		'selection_matched',
 		'selector',
 		'cancelled_at',
+		'recovery_only',
+		'recovery_terminal_status',
 	);
 
 	foreach ( $allowed as $key ) {
