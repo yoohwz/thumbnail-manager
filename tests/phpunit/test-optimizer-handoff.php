@@ -137,4 +137,93 @@ class YOTM_Optimizer_Handoff_Test extends WP_UnitTestCase {
 		$this->assertWPError( yotm_optimizer_active_job() );
 		$this->assertSame( 'running', yotm_job_get_by_id( $job['id'] )['status'] );
 	}
+
+	private function prune_source() {
+		$job = yotm_job_create(
+			'prune',
+			array(),
+			array(
+				'status'       => 'scanning',
+				'phase'        => 'metadata',
+				'counter_mode' => 'item_v3',
+			)
+		);
+		$this->assertIsArray( $job );
+		$this->jobs[] = $job['id'];
+		$base         = trailingslashit( wp_get_upload_dir()['basedir'] );
+		foreach ( array(
+			'deleted' => 'delete_reconciled',
+			'skipped' => '',
+			'failed'  => '',
+		) as $status => $outcome ) {
+			$path    = $base . 'example-' . $status . '-150x150.jpg';
+			$payload = array(
+				'attachment_id' => 123,
+				'path'          => $path,
+			);
+			if ( $outcome ) {
+				$payload['prune_operation_journal_v1'] = array(
+					'version'   => 1,
+					'outcome'   => $outcome,
+					'path'      => $path,
+					'file_hash' => str_repeat( 'a', 64 ),
+					'bytes'     => 100,
+				);
+			}
+			$this->assertTrue( yotm_job_add_item( $job['id'], hash( 'sha256', $status ), $payload, $status ) );
+		}
+		// A legacy deleted row without a journal remains outside the handoff.
+		$this->assertTrue(
+			yotm_job_add_item(
+				$job['id'],
+				hash( 'sha256', 'legacy' ),
+				array(
+					'attachment_id' => 123,
+					'path'          => $base . 'legacy-150x150.jpg',
+				),
+				'deleted'
+			)
+		);
+		yotm_job_update(
+			$job['id'],
+			array(
+				'status'    => 'completed',
+				'phase'     => 'completed',
+				'succeeded' => 2,
+				'processed' => 4,
+			)
+		);
+		return yotm_job_get_by_id( $job['id'] );
+	}
+
+	public function test_prune_handoff_exports_only_exact_reconciled_deletions_read_only() {
+		$job = $this->prune_source();
+		$out = yotm_optimizer_prune_handoff( $job['token'] );
+		$this->assertIsArray( $out );
+		$this->assertCount( 1, $out['items'] );
+		$this->assertSame( 'example-deleted-150x150.jpg', $out['items'][0]['path'] );
+		$this->assertSame( str_repeat( 'a', 64 ), $out['items'][0]['sha256'] );
+		$this->assertSame( $job, yotm_job_get_by_id( $job['id'] ) );
+		$this->assertSame( $out['items'], yotm_optimizer_prune_handoff( $job['token'], 1, hash( 'sha256', 'deleted' ) )['items'] );
+		$this->assertWPError( yotm_optimizer_prune_handoff( $job['token'], 1, hash( 'sha256', 'skipped' ) ) );
+		$this->assertWPError( yotm_optimizer_prune_handoff( $job['token'], 1, '../untrusted' ) );
+	}
+
+	public function test_prune_handoff_rejects_active_expired_wrong_owner_and_recovery() {
+		$job = $this->prune_source();
+		wp_set_current_user( self::factory()->user->create( array( 'role' => 'administrator' ) ) );
+		$this->assertWPError( yotm_optimizer_prune_handoff( $job['token'] ) );
+		wp_set_current_user( $this->admin );
+		yotm_job_update( $job['id'], array( 'status' => 'deleting' ) );
+		$this->assertWPError( yotm_optimizer_prune_handoff( $job['token'] ) );
+		yotm_job_update(
+			$job['id'],
+			array(
+				'status'     => 'completed',
+				'expires_at' => gmdate( 'Y-m-d H:i:s', time() - 1 ),
+			)
+		);
+		$this->assertWPError( yotm_optimizer_prune_handoff( $job['token'] ) );
+		$this->assertSame( 'completed', yotm_job_get_by_id( $job['id'] )['status'] );
+	}
 }

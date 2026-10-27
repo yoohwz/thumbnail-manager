@@ -208,3 +208,21 @@ test('optimizer handoff is only a preview link and source deep links remain read
   assert.match(harness.nodes.get('#yotm_job_report').content, /Create WebP\/AVIF for completed thumbnails/);
   assert.match(harness.nodes.get('#yotm_job_report').content, /Original images and other thumbnail sizes are excluded/);
 });
+
+test('Prune sidecar preview and stale-source guidance remain read-only and escape reasons', () => {
+  const harness = fixture({type: 'prune', respond(action, data, report) {
+    const result = structuredClone(report);
+    result.optimizer_prune_url = 'https://example.org/wp-admin/upload.php?page=yoohw-media-optimizer&yotm_prune=source-token';
+    result.new_check_url = 'https://example.org/wp-admin/tools.php?page=yo-manage-thumbnails';
+    result.items[0].health.freshness_note = 'Changed source <script>bad()</script>';
+    return {success: true, data: result};
+  }});
+  harness.window.YOTMResults.open('source-token');
+  const html = harness.nodes.get('#yotm_job_report').content;
+  assert.match(html, /Review leftover WebP\/AVIF sidecars/);
+  assert.match(html, /separate cleanup approval/);
+  assert.match(html, /Open tools to run a new check/);
+  assert.match(html, /Changed source &lt;script&gt;/);
+  assert.doesNotMatch(html, /<script>/);
+  assert.deepEqual(harness.calls.map(call => call.action), ['yotm_job_results']);
+});

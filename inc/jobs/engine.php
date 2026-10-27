@@ -543,7 +543,13 @@ function yotm_job_create_owned( $type, $payload = array(), $args = array() ) {
 		return $cleanup;
 	}
 
-	$type      = sanitize_key( $type );
+	$type = sanitize_key( $type );
+	if ( 'recommendation' === $type && ! array_key_exists( 'optimizer_source_revision', $payload ) ) {
+		$revision = yotm_optimizer_source_revision();
+		if ( null !== $revision ) {
+			$payload['optimizer_source_revision'] = $revision;
+		}
+	}
 	$exclusive = isset( $args['exclusive'] ) ? (bool) $args['exclusive'] : in_array( $type, array( 'prune', 'regenerate' ), true );
 	$lock_name = '';
 	$active    = yotm_job_get_active_for_current_user( $type );

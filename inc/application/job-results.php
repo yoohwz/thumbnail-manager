@@ -66,6 +66,9 @@ function yotm_job_results_application( $token, $page = 1, $filter = '' ) {
 			(array) ( $payload['health_report'] ?? array() ),
 			array_flip( array( 'status', 'message', 'reason', 'action', 'sizes', 'missing_count', 'checked_count', 'restored_count', 'restored_sizes', 'inspected_at' ) )
 		);
+		if ( $health ) {
+			$health['freshness_note'] = yotm_optimizer_freshness_note( $payload['health_report']['optimizer_source_revision'] ?? null, $id );
+		}
 		$path    = (string) ( $payload['path'] ?? '' );
 		$base    = trailingslashit( wp_normalize_path( wp_get_upload_dir()['basedir'] ) );
 		$path    = wp_normalize_path( $path );
@@ -86,16 +89,26 @@ function yotm_job_results_application( $token, $page = 1, $filter = '' ) {
 			'retryable'             => $can_retry && yotm_job_result_retryable_item( $row ),
 		);
 	}//end foreach
-	$data['items']          = $items;
-	$public['skipped']      = 'recommendation' === $job['type'] ? 0 : yotm_job_count_items_by_status( $job['id'], array( 'skipped' ) );
-	$data['job']            = $public;
-	$data['schema_version'] = 1;
-	$data['filter']         = $filter;
-	$data['unit']           = 'prune' === $job['type'] ? 'files' : ( 'regenerate' === $job['type'] ? 'images' : 'scan' );
-	$data['read_at']        = gmdate( 'Y-m-d H:i:s' );
-	$data['complete']       = 'completed' === $job['status'] && ! $expired;
-	$data['can_retry']      = $can_retry;
-	$data['optimizer_url']  = yotm_optimizer_available() && $data['complete'] && 'regenerate' === $job['type'] && ( 'repair' === ( $job['payload']['operation'] ?? '' ) || ! empty( $job['payload']['force_all'] ) ) && $job['succeeded'] > 0 && ! yotm_job_has_terminal_recovery_evidence( $job['id'] )
+	$data['items']               = $items;
+	$public['skipped']           = 'recommendation' === $job['type'] ? 0 : yotm_job_count_items_by_status( $job['id'], array( 'skipped' ) );
+	$data['job']                 = $public;
+	$data['schema_version']      = 1;
+	$data['filter']              = $filter;
+	$data['unit']                = 'prune' === $job['type'] ? 'files' : ( 'regenerate' === $job['type'] ? 'images' : 'scan' );
+	$data['read_at']             = gmdate( 'Y-m-d H:i:s' );
+	$data['complete']            = 'completed' === $job['status'] && ! $expired;
+	$data['can_retry']           = $can_retry;
+	$data['freshness_note']      = 'recommendation' === $job['type'] ? yotm_optimizer_freshness_note( $job['payload']['optimizer_source_revision'] ?? null ) : '';
+	$data['new_check_url']       = add_query_arg( 'page', 'yo-manage-thumbnails', admin_url( 'tools.php' ) );
+	$data['optimizer_prune_url'] = yotm_optimizer_available() && defined( 'YoOhw_Media_Optimizer::THUMBNAIL_MANAGER_CLEANUP_API' ) && 1 === YoOhw_Media_Optimizer::THUMBNAIL_MANAGER_CLEANUP_API && $data['complete'] && 'prune' === $job['type'] && $job['succeeded'] > 0 && ! yotm_job_has_terminal_recovery_evidence( $job['id'] )
+		? add_query_arg(
+			array(
+				'page'       => 'yoohw-media-optimizer',
+				'yotm_prune' => $job['token'],
+			),
+			admin_url( 'upload.php' )
+		) : '';
+	$data['optimizer_url']       = yotm_optimizer_available() && $data['complete'] && 'regenerate' === $job['type'] && ( 'repair' === ( $job['payload']['operation'] ?? '' ) || ! empty( $job['payload']['force_all'] ) ) && $job['succeeded'] > 0 && ! yotm_job_has_terminal_recovery_evidence( $job['id'] )
 		? add_query_arg(
 			array(
 				'page'     => 'yoohw-media-optimizer',
@@ -103,7 +116,7 @@ function yotm_job_results_application( $token, $page = 1, $filter = '' ) {
 			),
 			admin_url( 'upload.php' )
 		) : '';
-	$data['limitations']    = array(
+	$data['limitations']         = array(
 		__( 'Saved observations describe this run, not the current state of media. Opening this result starts no processing. Times are UTC.', 'thumbnail-manager' ),
 		__( 'Recent results are normally retained for seven days after completion or stopping; the saved deadline is shown. Export before that deadline to retain a copy.', 'thumbnail-manager' ),
 	);

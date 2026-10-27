@@ -67,6 +67,7 @@
     if (health.status && item.status !== 'done') { state += '<span class="yo-result-secondary">' + esc(statusLabel(item.status)) + '</span>'; }
     if (health.status && item.status === 'done' && health.status !== 'healthy') { state += '<span class="yo-result-secondary">' + (operation === 'check' ? text('resultInspectionDone', 'Inspection complete') : text('statusCompleted', 'Completed')) + '</span>'; }
     let detail = '<p class="yo-result-reason">' + esc(item.error || health.message || '') + '</p>';
+    if (health.freshness_note) { detail += '<p class="yo-result-action">' + esc(health.freshness_note) + '</p>'; }
     if (item.action) { detail += '<p class="yo-result-action">' + esc(item.action) + '</p>'; }
     if ((item.scope_preserved_sizes || []).length) { detail += '<p class="yo-result-action">' + text('resultPreservedSizes', 'Preserved because current size policy excludes them:') + ' ' + esc(item.scope_preserved_sizes.join(', ')) + '</p>'; }
     detail += itemDetails(health);
@@ -83,6 +84,8 @@
     const operation = {check: t('jobThumbnailCheck', 'Check thumbnails'), repair: t('jobThumbnailRepair', 'Repair missing thumbnails'), force: t('runForceRegenerate', 'Force regeneration'), regenerate: t('jobRegenerate', 'Regenerate'), prune: t('jobPrune', 'Prune files'), recommendation: t('jobRecommendation', 'Recommendations')}[context.operation || (context.force_all ? 'force' : job.type)] || job.type;
     let html = backButton() + '<div class="yo-report-heading"><div><p class="yo-report-kicker">' + text('resultTitle', 'Saved job results') + '</p><h2 id="yotm_report_heading">' + esc(operation) + badge(job.status) + '</h2><p class="yo-report-meta">' + text('resultUpdated', 'Updated (UTC):') + ' ' + esc(job.updated_at) + '<span class="yo-report-retention">' + text('resultSavedUntil', 'Saved until (UTC):') + ' ' + esc(job.expires_at) + '</span></p></div>' + controls() + '</div>';
     html += scopeContent(context);
+    const needsCheck = data.freshness_note || (data.items || []).some(function(item){ return item.health && item.health.freshness_note; });
+    if (needsCheck) { html += '<div class="yo-report-incomplete"><span class="dashicons dashicons-info-outline" aria-hidden="true"></span><div><p>' + esc(data.freshness_note || t('optimizerFreshness', 'Some images on this page need a new check after Media Optimizer source work. Their saved outcomes remain unchanged.')) + '</p><a href="' + esc(data.new_check_url) + '">' + text('optimizerNewCheck', 'Open tools to run a new check') + '</a></div></div>'; }
     html += '<dl class="yo-report-metrics">' + metric(job.type === 'prune' ? t('resultFilesProcessed', 'Files processed') : (job.type === 'recommendation' ? t('resultRecordsScanned', 'Records scanned') : t('resultImagesProcessed', 'Images processed')), job.processed, job.total_known === false ? null : job.total);
     if (job.type !== 'recommendation') {
       html += metric(context.operation === 'check' ? t('resultInspected', 'Inspected successfully:') : t('resultSucceeded', 'Successful:'), job.succeeded) + metric(t('skipped', 'Skipped:'), job.skipped) + metric(t('failed', 'Failed:'), job.failed, undefined, job.failed ? 'has-errors' : '');
@@ -111,6 +114,7 @@
     }
     if (['running', 'scanning', 'approved', 'deleting', 'awaiting_approval'].includes(job.status) && job.expires_at >= data.read_at) { html += '<p><button type="button" class="button" id="yotm_result_resume">' + text('resultResume', 'Continue active job') + '</button></p>'; }
     if (data.optimizer_url && /^https?:\/\//i.test(data.optimizer_url)) { html += '<p><a class="button" href="' + esc(data.optimizer_url) + '">' + text('optimizerHandoff', 'Create WebP/AVIF for completed thumbnails') + '</a></p><p class="description">' + text('optimizerHandoffHint', 'Review the exact generated files in Media Optimizer before running. Original images and other thumbnail sizes are excluded.') + '</p>'; }
+    if (data.optimizer_prune_url && /^https?:\/\//i.test(data.optimizer_prune_url)) { html += '<p><a class="button" href="' + esc(data.optimizer_prune_url) + '">' + text('optimizerPrune', 'Review leftover WebP/AVIF sidecars') + '</a></p><p class="description">' + text('optimizerPruneHint', 'Media Optimizer checks its ownership evidence and asks for separate cleanup approval. This Prune result remains unchanged.') + '</p>'; }
     html += resultNotes(data) + '<div id="yotm_result_message" class="yo-report-message" role="status"></div>';
     $report.html(html).removeClass('yo-hidden');
   }

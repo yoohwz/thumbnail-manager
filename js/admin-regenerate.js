@@ -119,6 +119,7 @@
     if (operation === 'repair') {
       result += '<p class="yo-health-restored"><strong>' + escapeHtml(t('healthRestored', 'Restored:')) + ' ' + escapeHtml(item.restored_count || 0) + '</strong>' + (item.restored_sizes && item.restored_sizes.length ? ' — ' + escapeHtml(item.restored_sizes.join(', ')) : '') + '</p>';
     }
+    if (item.freshness_note) { result += '<p class="yo-health-action">' + escapeHtml(item.freshness_note) + '</p>'; }
     if (item.message && (item.status !== 'healthy' || item.item_status === 'failed' || item.item_status === 'skipped')) {
       result += '<p class="yo-health-message">' + escapeHtml(item.message) + '</p>';
     }

@@ -138,11 +138,12 @@ function yotm_thumbnail_health_process_item( $item, $worker, $operation, $select
 			'message' => '',
 		);
 	}
-	$health                   = yotm_thumbnail_health_inspect( $id, $selected_sizes );
-	$report                   = $health['report'];
-	$report['inspected_at']   = gmdate( 'Y-m-d H:i:s' );
-	$report['restored_sizes'] = array();
-	$report['restored_count'] = 0;
+	$health                              = yotm_thumbnail_health_inspect( $id, $selected_sizes );
+	$report                              = $health['report'];
+	$report['inspected_at']              = gmdate( 'Y-m-d H:i:s' );
+	$report['optimizer_source_revision'] = yotm_optimizer_source_revision( $id );
+	$report['restored_sizes']            = array();
+	$report['restored_count']            = 0;
 	if ( 'repair' === $operation && 'regenerated' === $result['status'] ) {
 		$journal                  = $item['payload']['regeneration_journal'] ?? array();
 		$report['restored_sizes'] = array_keys( $journal['destinations'] ?? array() );
@@ -186,10 +187,11 @@ function yotm_thumbnail_health_results_application( $token, $page = 1, $per_page
 	$items   = array();
 	$allowed = array_flip( array( 'status', 'message', 'reason', 'action', 'sizes', 'missing_count', 'checked_count', 'restored_count', 'restored_sizes', 'inspected_at' ) );
 	foreach ( $data['items'] as $item ) {
-		$report                  = array_intersect_key( (array) ( $item['payload']['health_report'] ?? array() ), $allowed );
-		$report['attachment_id'] = absint( $item['payload']['attachment_id'] ?? 0 );
-		$report['title']         = get_the_title( $report['attachment_id'] );
-		$report['item_status']   = $item['status'];
+		$report                   = array_intersect_key( (array) ( $item['payload']['health_report'] ?? array() ), $allowed );
+		$report['attachment_id']  = absint( $item['payload']['attachment_id'] ?? 0 );
+		$report['freshness_note'] = yotm_optimizer_freshness_note( $item['payload']['health_report']['optimizer_source_revision'] ?? null, $report['attachment_id'] );
+		$report['title']          = get_the_title( $report['attachment_id'] );
+		$report['item_status']    = $item['status'];
 		if ( empty( $report['message'] ) && ! empty( $item['error'] ) ) {
 			$report['message'] = $item['error'];
 		}

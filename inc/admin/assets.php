@@ -97,6 +97,10 @@ function yotm_admin_enqueue_assets( $hook ) {
 			'i18n'                     => array(
 				'optimizerHandoff'                => __( 'Create WebP/AVIF for completed thumbnails', 'thumbnail-manager' ),
 				'optimizerHandoffHint'            => __( 'Review the exact generated files in Media Optimizer before running. Original images and other thumbnail sizes are excluded.', 'thumbnail-manager' ),
+				'optimizerFreshness'              => __( 'Some images on this page need a new check after Media Optimizer source work. Their saved outcomes remain unchanged.', 'thumbnail-manager' ),
+				'optimizerNewCheck'               => __( 'Open tools to run a new check', 'thumbnail-manager' ),
+				'optimizerPrune'                  => __( 'Review leftover WebP/AVIF sidecars', 'thumbnail-manager' ),
+				'optimizerPruneHint'              => __( 'Media Optimizer checks its ownership evidence and asks for separate cleanup approval. This Prune result remains unchanged.', 'thumbnail-manager' ),
 				'resultSavedUntil'                => __( 'Saved until (UTC):', 'thumbnail-manager' ),
 				'resultBack'                      => __( 'Back to tools', 'thumbnail-manager' ),
 				'resultInspectionDone'            => __( 'Inspection complete', 'thumbnail-manager' ),
