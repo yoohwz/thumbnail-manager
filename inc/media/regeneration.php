@@ -734,6 +734,9 @@ function yotm_regenerate_commit_metadata( $attachment_id, $journal, $old_metadat
 	$raw_rows = yotm_media_reference_raw_postmeta_rows( $attachment_id, '_wp_attachment_metadata' );
 	$raw      = is_wp_error( $raw_rows ) ? array() : array_column( $raw_rows, 'value' );
 	if ( ( false === $written && ( 1 !== count( $raw ) || $raw[0] !== $journal['final_metadata'] ) ) || 1 !== count( $raw ) || $raw[0] !== $journal['final_metadata'] ) {
+		if ( is_wp_error( yotm_optimizer_checkpoint() ) ) {
+			return 'incomplete';
+		}
 		update_post_meta( $attachment_id, '_wp_attachment_metadata', $old_metadata );
 		$restored_rows = yotm_media_reference_raw_postmeta_rows( $attachment_id, '_wp_attachment_metadata' );
 		$restored_raw  = is_wp_error( $restored_rows ) ? array() : array_column( $restored_rows, 'value' );
