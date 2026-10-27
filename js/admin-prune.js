@@ -16,6 +16,9 @@
   const getJobStatus = core.getJobStatus;
   const htmlNotice = core.htmlNotice;
   const isMissingJobStatus = core.isMissingJobStatus;
+  const isJobStopping = core.isJobStopping;
+  const stopPreparation = core.stopPreparation;
+  const stopJobMessage = core.stopJobMessage;
   const jobProgress = core.jobProgress;
   const loadRecentJobs = core.loadRecentJobs;
   const registerWorkflow = core.registerWorkflow;
@@ -29,6 +32,7 @@
   let pruneManifest = '';
   let pruneTotal = 0;
   let pruneRunning = false;
+  let prepareRequest = 0;
   let pruneReviewData = null;
   let manifestPage = 1;
   let manifestPages = 1;
@@ -241,7 +245,7 @@
       per_page: 25,
       search: $('#yotm_manifest_search').val() || ''
     }).done(function(response){
-      if (requestGeneration !== manifestRequestGeneration || requestToken !== pruneToken) {
+      if (requestGeneration !== manifestRequestGeneration || requestToken !== pruneToken || isJobStopping(requestToken)) {
         return;
       }
       if (!response || !response.success || !response.data) {
@@ -276,7 +280,7 @@
       manifestLoaded = true;
       $('#yotm_review_confirm').prop('disabled', false);
     }).fail(function(){
-      if (requestGeneration !== manifestRequestGeneration || requestToken !== pruneToken) {
+      if (requestGeneration !== manifestRequestGeneration || requestToken !== pruneToken || isJobStopping(requestToken)) {
         return;
       }
       $('#yotm_manifest_body').html('<tr><td colspan="4">' + escapeHtml(t('manifestLoadFailed', 'Could not load the manifest.')) + '</td></tr>');
@@ -321,6 +325,8 @@
 		$pruneResults.html(htmlNotice('notice-error', t('noFolderSelected', 'Choose at least one folder or use All uploads.'))).trigger('focus');
 		return;
 	}
+    stopPreparation('prune', false);
+    const requestId = ++prepareRequest;
     pruneRunning = true;
     setPruneStep('scanning');
     lockPruneControls(true);
@@ -335,6 +341,16 @@
       discover_orphans: $('#yotm_discover_orphans').is(':checked') ? 1 : 0,
       discover_historical: $('#yotm_discover_historical').is(':checked') ? 1 : 0
     }).done(function(response){
+      if (requestId !== prepareRequest || !pruneRunning) {
+        const lateToken = response && response.data && (response.data.token || response.data.resume_token);
+        if (lateToken && lateToken !== pruneToken) {
+          if (!pruneToken) { stopPrune(lateToken); }
+          else { cancelJob(lateToken, function(job){ return request('yotm_prune_delete_batch', {token: job.token, manifest_hash: job.manifest_hash, batch: 1}); }).always(loadRecentJobs); }
+        } else if (response && !response.success) {
+          stopPreparation('prune', false);
+        }
+        return;
+      }
       if (!response || !response.success || !response.data) {
         const resumeToken = response && response.data ? response.data.resume_token : '';
         if (resumeToken) {
@@ -351,6 +367,7 @@
       scanPruneBatch();
       loadRecentJobs();
     }).fail(function(){
+      if (requestId !== prepareRequest || !pruneRunning) { return; }
       $pruneResults.html(htmlNotice('notice-error', t('networkPrepare', 'Network error during prepare.')));
       clearPruneJob({keepResults: true, preserveJob: !!pruneToken});
     });
@@ -358,11 +375,11 @@
 
   function scanPruneBatch() {
     const token = pruneToken;
-    if (!token || !pruneRunning) {
+    if (!token || !pruneRunning || isJobStopping(token)) {
       return;
     }
     request('yotm_prune_scan_batch', {token: token, batch: 100}).done(function(response){
-      if (token !== pruneToken || !pruneRunning) {
+      if (token !== pruneToken || !pruneRunning || isJobStopping(token)) {
         return;
       }
       if (!response || !response.success || !response.data) {
@@ -395,7 +412,7 @@
       }
       pruneProgress(data.scan_percent || 0, label, indeterminate);
       if (!data.scan_done) {
-        window.setTimeout(scanPruneBatch, parseInt(data.retry_after_ms || 120, 10));
+        window.setTimeout(function(){ if (token === pruneToken && !isJobStopping(token)) { scanPruneBatch(); } }, parseInt(data.retry_after_ms || 120, 10));
         return;
       }
       pruneRunning = false;
@@ -414,7 +431,7 @@
       renderPruneReview(data);
       loadRecentJobs();
     }).fail(function(request){
-      if (token !== pruneToken) {
+      if (token !== pruneToken || isJobStopping(token)) {
         return;
       }
       const status = parseInt(request && request.status || 0, 10);
@@ -427,14 +444,16 @@
   }
 
   function approvePruneManifest() {
-    if (!pruneToken || !pruneManifest || !manifestLoaded || !$('#yotm_review_confirm').is(':checked')) {
+    if (!pruneToken || isJobStopping(pruneToken) || !pruneManifest || !manifestLoaded || !$('#yotm_review_confirm').is(':checked')) {
       return;
     }
     $pruneApprove.prop('disabled', true);
     $('#yotm_review_confirm, #yotm_manifest_search, #yotm_manifest_prev, #yotm_manifest_next').prop('disabled', true);
+    const token = pruneToken;
     request('yotm_prune_approve', {
-      token: pruneToken, manifest_hash: pruneManifest, confirmed: 1
+      token: token, manifest_hash: pruneManifest, confirmed: 1
     }).done(function(response){
+      if (token !== pruneToken || isJobStopping(token)) { return; }
       if (!response || !response.success) {
         $pruneResults.prepend(htmlNotice('notice-error', t('approvalFailed', 'Delete approval failed:') + ' ' + responseError(response, t('unknownError', 'Unknown error'))));
         $('#yotm_review_confirm').prop('disabled', !manifestLoaded);
@@ -448,6 +467,7 @@
       deletePruneBatch();
       loadRecentJobs();
     }).fail(function(){
+      if (token !== pruneToken || isJobStopping(token)) { return; }
       $pruneResults.prepend(htmlNotice('notice-error', t('networkApproval', 'Network error while approving the manifest.')));
       $('#yotm_review_confirm').prop('disabled', !manifestLoaded);
       $('#yotm_manifest_search, #yotm_manifest_prev, #yotm_manifest_next').prop('disabled', false);
@@ -457,13 +477,13 @@
 
   function deletePruneBatch() {
     const token = pruneToken;
-    if (!token || !pruneRunning) {
+    if (!token || !pruneRunning || isJobStopping(token)) {
       return;
     }
     request('yotm_prune_delete_batch', {
       token: token, manifest_hash: pruneManifest, batch: 100
     }).done(function(response){
-      if (token !== pruneToken || !pruneRunning) {
+      if (token !== pruneToken || !pruneRunning || isJobStopping(token)) {
         return;
       }
       if (!response || !response.success || !response.data) {
@@ -481,7 +501,7 @@
       }
       pruneProgress(data.percent || 0, t('deleting', 'Deleting…') + ' ' + data.processed + ' / ' + pruneTotal + ' — ' + data.bytes_human);
       if (!data.done) {
-        window.setTimeout(deletePruneBatch, parseInt(data.retry_after_ms || 120, 10));
+        window.setTimeout(function(){ if (token === pruneToken && !isJobStopping(token)) { deletePruneBatch(); } }, parseInt(data.retry_after_ms || 120, 10));
         return;
       }
       let message = formatTemplate(t('doneDeleted', 'Done. Deleted %1$s files — Freed %2$s.'), {'%1$s': data.deleted, '%2$s': data.bytes_human});
@@ -494,7 +514,7 @@
       $pruneResults.trigger('focus');
       loadRecentJobs();
     }).fail(function(){
-      if (token !== pruneToken) {
+      if (token !== pruneToken || isJobStopping(token)) {
         return;
       }
       $pruneResults.prepend(htmlNotice('notice-error', t('networkDelete', 'Network error during delete.') + ' ' + t('resumeAfterNetworkError', 'Reload this page to resume it.')));
@@ -503,9 +523,14 @@
   }
 
   function resumePrune(token) {
+    if (token && isJobStopping(token, 'prune')) {
+      stopPrune(token);
+      return;
+    }
     if (!token || (pruneToken === token && (pruneRunning || !$pruneReview.hasClass('yo-hidden')))) {
       return;
     }
+    ++prepareRequest;
     pruneToken = token;
     pruneRunning = true;
     rememberJob('prune', token);
@@ -515,7 +540,7 @@
     $pruneCancel.removeClass('yo-hidden');
     $pruneResults.html(htmlNotice('notice-info', t('resumeAvailable', 'An unfinished job was found. Resuming it now…')));
     getJobStatus(token).done(function(response){
-      if (pruneToken !== token) {
+      if (pruneToken !== token || isJobStopping(token)) {
         return;
       }
       if (!response || !response.success || !response.data) {
@@ -542,7 +567,7 @@
         setPruneStep(data.status === 'completed' ? 'completed' : 'configure');
       }
     }).fail(function(request){
-      if (pruneToken !== token) {
+      if (pruneToken !== token || isJobStopping(token)) {
         return;
       }
       if (isMissingJobStatus(request)) {
@@ -556,38 +581,49 @@
 
   $pruneRun.on('click', preparePrune);
   $pruneApprove.on('click', approvePruneManifest);
-  $pruneCancel.on('click', function(){
-    if (!pruneToken) {
+  function stopPrune(token) {
+    token = token || pruneToken;
+    ++prepareRequest;
+    pruneRunning = false;
+    if (!token) {
+      stopPreparation('prune', true);
       clearPruneJob({keepResults: true});
+      $pruneRun.prop('disabled', true);
+      $pruneResults.prepend(htmlNotice('notice-info', t('stopAwaitingPrepare', 'Waiting for the preparation request to finish so its job can be stopped. If interrupted, reload this page to find and stop it.')));
       return;
     }
-    const token = pruneToken;
-    pruneRunning = false;
-    $pruneCancel.prop('disabled', true);
+    pruneToken = token;
+    rememberJob('prune', token);
+    lockPruneControls(true);
+    $pruneRun.prop('disabled', true);
+    $pruneApprove.prop('disabled', true);
+    $pruneCancel.removeClass('yo-hidden').prop('disabled', true);
     $pruneStat.show().text(t('stopping', 'Stopping after the current batch…'));
-    cancelJob(token).done(function(){
+    cancelJob(token, function(job){ return request('yotm_prune_delete_batch', {token: job.token, manifest_hash: job.manifest_hash, batch: 1}); }).done(function(response){
       if (pruneToken !== token) {
         return;
       }
-      $pruneResults.prepend(htmlNotice('notice-warning', t('jobStopped', 'Job stopped. Completed work was not rolled back, and the audit record was retained.')));
+      $pruneResults.prepend(htmlNotice('notice-warning', stopJobMessage(response)));
       clearPruneJob({keepResults: true});
-      setPruneStep('configure');
+      setPruneStep(response.data.job.status === 'completed' ? 'completed' : 'configure');
       $pruneResults.trigger('focus');
       loadRecentJobs();
-    }).fail(function(){
+    }).fail(function(stopRequest){
       if (pruneToken !== token) {
         return;
       }
-      pruneRunning = true;
-      $pruneCancel.prop('disabled', false);
-      $pruneResults.prepend(htmlNotice('notice-error', t('unknownError', 'Unknown error')));
+      $pruneResults.prepend(htmlNotice('notice-error', t('stopUnconfirmed', 'Stop has not been confirmed. Retry Stop job or reload this page to continue stopping; no new batch will be started.') + ' ' + responseError(stopRequest, t('unknownError', 'Unknown error'))));
+      clearPruneJob({keepResults: true, preserveJob: !isMissingJobStatus(stopRequest)});
     });
-  });
+  }
+
+  $pruneCancel.on('click', function(){ stopPrune(); });
 
   toggleSubpathPicker();
   filterSubpathOptions();
   registerWorkflow('prune', {
     isActive: function(){ return !!pruneToken; },
+    stop: stopPrune,
     resume: resumePrune
   });
 })(jQuery, window.YOTMAdmin);

@@ -58,6 +58,7 @@ function harness(config = {}) {
     errorDetails: () => '', escapeHtml: value => String(value ?? '').replaceAll('<', '&lt;').replaceAll('>', '&gt;'),
     forgetJob() {}, formatTemplate: (text, args) => Object.entries(args).reduce((result, [key, value]) => result.replaceAll(key, value), text),
     getJobStatus: token => request('status', {token}), htmlNotice: (type, message) => '<p>' + message + '</p>',
+    isJobStopping: () => false, stopPreparation() {}, stopJobMessage: () => 'Job stopped.',
     isMissingJobStatus: () => false, loadRecentJobs() {}, registerWorkflow(type, value) {workflow = value;},
     rememberJob() {}, request, responseError: (response, fallback) => fallback, t: (key, fallback) => fallback
   };
@@ -161,6 +162,7 @@ test('stopping during prepare prevents a late response from starting or retainin
   late.resolve({token: 'late-report', operation: 'check', total: 1});
   assert.equal(h.calls.some(call => call.action === 'yotm_regenerate_batch'), false);
   assert.deepEqual(h.last('cancel').payload, {token: 'late-report'});
+  h.last('cancel').resolve({job: {token: 'late-report', type: 'regenerate', status: 'cancelled'}});
   h.click('#yotm_regen_run');
   assert.equal(h.calls.filter(call => call.action === 'yotm_regenerate_prepare').length, 2);
 });

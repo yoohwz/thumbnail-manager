@@ -17,6 +17,7 @@ function deferred(result) {
   const callbacks = {done: [], fail: [], always: []};
   let outcome = result || null;
   const promise = {
+    promise() { return promise; },
     done(callback) {
       callbacks.done.push(callback);
       if (outcome && outcome.kind === 'done') {
@@ -183,6 +184,7 @@ function createHarness(options = {}) {
     return makeCollection('empty', []);
   }
 
+  $.Deferred = () => deferred();
   $.post = (url, payload) => {
     const response = options.responses && options.responses[payload.action];
     const pending = deferred(response);
@@ -300,7 +302,7 @@ test('startup preserves prune-before-regenerate precedence and resumes recommend
   });
   loadAdmin(harness);
 
-  assert.deepEqual(harness.storageReads, [
+  assert.deepEqual(harness.storageReads.filter(key => key.startsWith('yotm_job_')), [
     'yotm_job_42_prune',
     'yotm_job_42_regenerate',
     'yotm_job_42_recommendation'
@@ -373,7 +375,7 @@ test('late status callbacks cannot mutate a replacement workflow token', () => {
       const key = 'yotm_job_42_' + item.type;
       const harness = createHarness({
         storage: {[key]: 'token-a'},
-        responses: {yotm_job_cancel: {kind: 'done', value: {success: true}}}
+        responses: {yotm_job_cancel: {kind: 'done', value: {success: true, data: {job: {token: 'token-a', status: 'cancelled', type: item.type}}}}}
       });
       loadAdmin(harness);
       const statusA = actionCalls(harness, 'yotm_job_status')[0];
@@ -396,40 +398,23 @@ test('late status callbacks cannot mutate a replacement workflow token', () => {
   }
 });
 
-test('late cancel callbacks cannot mutate a replacement workflow token', () => {
+test('late status cannot release a stop-pending token before cancellation is acknowledged', () => {
   const cases = [
-    {type: 'prune', cancel: '#yotm_cancel', run: '#yotm_run', prepare: 'yotm_prune_prepare'},
-    {type: 'regenerate', cancel: '#yotm_regen_cancel', run: '#yotm_regen_run', prepare: 'yotm_regenerate_prepare'},
-    {type: 'recommendation', cancel: '#yotm_recommend_cancel', run: '#yotm_recommend_scan', prepare: 'yotm_recommend_prepare'}
+    {type: 'prune', cancel: '#yotm_cancel'},
+    {type: 'regenerate', cancel: '#yotm_regen_cancel'},
+    {type: 'recommendation', cancel: '#yotm_recommend_cancel'}
   ];
-
   for (const item of cases) {
-    for (const lateOutcome of ['done', 'fail']) {
-      const key = 'yotm_job_42_' + item.type;
-      const harness = createHarness({storage: {[key]: 'token-a'}});
-      loadAdmin(harness);
-      const statusA = actionCalls(harness, 'yotm_job_status')[0];
-
-      invokeHandler(harness, item.cancel);
-      const cancelA = actionCalls(harness, 'yotm_job_cancel')[0];
-      statusA.deferred.reject({status: 404});
-      actionCalls(harness, 'yotm_jobs_recent')[0].deferred.resolve({
-        success: true,
-        data: {jobs: [{type: item.type, token: 'token-b', status: item.type === 'regenerate' ? 'running' : 'scanning'}]}
-      });
-      assert.equal(harness.storage.get(key), 'token-b');
-
-      if (lateOutcome === 'done') {
-        cancelA.deferred.resolve({success: true});
-        assert.equal(harness.storage.get(key), 'token-b', item.type + ' late cancel done');
-      } else {
-        actionCalls(harness, 'yotm_job_status').at(-1).deferred.reject({status: 404});
-        assert.equal(harness.storage.has(key), false, item.type + ' replacement should reach terminal state');
-        cancelA.deferred.reject({status: 500});
-        invokeHandler(harness, item.run);
-        assert.equal(actionCalls(harness, item.prepare).length, 1, item.type + ' late cancel fail must not block a new run');
-      }
-    }
+    const key = 'yotm_job_42_' + item.type;
+    const h = createHarness({storage: {[key]: 'token-a'}});
+    loadAdmin(h);
+    invokeHandler(h, item.cancel);
+    actionCalls(h, 'yotm_job_status')[0].deferred.reject({status: 404});
+    assert.equal(h.storage.get(key), 'token-a');
+    actionCalls(h, 'yotm_job_cancel')[0].deferred.resolve({success: true, data: {job: {token: 'token-a', type: item.type, status: 'cancelled'}}});
+    assert.equal(h.storage.has(key), false);
+    actionCalls(h, 'yotm_jobs_recent').at(-1).deferred.resolve({success: true, data: {jobs: [{type: item.type, token: 'token-b', status: 'running'}]}});
+    assert.equal(h.storage.get(key), 'token-b');
   }
 });
 
@@ -949,4 +934,113 @@ test('admin modules retain the established AJAX action and storage contracts', (
     assert.match(combined, new RegExp("registerWorkflow\\('" + type + "'"));
   }
   assert.match(adminSource, /'yotm_job_' \+ siteId \+ '_' \+ type/);
+});
+
+const stopCases = [
+  {type: 'prune', start: '#yotm_run', stop: '#yotm_cancel', prepare: 'yotm_prune_prepare', batch: 'yotm_prune_scan_batch', results: '#yotm_results'},
+  {type: 'regenerate', start: '#yotm_regen_run', stop: '#yotm_regen_cancel', prepare: 'yotm_regenerate_prepare', batch: 'yotm_regenerate_batch', results: '#yotm_regen_results'},
+  {type: 'recommendation', start: '#yotm_recommend_scan', stop: '#yotm_recommend_cancel', prepare: 'yotm_recommend_prepare', batch: 'yotm_recommend_batch', results: '#yotm_recommend_results'}
+];
+const busyStop = {status: 409, responseJSON: {success: false, data: {code: 'yotm_job_cancel_busy'}}};
+
+function startPendingBatch(h, item) {
+  invokeHandler(h, item.start);
+  actionCalls(h, item.prepare)[0].deferred.resolve({success: true, data: {token: 'stopping-token', total: 40, total_known: true}});
+  return actionCalls(h, item.batch)[0];
+}
+
+test('busy Stop keeps all workflows stopped while late batches, status and recent listings arrive', () => {
+  for (const item of stopCases) {
+    const h = createHarness();
+    loadAdmin(h);
+    const batch = startPendingBatch(h, item);
+    assert.ok(batch, item.type);
+    invokeHandler(h, item.stop);
+    actionCalls(h, 'yotm_job_cancel')[0].deferred.reject(busyStop);
+    batch.deferred.resolve({success: true, data: {done: false, processed: 20, total: 40}});
+    actionCalls(h, 'yotm_job_status').at(-1).deferred.resolve({success: true, data: {token: 'stopping-token', type: item.type, status: 'running', context: {}}});
+    actionCalls(h, 'yotm_jobs_recent')[0].deferred.resolve({success: true, data: {jobs: [{token: 'stopping-token', type: item.type, status: 'running'}]}});
+    assert.equal(actionCalls(h, item.batch).length, 1, item.type);
+    assert.equal(h.storage.get('yotm_job_42_' + item.type), 'stopping-token');
+    h.timers.splice(0).forEach(timer => timer.callback());
+    assert.equal(actionCalls(h, 'yotm_job_cancel').length, 2);
+    assert.equal(actionCalls(h, item.batch).length, 1);
+    actionCalls(h, 'yotm_job_cancel').at(-1).deferred.resolve({success: true, data: {job: {token: 'stopping-token', type: item.type, status: 'cancelled'}}});
+    assert.equal(h.storage.has('yotm_job_42_' + item.type), false);
+    assert.equal(h.storage.has('yotm_stop_42_0_stopping-token'), false);
+  }
+});
+
+test('failed or malformed Stop never claims success or automatically resumes work, including reload', () => {
+  for (const failure of [{status: 0}, {status: 503}, {status: 403}, {status: 409, responseJSON: {data: {code: 'storage_failed'}}}, null]) {
+    for (const item of stopCases) {
+      const h = createHarness({config: {userId: 7}});
+      loadAdmin(h);
+      const batch = startPendingBatch(h, item);
+      invokeHandler(h, item.stop);
+      const cancel = actionCalls(h, 'yotm_job_cancel')[0];
+      if (failure) { cancel.deferred.reject(failure); }
+      else { cancel.deferred.resolve({success: true, data: {job: {token: 'other-token', status: 'cancelled'}}}); }
+      batch.deferred.resolve({success: true, data: {done: false}});
+      assert.equal(h.storage.get('yotm_stop_42_7_stopping-token'), '1');
+      assert.equal(actionCalls(h, item.batch).length, 1);
+      assert.equal(h.timers.length, 0);
+      assert.match(h.$(item.results).html(), /Stop has not been confirmed/);
+      const reloaded = createHarness({storage: Object.fromEntries(h.storage), config: {userId: 7}});
+      loadAdmin(reloaded);
+      assert.equal(actionCalls(reloaded, 'yotm_job_cancel').length, 1);
+      assert.equal(actionCalls(reloaded, item.batch).length, 0);
+      const anotherUser = createHarness({storage: Object.fromEntries(h.storage), config: {userId: 8}});
+      loadAdmin(anotherUser);
+      assert.equal(actionCalls(anotherUser, 'yotm_job_cancel').length, 0);
+    }
+  }
+});
+
+test('Stop during preparation cancels late success and conflict tokens without starting a batch', () => {
+  for (const item of stopCases) {
+    for (const conflict of [false, true]) {
+      const h = createHarness();
+      loadAdmin(h);
+      invokeHandler(h, item.start);
+      invokeHandler(h, item.stop);
+      assert.equal(h.storage.get('yotm_stop_42_0_prepare_' + item.type), '1');
+      assert.equal(h.$(item.start).elements[0].disabled, true);
+      actionCalls(h, item.prepare)[0].deferred.resolve({success: !conflict, data: {[conflict ? 'resume_token' : 'token']: 'late-token'}});
+      assert.equal(actionCalls(h, item.batch).length, 0);
+      assert.equal(actionCalls(h, 'yotm_job_cancel')[0].payload.token, 'late-token');
+      actionCalls(h, 'yotm_job_cancel')[0].deferred.resolve({success: true, data: {job: {token: 'late-token', type: item.type, status: 'cancelled'}}});
+      assert.equal(h.storage.has('yotm_stop_42_0_prepare_' + item.type), false);
+      assert.match(h.$(item.results).html(), /Job stopped/);
+    }
+    const reload = createHarness({storage: {['yotm_stop_42_0_prepare_' + item.type]: '1'}});
+    loadAdmin(reload);
+    actionCalls(reload, 'yotm_jobs_recent')[0].deferred.resolve({success: true, data: {jobs: [{token: 'discovered-token', type: item.type, status: 'running'}]}});
+    assert.equal(actionCalls(reload, 'yotm_job_cancel')[0].payload.token, 'discovered-token');
+    assert.equal(actionCalls(reload, item.batch).length, 0);
+  }
+});
+
+test('only persisted cancellation recovery permits one bounded recovery request using fresh server context', () => {
+  for (const item of stopCases.slice(0, 2)) {
+    const h = createHarness({storage: {['yotm_job_42_' + item.type]: 'stopping-token'}});
+    loadAdmin(h);
+    invokeHandler(h, item.stop);
+    actionCalls(h, 'yotm_job_cancel')[0].deferred.reject(busyStop);
+    actionCalls(h, 'yotm_job_status').at(-1).deferred.resolve({success: true, data: {
+      token: 'stopping-token', type: item.type, status: 'running', manifest_hash: 'fresh-server-hash',
+      context: {recovery_only: 1, recovery_terminal_status: 'cancelled'}
+    }});
+    const recoveryAction = item.type === 'prune' ? 'yotm_prune_delete_batch' : item.batch;
+    const call = actionCalls(h, recoveryAction)[0];
+    assert.equal(call.payload.batch, 1);
+    assert.equal(call.payload.token, 'stopping-token');
+    if (item.type === 'prune') { assert.equal(call.payload.manifest_hash, 'fresh-server-hash'); }
+    call.deferred.resolve({success: true, data: {done: true}});
+    h.timers.splice(0).forEach(timer => timer.callback());
+    actionCalls(h, 'yotm_job_cancel').at(-1).deferred.resolve({success: true, data: {job: {token: 'stopping-token', type: item.type, status: 'completed'}}});
+    assert.match(h.$(item.results).html(), /completed before it could be stopped/);
+    assert.doesNotMatch(h.$(item.results).html(), /Job stopped/);
+    assert.equal(actionCalls(h, recoveryAction).length, 1);
+  }
 });
