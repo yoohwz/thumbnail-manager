@@ -334,12 +334,15 @@
     const list = Array.isArray(jobs) ? jobs : [];
     const $body = $('#yotm_recent_jobs_body').empty();
     if (!list.length) {
-      $body.append('<tr><td colspan="4">' + escapeHtml(t('noRecentJobs', 'No recent jobs.')) + '</td></tr>');
+      $body.append('<tr><td colspan="5">' + escapeHtml(t('noRecentJobs', 'No recent jobs.')) + '</td></tr>');
     } else {
       list.forEach(function(job){
         const progress = jobProgress(job);
         const statusClass = job.status === 'completed' ? 'yo-safe' : (job.status === 'cancelled' || job.status === 'expired' ? 'yo-warning' : 'yo-review-badge');
-        $body.append('<tr><td>' + escapeHtml(jobTypeLabel(job.type, (job.context || {}).operation)) + '</td><td><span class="yo-badge ' + statusClass + '">' + escapeHtml(jobStatusLabel(job.status)) + '</span></td><td>' + escapeHtml(job.processed || 0) + ' / ' + escapeHtml(job.total_known === false ? '?' : (job.total || 0)) + (job.total_known === false ? '' : ' (' + progress.toFixed(0) + '%)') + ' ' + escapeHtml(job.type === 'prune' ? t('jobFiles', 'files') : (job.type === 'regenerate' ? t('jobImages', 'images') : t('jobScanRecords', 'scan records'))) + '</td><td>' + escapeHtml(formatDate(job.updated_at)) + (' <button type="button" class="button-link yotm-health-view" data-token="' + escapeHtml(job.token) + '">' + escapeHtml(t('viewJob', 'View job')) + '</button>') + '</td></tr>');
+        const context = job.context || {};
+        const scope = context.scope_label || context.scan_base_label || t('allMedia', 'All media');
+        const unit = job.type === 'prune' ? t('jobFiles', 'files') : (job.type === 'regenerate' ? t('jobImages', 'images') : t('jobScanRecords', 'scan records'));
+        $body.append('<tr><td><strong>' + escapeHtml(jobTypeLabel(job.type, context.operation)) + '</strong><span class="yo-history-scope">' + escapeHtml(scope) + '</span></td><td><span class="yo-badge ' + statusClass + '">' + escapeHtml(jobStatusLabel(job.status)) + '</span></td><td>' + escapeHtml(job.processed || 0) + ' / ' + escapeHtml(job.total_known === false ? '?' : (job.total || 0)) + ' ' + escapeHtml(unit) + '</td><td>' + escapeHtml(formatDate(job.updated_at)) + '</td><td class="yo-history-action"><button type="button" class="button button-small yotm-health-view" data-token="' + escapeHtml(job.token) + '">' + escapeHtml(t('viewResults', 'View results')) + '</button></td></tr>');
       });
     }
 

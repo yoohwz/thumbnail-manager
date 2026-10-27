@@ -59,6 +59,7 @@ function yotm_render_admin_view( $view ) {
 								<th><?php echo esc_html__( 'Status', 'thumbnail-manager' ); ?></th>
 								<th><?php echo esc_html__( 'Progress', 'thumbnail-manager' ); ?></th>
 								<th><?php echo esc_html__( 'Updated', 'thumbnail-manager' ); ?></th>
+								<th><?php echo esc_html__( 'Results', 'thumbnail-manager' ); ?></th>
 							</tr>
 						</thead>
 						<tbody id="yotm_recent_jobs_body"></tbody>
@@ -67,7 +68,7 @@ function yotm_render_admin_view( $view ) {
 			</details>
 		</section>
 
-		<section id="yotm_job_report" class="yo-hidden" tabindex="-1" aria-live="polite"></section>
+		<section id="yotm_job_report" class="yo-job-report yo-hidden" tabindex="-1" aria-labelledby="yotm_report_heading"></section>
 
 			<div class="yo-tabs" id="yotm_tabs" role="tablist">
 				<button type="button" class="yo-tab active" data-tab="regenerate" id="yotm_tab_regenerate" role="tab" tabindex="0" aria-controls="yotm_panel_regenerate" aria-selected="true">
