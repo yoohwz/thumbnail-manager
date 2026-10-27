@@ -200,11 +200,20 @@
   const $regenRun = $('#yotm_regen_run');
   const $regenCancel = $('#yotm_regen_cancel');
 
+  function selectedRegenSizes() {
+    return $('#yotm_regen_selected_sizes .yotm-size-choice:checked').map(function(){ return this.value; }).get();
+  }
+
+  function updateRegenSizesSelection() {
+    $('#yotm_regen_sizes_selection_count').text(formatTemplate(t('selectedSizesCount', '%1$s sizes selected'), {'%1$s': selectedRegenSizes().length}));
+  }
+
   function toggleRegenScopeFields() {
     const scope = $('input[name="yotm_regen_scope"]:checked').val();
     $('#yotm_regen_subpath_wrap').toggleClass('yo-hidden', scope !== 'subpath');
     $('#yotm_regen_ids_wrap').toggleClass('yo-hidden', scope !== 'ids');
     $('#yotm_regen_selected_sizes_wrap').toggleClass('yo-hidden', $('input[name="yotm_regen_size_scope"]:checked').val() !== 'selected');
+    updateRegenSizesSelection();
   }
 
   function toggleRegenModeNote() {
@@ -214,7 +223,7 @@
   }
 
   function lockRegenControls(locked) {
-    $('input[name="yotm_regen_scope"], #yotm_regen_subpath, #yotm_regen_attachment_ids, #yotm_regen_choose, input[name="yotm_regen_mode"], input[name="yotm_regen_size_scope"], #yotm_regen_selected_sizes').prop('disabled', !!locked);
+    $('input[name="yotm_regen_scope"], #yotm_regen_subpath, #yotm_regen_attachment_ids, #yotm_regen_choose, input[name="yotm_regen_mode"], input[name="yotm_regen_size_scope"], #yotm_regen_selected_sizes .yotm-size-choice').prop('disabled', !!locked);
   }
 
   function regenProgress(percent, label, indeterminate) {
@@ -331,7 +340,7 @@
       $('#yotm_regen_selection_error').html(htmlNotice('notice-error', t('selectionEmpty', 'Choose at least one image from the Media Library.')));
       return;
     }
-    const selectedSizes = $('input[name="yotm_regen_size_scope"]:checked').val() === 'selected' ? ($('#yotm_regen_selected_sizes').val() || []) : null;
+    const selectedSizes = $('input[name="yotm_regen_size_scope"]:checked').val() === 'selected' ? selectedRegenSizes() : null;
     if (!opts.reportToken && selectedSizes && !selectedSizes.length) {
       $('#yotm_regen_sizes_error').html(htmlNotice('notice-error', t('selectedSizesEmpty', 'Choose at least one enabled thumbnail size.')));
       return;
@@ -475,6 +484,7 @@
   }
   selectionCount();
   $('input[name="yotm_regen_scope"], input[name="yotm_regen_size_scope"]').on('change', toggleRegenScopeFields);
+  $('#yotm_regen_selected_sizes .yotm-size-choice').on('change', updateRegenSizesSelection);
   $('input[name="yotm_regen_mode"]').on('change', toggleRegenModeNote);
   $regenRun.on('click', function(){ prepareRegenerate(); });
   function stopRegenerate(token) {

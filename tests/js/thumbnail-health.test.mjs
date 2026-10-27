@@ -15,6 +15,7 @@ function harness(config = {}) {
   let scope = 'all';
   let mode = 'missing';
   let pickerItems = [];
+  let sizeChoices = [];
   const selection = {toJSON: () => pickerItems, reset() {}, add() {}};
   const frame = {on(event, callback) { pickerEvents[event] = callback; }, state: () => ({get: () => selection}), open() { pickerEvents.open(); }};
   function $(key) {
@@ -28,6 +29,10 @@ function harness(config = {}) {
           if (key === 'input[name="yotm_regen_scope"]:checked') return scope;
           if (key === 'input[name="yotm_regen_mode"]:checked') return mode;
           return item.value;
+        },
+        map(callback) {
+          const elements = key === '#yotm_regen_selected_sizes .yotm-size-choice:checked' ? sizeChoices.filter(choice => choice.checked) : [];
+          return {get: () => elements.map((element, index) => callback.call(element, index, element))};
         },
         prop(name, value) {
           if (name === 'checked' && value && key.includes('[value="ids"]')) scope = 'ids';
@@ -66,6 +71,12 @@ function harness(config = {}) {
   return {
     calls, nodes, timers, $, workflow,
     setScope(value) {scope = value;}, setMode(value) {mode = value;},
+    setSizes(choices) {sizeChoices = choices;},
+    change(key) {
+      const handler = handlers.find(item => item.key === key && item.event === 'change');
+      assert.ok(handler, 'change handler exists for ' + key);
+      handler.callback();
+    },
     click(key, data) {
       const handler = handlers.find(item => item.key === key && item.event === 'click' && (!!data === !!item.selector));
       assert.ok(handler, 'handler exists for ' + key);
@@ -207,7 +218,9 @@ test('blocked reasons, actions and actual repair outcomes stay visible before si
 test('custom thumbnail scope sends only selected slugs and never changes upload settings', () => {
   const h = harness();
   h.$('input[name="yotm_regen_size_scope"]:checked').val('selected');
-  h.$('#yotm_regen_selected_sizes').val(['medium', 'large']);
+  h.setSizes([{value: 'medium', checked: true}, {value: 'thumbnail', checked: false}, {value: 'large', checked: true}]);
+  h.change('#yotm_regen_selected_sizes .yotm-size-choice');
+  assert.equal(h.$('#yotm_regen_sizes_selection_count').text(), '2 sizes selected');
   h.click('#yotm_regen_run');
   assert.deepEqual(h.last('yotm_regenerate_prepare').payload.selected_sizes, ['medium', 'large']);
   assert.equal(h.calls.length, 1);
@@ -217,7 +230,7 @@ test('custom thumbnail scope sends only selected slugs and never changes upload 
 test('empty custom thumbnail scope blocks preparation without falling back to all sizes', () => {
   const h = harness();
   h.$('input[name="yotm_regen_size_scope"]:checked').val('selected');
-  h.$('#yotm_regen_selected_sizes').val([]);
+  h.setSizes([{value: 'medium', checked: false}]);
   h.click('#yotm_regen_run');
   assert.equal(h.calls.length, 0);
   assert.match(h.$('#yotm_regen_sizes_error').html(), /Choose at least one/);
@@ -225,10 +238,22 @@ test('empty custom thumbnail scope blocks preparation without falling back to al
 
 test('default thumbnail scope omits selection and explicit repair retains saved report authority', () => {
   const h = harness();
+  h.setSizes([{value: 'medium', checked: true}]);
   completeCheck(h);
   assert.equal(Object.hasOwn(h.calls[0].payload, 'selected_sizes'), false);
   h.$('input[name="yotm_regen_size_scope"]:checked').val('selected');
-  h.$('#yotm_regen_selected_sizes').val(['other']);
+  h.setSizes([{value: 'other', checked: true}]);
   h.click('#yotm_regen_repair');
   assert.deepEqual(h.last('yotm_regenerate_prepare').payload, {operation: 'repair', report_token: 'report-one'});
+});
+
+test('native size choices lock during processing and unlock on completion', () => {
+  const h = harness();
+  h.click('#yotm_regen_run');
+  const control = [...h.nodes.entries()].find(([key]) => key.includes('input[name="yotm_regen_scope"],') && key.includes('#yotm_regen_selected_sizes .yotm-size-choice'));
+  assert.ok(control, 'locking targets native checkbox inputs');
+  assert.equal(control[1].item.disabled, true);
+  h.last('yotm_regenerate_prepare').resolve({token: 'check-one', operation: 'check', total: 1, total_known: true});
+  h.last('yotm_regenerate_batch').resolve({operation: 'check', done: true, total: 1, total_known: true, processed: 1, regenerated: 1, skipped: 0, failed: 0});
+  assert.equal(control[1].item.disabled, false);
 });

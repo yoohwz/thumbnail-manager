@@ -2788,3 +2788,149 @@ msgstr ""
 
 msgid "The saved retry selection is unavailable. Stop this job and select unsuccessful items again."
 msgstr ""
+
+#: inc/admin/assets.php:97
+msgid "Saved until (UTC):"
+msgstr ""
+
+#: inc/admin/assets.php:98
+msgid "Back to tools"
+msgstr ""
+
+#: inc/admin/assets.php:99
+msgid "Inspection complete"
+msgstr ""
+
+#: inc/admin/assets.php:100
+msgid "Coverage, dates & retention"
+msgstr ""
+
+#: inc/admin/assets.php:101
+msgid "Files processed"
+msgstr ""
+
+#: inc/admin/assets.php:102
+msgid "Records scanned"
+msgstr ""
+
+#: inc/admin/assets.php:103
+msgid "Images processed"
+msgstr ""
+
+#: inc/admin/assets.php:104
+msgid "This saved result is partial. Refresh to load the latest observations; opening it starts no processing."
+msgstr ""
+
+#: inc/admin/assets.php:105
+msgid "matching items"
+msgstr ""
+
+#: inc/admin/assets.php:106
+msgid "Outcome & next step"
+msgstr ""
+
+#: inc/admin/assets.php:107
+msgid "No items in this view"
+msgstr ""
+
+#: inc/admin/assets.php:108
+msgid "Choose another filter to view the other saved results."
+msgstr ""
+
+#: inc/admin/assets.php:109
+msgid "No item details are available yet. Review the summary and coverage notes."
+msgstr ""
+
+#: inc/admin/assets.php:110
+msgid "Result pages"
+msgstr ""
+
+#: inc/admin/assets.php:111
+msgid "selected"
+msgstr ""
+
+#: inc/admin/assets.php:112
+msgid "A retry creates a new job. Completed items stay unchanged."
+msgstr ""
+
+#: inc/admin/assets.php:113
+msgid "View results"
+msgstr ""
+
+#: inc/admin/assets.php:114
+msgid "Content hints refer to size names, not a verified image. Policy protection is separate."
+msgstr ""
+
+#. translators: %1$s: number of selected thumbnail sizes.
+#: inc/admin/assets.php:160
+msgid "%1$s sizes selected"
+msgstr ""
+
+#: inc/admin/assets.php:286
+msgid "Attachments scanned"
+msgstr ""
+
+#: inc/admin/assets.php:287
+msgid "Unique checked files"
+msgstr ""
+
+#: inc/admin/assets.php:288
+msgid "Checked file bytes"
+msgstr ""
+
+#: inc/admin/assets.php:289
+msgid "Missing files"
+msgstr ""
+
+#: inc/admin/assets.php:290
+msgid "Unreadable files"
+msgstr ""
+
+#: inc/admin/assets.php:291
+msgid "Unverified metadata entries"
+msgstr ""
+
+#: inc/admin/assets.php:292
+msgid "Scan coverage and limits"
+msgstr ""
+
+#: inc/admin/assets.php:293
+msgid "Policy protected"
+msgstr ""
+
+#. translators: %1$s: detected content reference count.
+#: inc/admin/assets.php:295
+msgid "%1$s content hints"
+msgstr ""
+
+#: inc/admin/assets.php:296
+msgid "Review scan evidence"
+msgstr ""
+
+#: inc/admin/assets.php:297
+msgid "View evidence"
+msgstr ""
+
+#: inc/admin/assets.php:298
+msgid "Policy protection"
+msgstr ""
+
+#: inc/admin/assets.php:299
+msgid "Content reference hints"
+msgstr ""
+
+#: inc/admin/assets.php:300
+msgid "Recorded evidence"
+msgstr ""
+
+#: inc/admin/assets.php:301
+msgid "Keep decision"
+msgstr ""
+
+#: inc/admin/assets.php:302
+msgid "Recorded thumbnails"
+msgstr ""
+
+#: inc/admin/view.php:62
+msgid "Results"
+msgstr ""
