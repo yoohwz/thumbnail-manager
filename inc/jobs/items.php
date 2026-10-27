@@ -1239,6 +1239,6 @@ function yotm_job_worker_add_selection_item( $worker, $item_key, $payload, $sele
 		$now,
 		$now
 	);
-	// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Exact-worker insertion prepared above; plugin-owned tables.
+	// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Authoritative worker-fenced queue insertion is prepared above and must bypass object caching.
 	return 1 === $wpdb->query( $sql );
 }
