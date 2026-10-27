@@ -138,6 +138,8 @@ function yotm_admin_enqueue_assets( $hook ) {
 				'healthInvalidDefinition'         => __( 'This thumbnail size has an invalid definition.', 'thumbnail-manager' ),
 				'healthUpscaledDefinition'        => __( 'This thumbnail size would require enlarging the source image.', 'thumbnail-manager' ),
 				'selectedSizesEmpty'              => __( 'Choose at least one enabled thumbnail size.', 'thumbnail-manager' ),
+				/* translators: %1$s: number of selected thumbnail sizes. */
+				'selectedSizesCount'              => __( '%1$s sizes selected', 'thumbnail-manager' ),
 				'selectedSizesLabel'              => __( 'Selected sizes:', 'thumbnail-manager' ),
 				'healthSizeUnregistered'          => __( 'This size is no longer registered; existing files were preserved.', 'thumbnail-manager' ),
 				'checkThumbnails'                 => __( 'Check thumbnails', 'thumbnail-manager' ),

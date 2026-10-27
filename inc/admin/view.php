@@ -152,17 +152,24 @@ function yotm_render_admin_view( $view ) {
 				<div id="yotm_regen_selection_error" role="alert"></div>
 			</div>
 
-			<fieldset class="yo-row" id="yotm_regen_sizes_scope">
+			<fieldset class="yo-row yo-size-scope-card" id="yotm_regen_sizes_scope">
 				<legend><strong><?php echo esc_html__( 'Thumbnail sizes for this job', 'thumbnail-manager' ); ?></strong></legend>
-				<label><input type="radio" name="yotm_regen_size_scope" value="all" checked> <?php echo esc_html__( 'All enabled sizes', 'thumbnail-manager' ); ?></label>
-				<label><input type="radio" name="yotm_regen_size_scope" value="selected"> <?php echo esc_html__( 'Choose sizes', 'thumbnail-manager' ); ?></label>
+				<div class="yo-size-scope-options">
+					<label><input type="radio" name="yotm_regen_size_scope" value="all" checked> <?php echo esc_html__( 'All enabled sizes', 'thumbnail-manager' ); ?></label>
+					<label><input type="radio" name="yotm_regen_size_scope" value="selected"> <?php echo esc_html__( 'Choose sizes', 'thumbnail-manager' ); ?></label>
+				</div>
 				<div id="yotm_regen_selected_sizes_wrap" class="yo-hidden">
-					<label for="yotm_regen_selected_sizes"><?php echo esc_html__( 'Select one or more enabled sizes', 'thumbnail-manager' ); ?></label><br>
-					<select id="yotm_regen_selected_sizes" multiple size="6">
+					<p id="yotm_regen_sizes_prompt"><?php echo esc_html__( 'Select one or more enabled sizes', 'thumbnail-manager' ); ?></p>
+					<div id="yotm_regen_selected_sizes" class="yo-run-size-list" role="group" aria-labelledby="yotm_regen_sizes_prompt">
 						<?php foreach ( yotm_apply_enabled_size_policy( wp_get_registered_image_subsizes() ) as $size_slug => $size_definition ) : ?>
-							<option value="<?php echo esc_attr( $size_slug ); ?>"><?php echo esc_html( $size_slug . ' (' . $size_definition['width'] . ' × ' . $size_definition['height'] . ')' ); ?></option>
+							<label class="yo-run-size-choice">
+								<input type="checkbox" class="yotm-size-choice" name="yotm_regen_selected_sizes[]" value="<?php echo esc_attr( $size_slug ); ?>">
+								<strong><?php echo esc_html( $size_slug ); ?></strong>
+								<span><?php echo esc_html( $size_definition['width'] . ' × ' . $size_definition['height'] ); ?></span>
+							</label>
 						<?php endforeach; ?>
-					</select>
+					</div>
+					<p id="yotm_regen_sizes_selection_count" class="description" aria-live="polite"></p>
 				</div>
 				<p class="description"><?php echo esc_html__( 'This selection applies only to this job. Future upload settings stay unchanged. Sizes disabled or unregistered later are preserved.', 'thumbnail-manager' ); ?></p>
 				<div id="yotm_regen_sizes_error" role="alert"></div>
