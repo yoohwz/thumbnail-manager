@@ -151,6 +151,22 @@ function yotm_render_admin_view( $view ) {
 				<div id="yotm_regen_selection_error" role="alert"></div>
 			</div>
 
+			<fieldset class="yo-row" id="yotm_regen_sizes_scope">
+				<legend><strong><?php echo esc_html__( 'Thumbnail sizes for this job', 'thumbnail-manager' ); ?></strong></legend>
+				<label><input type="radio" name="yotm_regen_size_scope" value="all" checked> <?php echo esc_html__( 'All enabled sizes', 'thumbnail-manager' ); ?></label>
+				<label><input type="radio" name="yotm_regen_size_scope" value="selected"> <?php echo esc_html__( 'Choose sizes', 'thumbnail-manager' ); ?></label>
+				<div id="yotm_regen_selected_sizes_wrap" class="yo-hidden">
+					<label for="yotm_regen_selected_sizes"><?php echo esc_html__( 'Select one or more enabled sizes', 'thumbnail-manager' ); ?></label><br>
+					<select id="yotm_regen_selected_sizes" multiple size="6">
+						<?php foreach ( yotm_apply_enabled_size_policy( wp_get_registered_image_subsizes() ) as $size_slug => $size_definition ) : ?>
+							<option value="<?php echo esc_attr( $size_slug ); ?>"><?php echo esc_html( $size_slug . ' (' . $size_definition['width'] . ' × ' . $size_definition['height'] . ')' ); ?></option>
+						<?php endforeach; ?>
+					</select>
+				</div>
+				<p class="description"><?php echo esc_html__( 'This selection applies only to this job. Future upload settings stay unchanged. Sizes disabled or unregistered later are preserved.', 'thumbnail-manager' ); ?></p>
+				<div id="yotm_regen_sizes_error" role="alert"></div>
+			</fieldset>
+
 			<fieldset class="yo-row yo-radio-group" id="yotm_regen_mode_group">
 				<legend><strong><?php echo esc_html__( 'Regeneration mode', 'thumbnail-manager' ); ?></strong></legend>
 				<label class="yo-radio-option">

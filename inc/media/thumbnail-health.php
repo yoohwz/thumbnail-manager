@@ -15,10 +15,11 @@ if ( ! defined( 'ABSPATH' ) ) {
  * The report is public. Snapshot and requested_sizes are private transaction
  * inputs and must not be included in browser-facing results.
  *
- * @param int $attachment_id Attachment ID.
+ * @param int        $attachment_id Attachment ID.
+ * @param array|null $selected_sizes Optional job-local size scope.
  * @return array
  */
-function yotm_thumbnail_health_inspect( $attachment_id ) {
+function yotm_thumbnail_health_inspect( $attachment_id, $selected_sizes = null ) {
 	$report   = array(
 		'attachment_id' => absint( $attachment_id ),
 		'status'        => 'blocked',
@@ -83,7 +84,17 @@ function yotm_thumbnail_health_inspect( $attachment_id ) {
 		return $result;
 	}
 	$permitted = yotm_apply_enabled_size_policy( array_intersect_key( $permitted, $registered ) );
-	$blocked   = false;
+	if ( null !== $selected_sizes ) {
+		$registered = array_intersect_key( $registered, array_flip( $selected_sizes ) );
+		foreach ( array_diff( $selected_sizes, array_keys( $registered ) ) as $slug ) {
+			$result['report']['sizes'][ $slug ] = array(
+				'status' => 'disabled',
+				'reason' => 'size_no_longer_registered',
+				'action' => __( 'This size is no longer registered. Its existing files were preserved.', 'thumbnail-manager' ),
+			);
+		}
+	}
+	$blocked = false;
 	foreach ( $registered as $slug => $definition ) {
 		$entry = array(
 			'status' => 'disabled',

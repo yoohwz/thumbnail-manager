@@ -28,7 +28,8 @@ function yotm_regenerate_prepare() {
 		! empty( $_POST['force_all'] ),
 		! empty( $_POST['only_missing'] ),
 		sanitize_key( wp_unslash( $_POST['operation'] ?? '' ) ),
-		sanitize_text_field( wp_unslash( $_POST['report_token'] ?? '' ) )
+		sanitize_text_field( wp_unslash( $_POST['report_token'] ?? '' ) ),
+		isset( $_POST['selected_sizes'] ) ? map_deep( wp_unslash( $_POST['selected_sizes'] ), 'sanitize_text_field' ) : null
 	);
 	yotm_regenerate_send_application_outcome( $outcome );
 }

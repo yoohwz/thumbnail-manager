@@ -202,3 +202,33 @@ test('blocked reasons, actions and actual repair outcomes stay visible before si
   assert.ok(html.indexOf('<th scope="row">large') < html.indexOf('<th scope="row">medium'));
   assert.ok(html.indexOf('<th scope="row">medium') < html.indexOf('<th scope="row">thumbnail'));
 });
+
+
+test('custom thumbnail scope sends only selected slugs and never changes upload settings', () => {
+  const h = harness();
+  h.$('input[name="yotm_regen_size_scope"]:checked').val('selected');
+  h.$('#yotm_regen_selected_sizes').val(['medium', 'large']);
+  h.click('#yotm_regen_run');
+  assert.deepEqual(h.last('yotm_regenerate_prepare').payload.selected_sizes, ['medium', 'large']);
+  assert.equal(h.calls.length, 1);
+  assert.equal(h.last('yotm_regenerate_prepare').payload.operation, 'check');
+});
+
+test('empty custom thumbnail scope blocks preparation without falling back to all sizes', () => {
+  const h = harness();
+  h.$('input[name="yotm_regen_size_scope"]:checked').val('selected');
+  h.$('#yotm_regen_selected_sizes').val([]);
+  h.click('#yotm_regen_run');
+  assert.equal(h.calls.length, 0);
+  assert.match(h.$('#yotm_regen_sizes_error').html(), /Choose at least one/);
+});
+
+test('default thumbnail scope omits selection and explicit repair retains saved report authority', () => {
+  const h = harness();
+  completeCheck(h);
+  assert.equal(Object.hasOwn(h.calls[0].payload, 'selected_sizes'), false);
+  h.$('input[name="yotm_regen_size_scope"]:checked').val('selected');
+  h.$('#yotm_regen_selected_sizes').val(['other']);
+  h.click('#yotm_regen_repair');
+  assert.deepEqual(h.last('yotm_regenerate_prepare').payload, {operation: 'repair', report_token: 'report-one'});
+});
