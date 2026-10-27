@@ -2,11 +2,13 @@
 /**
  * Optional/older optimizer behavior; run separately with that plugin skipped.
  *
- * wp --skip-plugins=yoohw-media-optimizer eval-file tests/optimizer-optional-smoke.php standalone
- * wp --skip-plugins=yoohw-media-optimizer eval-file tests/optimizer-optional-smoke.php legacy
+ * Run: wp --skip-plugins=yoohw-media-optimizer eval-file tests/optimizer-optional-smoke.php standalone
+ * Run: wp --skip-plugins=yoohw-media-optimizer eval-file tests/optimizer-optional-smoke.php legacy
  *
  * @package Thumbnail_Manager
  */
+
+// phpcs:disable WordPress.Files.FileName.InvalidClassFileName -- This isolated probe declares an older optional counterpart.
 
 if ( ! defined( 'WP_CLI' ) || ! WP_CLI ) {
 	exit( "Run this file through WP-CLI.\n" );
