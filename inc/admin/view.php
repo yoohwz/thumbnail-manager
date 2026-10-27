@@ -67,6 +67,8 @@ function yotm_render_admin_view( $view ) {
 			</details>
 		</section>
 
+		<section id="yotm_job_report" class="yo-hidden" tabindex="-1" aria-live="polite"></section>
+
 			<div class="yo-tabs" id="yotm_tabs" role="tablist">
 				<button type="button" class="yo-tab active" data-tab="regenerate" id="yotm_tab_regenerate" role="tab" tabindex="0" aria-controls="yotm_panel_regenerate" aria-selected="true">
 					<?php echo esc_html__( 'Regenerate', 'thumbnail-manager' ); ?>

@@ -67,6 +67,13 @@ function yotm_admin_enqueue_assets( $hook ) {
 		file_exists( YOTM_PLUGIN_PATH . 'js/admin-sizes.js' ) ? (string) filemtime( YOTM_PLUGIN_PATH . 'js/admin-sizes.js' ) : YOTM_VERSION,
 		true
 	);
+	wp_enqueue_script(
+		'yotm-job-results',
+		YOTM_PLUGIN_URL . 'js/admin-results.js',
+		array( 'yotm-prune-admin' ),
+		(string) filemtime( YOTM_PLUGIN_PATH . 'js/admin-results.js' ),
+		true
+	);
 	wp_enqueue_script( 'yotm-prune-admin' );
 	wp_enqueue_script( 'yotm-prune-admin-prune' );
 	wp_enqueue_script( 'yotm-prune-admin-recommendations' );
@@ -87,6 +94,32 @@ function yotm_admin_enqueue_assets( $hook ) {
 				? yotm_recommend_registered_sizes_signature( yotm_get_registered_sizes() )
 				: '',
 			'i18n'                     => array(
+				'resultFilter'                    => __( 'Show results', 'thumbnail-manager' ),
+				'resultAll'                       => __( 'All items', 'thumbnail-manager' ),
+				'resultUnsuccessful'              => __( 'Unsuccessful items', 'thumbnail-manager' ),
+				'resultFailed'                    => __( 'Failed', 'thumbnail-manager' ),
+				'resultSkipped'                   => __( 'Skipped', 'thumbnail-manager' ),
+				'resultExport'                    => __( 'Download JSON report', 'thumbnail-manager' ),
+				'resultClose'                     => __( 'Close results', 'thumbnail-manager' ),
+				'resultDefaultSizes'              => __( 'Default size policy for this run', 'thumbnail-manager' ),
+				'resultTitle'                     => __( 'Saved job results', 'thumbnail-manager' ),
+				'resultSucceeded'                 => __( 'Successful:', 'thumbnail-manager' ),
+				'resultCandidateBytes'            => __( 'Candidate bytes (estimate):', 'thumbnail-manager' ),
+				'resultFreedBytes'                => __( 'Recorded bytes freed:', 'thumbnail-manager' ),
+				'resultCreated'                   => __( 'Started (UTC):', 'thumbnail-manager' ),
+				'resultUpdated'                   => __( 'Updated (UTC):', 'thumbnail-manager' ),
+				'resultExpires'                   => __( 'Saved deadline (UTC):', 'thumbnail-manager' ),
+				'resultMatchCount'                => __( 'Items matching this filter:', 'thumbnail-manager' ),
+				'resultSelect'                    => __( 'Select for retry', 'thumbnail-manager' ),
+				'resultPath'                      => __( 'File', 'thumbnail-manager' ),
+				'resultRetry'                     => __( 'Retry selected items in a new job', 'thumbnail-manager' ),
+				'resultResume'                    => __( 'Continue active job', 'thumbnail-manager' ),
+				'resultUnavailable'               => __( 'This saved result is unavailable. Run a new check or scan.', 'thumbnail-manager' ),
+				'resultExportFailed'              => __( 'Export failed. Saved results are unchanged; reopen them and try again.', 'thumbnail-manager' ),
+				'resultExportLimit'               => __( 'Export contains the first 10,000 items. The saved summary covers the full job; use the on-screen filters to inspect other items.', 'thumbnail-manager' ),
+				'resultExportSnapshot'            => __( 'Export reads saved pages in order. An active job can change while it is being exported; use a terminal job for a stable result.', 'thumbnail-manager' ),
+				'resultExportDone'                => __( 'Report downloaded.', 'thumbnail-manager' ),
+				'resultRetryFailed'               => __( 'Could not prepare retry.', 'thumbnail-manager' ),
 				'healthFilePresent'               => __( 'Thumbnail file is present.', 'thumbnail-manager' ),
 				'healthFileMissing'               => __( 'Thumbnail file is missing.', 'thumbnail-manager' ),
 				'healthMetadataMissing'           => __( 'Thumbnail metadata is missing.', 'thumbnail-manager' ),

@@ -221,9 +221,10 @@ function yotm_job_update_mutable_item_payload( $item_id, $payload ) {
  * @param int    $page Current page.
  * @param int    $per_page Items per page.
  * @param string $search Optional opaque payload search.
+ * @param array  $statuses Optional exact statuses.
  * @return array{items:array,total:int,pages:int,page:int}|WP_Error
  */
-function yotm_job_get_item_rows_page( $job_id, $page = 1, $per_page = 25, $search = '' ) {
+function yotm_job_get_item_rows_page( $job_id, $page = 1, $per_page = 25, $search = '', $statuses = array() ) {
 	global $wpdb;
 
 	$tables   = yotm_job_table_names();
@@ -236,6 +237,11 @@ function yotm_job_get_item_rows_page( $job_id, $page = 1, $per_page = 25, $searc
 	if ( '' !== $search ) {
 		$where .= ' AND payload LIKE %s';
 		$args[] = '%' . $wpdb->esc_like( $search ) . '%';
+	}
+
+	if ( ! empty( $statuses ) ) {
+		$where .= ' AND status IN (' . implode( ',', array_fill( 0, count( $statuses ), '%s' ) ) . ')';
+		$args   = array_merge( $args, array_map( 'sanitize_key', $statuses ) );
 	}
 
 	// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Plugin-owned table/WHERE fragments and their bounded arguments are assembled above.
@@ -1172,4 +1178,28 @@ function yotm_job_sum_item_bytes( $job_id ) {
 	$tables = yotm_job_table_names();
 
 	return (int) $wpdb->get_var( $wpdb->prepare( "SELECT COALESCE(SUM(bytes),0) FROM {$tables['items']} WHERE job_id = %d", absint( $job_id ) ) );
+}
+
+/**
+ * Fail closed before a fresh retry when terminal unsuccessful rows retain journals.
+ *
+ * Completed media journals stay audit-only; ambiguous unsuccessful journals need
+ * inspection in the original job instead of a new destructive attempt.
+ *
+ * @param int $job_id Source ID.
+ * @return bool
+ */
+function yotm_job_has_terminal_recovery_evidence( $job_id ) {
+	global $wpdb;
+	$tables = yotm_job_table_names();
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Recovery evidence must reflect persistent state.
+	$found = $wpdb->get_var(
+		$wpdb->prepare(
+			"SELECT 1 FROM {$tables['items']} WHERE job_id = %d AND status IN ('failed','skipped') AND (payload LIKE %s OR payload LIKE %s) LIMIT 1",
+			absint( $job_id ),
+			'%' . $wpdb->esc_like( '"regeneration_journal"' ) . '%',
+			'%' . $wpdb->esc_like( '"prune_operation_journal_v1"' ) . '%'
+		)
+	);
+	return '' !== (string) $wpdb->last_error || (bool) $found;
 }

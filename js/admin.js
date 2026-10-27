@@ -335,7 +335,7 @@
       list.forEach(function(job){
         const progress = jobProgress(job);
         const statusClass = job.status === 'completed' ? 'yo-safe' : (job.status === 'cancelled' || job.status === 'expired' ? 'yo-warning' : 'yo-review-badge');
-        $body.append('<tr><td>' + escapeHtml(jobTypeLabel(job.type, (job.context || {}).operation)) + '</td><td><span class="yo-badge ' + statusClass + '">' + escapeHtml(jobStatusLabel(job.status)) + '</span></td><td>' + escapeHtml(job.processed || 0) + ' / ' + escapeHtml(job.total || 0) + ' (' + progress.toFixed(0) + '%)</td><td>' + escapeHtml(formatDate(job.updated_at)) + (job.type === 'regenerate' && ['check', 'repair'].includes((job.context || {}).operation) ? ' <button type="button" class="button-link yotm-health-view" data-token="' + escapeHtml(job.token) + '">' + escapeHtml(t('viewJob', 'View job')) + '</button>' : '') + '</td></tr>');
+        $body.append('<tr><td>' + escapeHtml(jobTypeLabel(job.type, (job.context || {}).operation)) + '</td><td><span class="yo-badge ' + statusClass + '">' + escapeHtml(jobStatusLabel(job.status)) + '</span></td><td>' + escapeHtml(job.processed || 0) + ' / ' + escapeHtml(job.total || 0) + ' (' + progress.toFixed(0) + '%)</td><td>' + escapeHtml(formatDate(job.updated_at)) + (' <button type="button" class="button-link yotm-health-view" data-token="' + escapeHtml(job.token) + '">' + escapeHtml(t('viewJob', 'View job')) + '</button>') + '</td></tr>');
       });
     }
 
@@ -359,7 +359,7 @@
   }
 
   $('#yotm_recent_jobs_body').on('click', '.yotm-health-view', function(){
-    resumeWorkflow('regenerate', $(this).attr('data-token'));
+    if (window.YOTMResults) { window.YOTMResults.open($(this).attr('data-token')); }
   });
 
   $('#yotm_active_job_view').on('click', function(){
@@ -431,6 +431,7 @@
     loadRecentJobs: loadRecentJobs,
     recallJob: recallJob,
     registerWorkflow: registerWorkflow,
+    resumeWorkflow: resumeWorkflow,
     rememberJob: rememberJob,
     request: request,
     responseError: responseError,

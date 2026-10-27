@@ -118,3 +118,34 @@ function yotm_job_ajax_cancel() {
 	);
 }
 add_action( 'wp_ajax_yotm_job_cancel', 'yotm_job_ajax_cancel' );
+
+/**
+ * Read saved results and export pages with the same public projection.
+ */
+function yotm_job_ajax_results() {
+	if ( ! current_user_can( 'manage_options' ) ) {
+		wp_send_json_error( array( 'msg' => __( 'No permission.', 'thumbnail-manager' ) ), 403 );
+	}
+	check_ajax_referer( 'yotm_prune_nonce', 'nonce' );
+	$outcome = yotm_job_results_application(
+		sanitize_text_field( wp_unslash( $_POST['token'] ?? '' ) ),
+		absint( wp_unslash( $_POST['page'] ?? 1 ) ),
+		sanitize_key( wp_unslash( $_POST['filter'] ?? '' ) )
+	);
+	yotm_regenerate_send_application_outcome( $outcome );
+}
+add_action( 'wp_ajax_yotm_job_results', 'yotm_job_ajax_results' );
+
+/**
+ * Prepare a fresh bounded attempt for selected unsuccessful items.
+ */
+function yotm_job_ajax_retry() {
+	if ( ! current_user_can( 'manage_options' ) ) {
+		wp_send_json_error( array( 'msg' => __( 'No permission.', 'thumbnail-manager' ) ), 403 );
+	}
+	check_ajax_referer( 'yotm_prune_nonce', 'nonce' );
+	$keys    = isset( $_POST['keys'] ) && is_array( $_POST['keys'] ) ? array_map( 'sanitize_text_field', wp_unslash( $_POST['keys'] ) ) : array();
+	$outcome = yotm_job_retry_application( sanitize_text_field( wp_unslash( $_POST['token'] ?? '' ) ), $keys );
+	yotm_regenerate_send_application_outcome( $outcome );
+}
+add_action( 'wp_ajax_yotm_job_retry', 'yotm_job_ajax_retry' );

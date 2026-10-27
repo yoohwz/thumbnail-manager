@@ -182,6 +182,16 @@ function yotm_prune_build_manifest_batch( $job, $limit = 1000, $worker = null ) 
 	}
 
 	foreach ( $rows as $row ) {
+		if ( isset( $payload['retry_keys'] ) && ! in_array( $row['item_key'], $payload['retry_keys'], true ) ) {
+			if ( ! yotm_job_delete_item_by_key( $job['id'], $row['item_key'] ) ) {
+				return array(
+					'done' => false,
+					'job'  => yotm_job_get_by_id( $job['id'] ),
+				);
+			}
+			$after = $row['item_key'];
+			continue;
+		}
 		$item_payload = $row['payload'];
 		$item_schema  = (string) ( $item_payload['ownership_schema'] ?? '' );
 		if ( 'prune' === ( $job['type'] ?? '' ) && in_array( $item_schema, array( 'generated_file_v1', 'legacy_generated_v1', 'historical_legacy_generated_v1' ), true ) ) {
@@ -249,8 +259,9 @@ function yotm_prune_build_manifest_batch( $job, $limit = 1000, $worker = null ) 
  * @param bool     $discover_orphans Whether to include current-disabled disk-only discovery.
  * @param bool     $discover_historical Whether to include historical-unregistered discovery.
  * @return array Application outcome.
+ * @param array    $retry_scope Server-derived retry identity and selected item keys.
  */
-function yotm_prune_prepare_application( $keep, $limit_subpaths, $discover_orphans, $discover_historical = false ) {
+function yotm_prune_prepare_application( $keep, $limit_subpaths, $discover_orphans, $discover_historical = false, $retry_scope = array() ) {
 	$limit_subpaths      = yotm_normalize_upload_subpaths( $limit_subpaths );
 	$discover_orphans    = (bool) $discover_orphans;
 	$discover_historical = (bool) $discover_historical;
@@ -273,9 +284,9 @@ function yotm_prune_prepare_application( $keep, $limit_subpaths, $discover_orpha
 	if ( is_wp_error( $selection_meta_max ) ) {
 		return yotm_prune_application_error( array( 'msg' => $selection_meta_max->get_error_message() ), 503 );
 	}
-	$scan_total                           = 'attached_meta_v2' === $selector ? 0 : yotm_count_image_attachments( $query_args );
-	$scope_label                          = yotm_uploads_scope_label( $base, $scan_bases );
-	$job_payload                          = array(
+	$scan_total  = 'attached_meta_v2' === $selector ? 0 : yotm_count_image_attachments( $query_args );
+	$scope_label = yotm_uploads_scope_label( $base, $scan_bases );
+	$job_payload = array(
 		'scan_base'                => $scan_bases[0],
 		'scan_bases'               => $scan_bases,
 		'scan_subpaths'            => $limit_subpaths,
@@ -315,6 +326,10 @@ function yotm_prune_prepare_application( $keep, $limit_subpaths, $discover_orpha
 		'disk_cursor_version'      => 'dfs_v2',
 		'disk_entries_processed'   => 0,
 	);
+	if ( ! empty( $retry_scope ) ) {
+		$job_payload['retry_of']   = $retry_scope['retry_of'];
+		$job_payload['retry_keys'] = $retry_scope['retry_keys'];
+	}
 	$job_payload['legacy_policy']         = array(
 		'version'                         => 2,
 		'enabled'                         => $scan_disk ? 1 : 0,
