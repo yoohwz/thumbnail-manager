@@ -17,12 +17,14 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-$assert = static function ( $condition, $message ) {
+$assertions = 0;
+$assert     = static function ( $condition, $message ) use ( &$assertions ) {
+	++$assertions;
 	if ( ! $condition ) {
 		throw new RuntimeException( esc_html( $message ) );
 	}
 };
-$pass   = static function ( $message ) {
+$pass       = static function ( $message ) {
 	echo 'PASS — ' . esc_html( $message ) . "\n";
 };
 $assert( function_exists( 'yotm_optimizer_handoff' ) && yotm_optimizer_available(), 'Both compatible plugins must be active.' );
@@ -263,7 +265,8 @@ try {
 	$barrier   = $dir . '/native-ready';
 	$release   = $dir . '/native-release';
 	$code      = '$h=fopen($argv[1],"rb");if(!$h||!flock($h,LOCK_EX|LOCK_NB)){exit(2);}file_put_contents($argv[2],"ready");$until=microtime(true)+15;while(!file_exists($argv[3])&&microtime(true)<$until){usleep(10000);}flock($h,LOCK_UN);fclose($h);';
-	$child     = proc_open( array( PHP_BINARY, '-r', $code, $lock_path, $barrier, $release ), array( array( 'pipe', 'r' ), array( 'pipe', 'w' ), array( 'pipe', 'w' ) ), $pipes );
+	// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.system_calls_proc_open -- Separate native owner is required to prove actual flock contention.
+	$child = proc_open( array( PHP_BINARY, '-r', $code, $lock_path, $barrier, $release ), array( array( 'pipe', 'r' ), array( 'pipe', 'w' ), array( 'pipe', 'w' ) ), $pipes );
 	$assert( is_resource( $child ), 'Could not start the native mutex contender.' );
 	fclose( $pipes[0] );
 	$deadline = microtime( true ) + 5;
@@ -284,7 +287,8 @@ try {
 	$probe = yotm_with_optimizer_guard(
 		static function () use ( $assert, $fixture_ids, $owner, &$child, &$pipes ) {
 			$probe_code = 'require $argv[1]."wp-load.php";wp_set_current_user((int)$argv[2]);$r=YoOhw_Media_Optimizer::instance()->optimize_attachment((int)$argv[3]);echo json_encode(array("error"=>!empty($r["error"]),"processed"=>$r["processed"]??-1));';
-			$child      = proc_open( array( PHP_BINARY, '-d', 'display_errors=stderr', '-r', $probe_code, ABSPATH, (string) $owner, (string) $fixture_ids['force'] ), array( array( 'pipe', 'r' ), array( 'pipe', 'w' ), array( 'pipe', 'w' ) ), $pipes );
+			// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.system_calls_proc_open -- A separately bootstrapped WordPress worker proves cross-process exclusion.
+			$child = proc_open( array( PHP_BINARY, '-d', 'display_errors=stderr', '-r', $probe_code, ABSPATH, (string) $owner, (string) $fixture_ids['force'] ), array( array( 'pipe', 'r' ), array( 'pipe', 'w' ), array( 'pipe', 'w' ) ), $pipes );
 			$assert( is_resource( $child ), 'Could not start the optimizer contender.' );
 			fclose( $pipes[0] );
 			$output = stream_get_contents( $pipes[1] );
@@ -337,6 +341,7 @@ try {
 		$assert( is_file( $fixture_path ) && hash_file( 'sha256', $fixture_path ) === $hash, 'Lost ownership changed an existing live fixture.' );
 	}
 	$pass( 'ownership loss before TM promotion stops live writes/rollback and retains regeneration recovery evidence' );
+	echo 'PASS — ' . (int) $assertions . " runtime assertions; both current plugins active; real GD PNG/WebP path.\n";
 	echo "NOT RUN — browser HTTP/nonce/capability transport, multisite switch, hostile filesystem races, process death after promotion and full codec matrix; covered separately where applicable.\n";
 } finally {
 	if ( is_resource( $child ) ) {
