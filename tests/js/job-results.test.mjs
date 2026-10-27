@@ -59,7 +59,7 @@ test('opening each saved job type reads results and never resumes or batches', (
     assert.deepEqual(harness.calls.map(call => call.action), ['yotm_job_results']);
     const html = harness.nodes.get('#yotm_job_report').content;
     assert.match(html, /Saved job results/);
-    assert.match(html, /&lt;bad title&gt;/);
+    if (type !== 'recommendation') { assert.match(html, /&lt;bad title&gt;/); } else { assert.doesNotMatch(html, /Successful:/); assert.doesNotMatch(html, /yotm_result_filter/); }
     assert.doesNotMatch(html, /<script>unsafe/);
     assert.match(html, /Saved deadline/);
     assert.match(html, /thumbnail/);
@@ -108,4 +108,20 @@ test('missing or expired result errors are explicit without processing', () => {
   harness.window.YOTMResults.open('missing');
   assert.match(harness.nodes.get('#yotm_job_report').content, /Result expired/);
   assert.deepEqual(harness.calls.map(call => call.action), ['yotm_job_results']);
+});
+
+
+test('export from a filtered page uses the full export pagination metadata', () => {
+  const harness = fixture({respond(action, data, report) {
+    const result = structuredClone(report);
+    if (!data.filter) { result.page = data.page || 1; result.pages = 2; result.total = 101; result.items = Array.from({length: result.page === 1 ? 100 : 1}, (_, index) => ({key: String(index)})); }
+    return {success: true, data: result};
+  }});
+  harness.window.YOTMResults.open('source-token', 1, 'unsuccessful');
+  harness.handlers.get('click:#yotm_result_export')();
+  const exported = JSON.parse(harness.blobs[0]);
+  assert.equal(exported.total, 101);
+  assert.equal(exported.pages, 2);
+  assert.equal(exported.filter, '');
+  assert.equal(exported.items.length, 101);
 });

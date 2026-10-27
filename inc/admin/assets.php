@@ -94,6 +94,14 @@ function yotm_admin_enqueue_assets( $hook ) {
 				? yotm_recommend_registered_sizes_signature( yotm_get_registered_sizes() )
 				: '',
 			'i18n'                     => array(
+				'resultQueued'                    => __( 'Queued', 'thumbnail-manager' ),
+				'resultRefresh'                   => __( 'Refresh results', 'thumbnail-manager' ),
+				'resultInspected'                 => __( 'Inspected successfully:', 'thumbnail-manager' ),
+				'jobFiles'                        => __( 'files', 'thumbnail-manager' ),
+				'jobImages'                       => __( 'images', 'thumbnail-manager' ),
+				'jobScanRecords'                  => __( 'scan records', 'thumbnail-manager' ),
+				'recommendationSampleLimits'      => __( 'Up to five accessible content examples are shown per size. The scan covers IDs present when it began; new or changed content may be missed.', 'thumbnail-manager' ),
+				'resultPreservedSizes'            => __( 'Preserved because current size policy excludes them:', 'thumbnail-manager' ),
 				'resultFilter'                    => __( 'Show results', 'thumbnail-manager' ),
 				'resultAll'                       => __( 'All items', 'thumbnail-manager' ),
 				'resultUnsuccessful'              => __( 'Unsuccessful items', 'thumbnail-manager' ),

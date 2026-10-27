@@ -52,7 +52,7 @@ function yotm_job_results_application( $token, $page = 1, $filter = '' ) {
 		return yotm_regenerate_application_error( array( 'msg' => $data->get_error_message() ), 503 );
 	}
 	$public = yotm_job_public_data( $job );
-	unset( $public['context']['sample'], $public['context']['report_token'] );
+	unset( $public['context']['sample'], $public['context']['report_token'], $public['context']['orphan_summary']['unmapped_sample'], $public['context']['orphan_summary']['skipped_original_sample'] );
 	$public['context']['selected_sizes'] = $job['payload']['selected_sizes'] ?? null;
 	$public['context']['retry_of']       = $job['payload']['retry_of'] ?? '';
 	$terminal                            = in_array( $job['status'], array( 'completed', 'cancelled', 'expired' ), true );

@@ -25,8 +25,14 @@ class YOTM_Regenerate_Size_Scope_Test extends WP_UnitTestCase {
 		add_image_size( 'scope_b', 160, 100, true );
 		add_filter( 'intermediate_image_sizes_advanced', array( $this, 'sizes' ), PHP_INT_MAX );
 		copy( DIR_TESTDATA . '/images/2004-07-22-DSC_0007.jpg', $this->dir . '/source.jpg' );
-		$this->id = wp_insert_attachment( array( 'post_mime_type' => 'image/jpeg', 'post_title' => 'Scoped fixture' ), $this->dir . '/source.jpg' );
-		$this->metadata = wp_generate_attachment_metadata( $this->id, $this->dir . '/source.jpg' );
+		$this->id                 = wp_insert_attachment(
+			array(
+				'post_mime_type' => 'image/jpeg',
+				'post_title'     => 'Scoped fixture',
+			),
+			$this->dir . '/source.jpg'
+		);
+		$this->metadata           = wp_generate_attachment_metadata( $this->id, $this->dir . '/source.jpg' );
 		$this->metadata['custom'] = array( 'preserve' => true );
 		wp_update_attachment_metadata( $this->id, $this->metadata );
 		$this->assertTrue( yotm_media_source_sync_attachment( $this->id, null, true ) );
@@ -44,7 +50,8 @@ class YOTM_Regenerate_Size_Scope_Test extends WP_UnitTestCase {
 			yotm_regenerate_remove_stage( $stage, $this->dir );
 		}
 		foreach ( glob( $this->dir . '/*' ) as $file ) {
-			if ( is_file( $file ) ) { unlink( $file ); }
+			if ( is_file( $file ) ) {
+				unlink( $file ); }
 		}
 		@rmdir( $this->dir );
 		delete_option( 'yotm_disabled_sizes' );
@@ -66,16 +73,18 @@ class YOTM_Regenerate_Size_Scope_Test extends WP_UnitTestCase {
 			$result = yotm_regenerate_batch_application( $token, 1 );
 			yotm_job_release_all_workers();
 			$this->assertTrue( $result['success'], wp_json_encode( $result ) );
-			if ( $result['data']['done'] ) { return $result['data']; }
+			if ( $result['data']['done'] ) {
+				return $result['data']; }
 		}
 		$this->fail( 'Scoped job did not complete.' );
 	}
 
 	public function test_scoped_check_and_repair_preserve_unselected_missing_size_and_global_policy() {
-		foreach ( $this->metadata['sizes'] as $size ) { unlink( $this->dir . '/' . $size['file'] ); }
+		foreach ( $this->metadata['sizes'] as $size ) {
+			unlink( $this->dir . '/' . $size['file'] ); }
 		$prepared = $this->prepare();
 		$this->assertTrue( $prepared['success'] );
-		$check = $this->finish( $prepared['data']['token'] );
+		$check  = $this->finish( $prepared['data']['token'] );
 		$report = yotm_thumbnail_health_results_application( $check['token'] )['data'];
 		$this->assertSame( array( 'scope_a' ), array_keys( $report['items'][0]['sizes'] ) );
 		$this->assertSame( 1, $report['items'][0]['missing_count'] );
@@ -100,24 +109,24 @@ class YOTM_Regenerate_Size_Scope_Test extends WP_UnitTestCase {
 
 	public function test_default_scope_still_checks_all_enabled_sizes() {
 		$prepared = $this->prepare( null );
-		$check = $this->finish( $prepared['data']['token'] );
-		$report = yotm_thumbnail_health_results_application( $check['token'] )['data']['items'][0];
+		$check    = $this->finish( $prepared['data']['token'] );
+		$report   = yotm_thumbnail_health_results_application( $check['token'] )['data']['items'][0];
 		$this->assertSame( 2, $report['checked_count'] );
 		$this->assertSame( 'healthy', $report['sizes']['scope_a']['status'] );
 		$this->assertSame( 'healthy', $report['sizes']['scope_b']['status'] );
 	}
 
 	public function test_scoped_force_preserves_other_metadata_and_files_and_cleans_only_replaced_size() {
-		$old_path = $this->dir . '/' . $this->metadata['sizes']['scope_a']['file'];
-		$keep_path = $this->dir . '/' . $this->metadata['sizes']['scope_b']['file'];
-		$keep_hash = hash_file( 'sha256', $keep_path );
+		$old_path    = $this->dir . '/' . $this->metadata['sizes']['scope_a']['file'];
+		$keep_path   = $this->dir . '/' . $this->metadata['sizes']['scope_b']['file'];
+		$keep_hash   = hash_file( 'sha256', $keep_path );
 		$source_hash = hash_file( 'sha256', $this->dir . '/source.jpg' );
 		add_image_size( 'scope_a', 130, 130, true );
 		$prepared = $this->prepare( array( 'scope_a' ), true );
-		$result = $this->finish( $prepared['data']['token'] );
+		$result   = $this->finish( $prepared['data']['token'] );
 		$this->assertSame( 1, $result['regenerated'] );
-		$final = get_post_meta( $this->id, '_wp_attachment_metadata', true );
-		$expected = $this->metadata;
+		$final                        = get_post_meta( $this->id, '_wp_attachment_metadata', true );
+		$expected                     = $this->metadata;
 		$expected['sizes']['scope_a'] = $final['sizes']['scope_a'];
 		$this->assertSame( $expected, $final );
 		$this->assertFileDoesNotExist( $old_path );
@@ -127,7 +136,7 @@ class YOTM_Regenerate_Size_Scope_Test extends WP_UnitTestCase {
 
 	public function test_disabled_or_unregistered_after_prepare_preserves_that_size_without_expanding() {
 		$prepared = $this->prepare( array( 'scope_a' ), true );
-		$hash = hash_file( 'sha256', $this->dir . '/' . $this->metadata['sizes']['scope_a']['file'] );
+		$hash     = hash_file( 'sha256', $this->dir . '/' . $this->metadata['sizes']['scope_a']['file'] );
 		remove_image_size( 'scope_a' );
 		$result = $this->finish( $prepared['data']['token'] );
 		$this->assertSame( 1, $result['skipped'] );
@@ -136,7 +145,7 @@ class YOTM_Regenerate_Size_Scope_Test extends WP_UnitTestCase {
 	}
 
 	public function test_partial_scope_after_disable_preserves_restricted_size_and_only_rebuilds_remaining_target() {
-		$prepared = $this->prepare( array( 'scope_a', 'scope_b' ), true );
+		$prepared  = $this->prepare( array( 'scope_a', 'scope_b' ), true );
 		$keep_path = $this->dir . '/' . $this->metadata['sizes']['scope_b']['file'];
 		$keep_hash = hash_file( 'sha256', $keep_path );
 		yotm_update_disabled_sizes_option( array( 'scope_b' ) );
@@ -149,9 +158,9 @@ class YOTM_Regenerate_Size_Scope_Test extends WP_UnitTestCase {
 	}
 
 	public function test_recovery_rejects_journal_changes_outside_saved_scope() {
-		$final = $this->metadata;
+		$final           = $this->metadata;
 		$final['custom'] = array( 'tampered' => true );
-		$result = yotm_regenerate_validate_scope( $this->metadata, $final, array( 'scope_a' ), array() );
+		$result          = yotm_regenerate_validate_scope( $this->metadata, $final, array( 'scope_a' ), array() );
 		$this->assertWPError( $result );
 		$this->assertSame( 'yotm_regenerate_scope_metadata', $result->get_error_code() );
 	}
@@ -165,7 +174,7 @@ class YOTM_Regenerate_Size_Scope_Test extends WP_UnitTestCase {
 		$hash = hash_file( 'sha256', $this->dir . '/' . $this->metadata['sizes']['scope_b']['file'] );
 		add_filter( 'wp_update_attachment_metadata', array( $this, 'tamper' ), 20 );
 		$prepared = $this->prepare( array( 'scope_a' ), true );
-		$result = $this->finish( $prepared['data']['token'] );
+		$result   = $this->finish( $prepared['data']['token'] );
 		$this->assertSame( 1, $result['failed'] );
 		$this->assertSame( $this->metadata, get_post_meta( $this->id, '_wp_attachment_metadata', true ) );
 		$this->assertSame( $hash, hash_file( 'sha256', $this->dir . '/' . $this->metadata['sizes']['scope_b']['file'] ) );
@@ -175,31 +184,31 @@ class YOTM_Regenerate_Size_Scope_Test extends WP_UnitTestCase {
 		$this->metadata['sizes']['scope_b'] = $this->metadata['sizes']['scope_a'];
 		wp_update_attachment_metadata( $this->id, $this->metadata );
 		$this->assertTrue( yotm_media_source_sync_attachment( $this->id, null, true ) );
-		$path = $this->dir . '/' . $this->metadata['sizes']['scope_a']['file'];
-		$hash = hash_file( 'sha256', $path );
+		$path     = $this->dir . '/' . $this->metadata['sizes']['scope_a']['file'];
+		$hash     = hash_file( 'sha256', $path );
 		$prepared = $this->prepare( array( 'scope_a' ), true );
-		$result = $this->finish( $prepared['data']['token'] );
+		$result   = $this->finish( $prepared['data']['token'] );
 		$this->assertSame( 1, $result['failed'] );
 		$this->assertSame( $this->metadata, get_post_meta( $this->id, '_wp_attachment_metadata', true ) );
 		$this->assertSame( $hash, hash_file( 'sha256', $path ) );
 	}
 
 	public function test_committed_scoped_recovery_cleans_target_obsolete_file_and_preserves_unselected() {
-		$old_path = $this->dir . '/' . $this->metadata['sizes']['scope_a']['file'];
+		$old_path  = $this->dir . '/' . $this->metadata['sizes']['scope_a']['file'];
 		$old_bytes = file_get_contents( $old_path );
 		$keep_path = $this->dir . '/' . $this->metadata['sizes']['scope_b']['file'];
 		$keep_hash = hash_file( 'sha256', $keep_path );
 		add_image_size( 'scope_a', 130, 130, true );
 		$prepared = $this->prepare( array( 'scope_a' ), true );
-		$job = yotm_job_get( $prepared['data']['token'] );
+		$job      = yotm_job_get( $prepared['data']['token'] );
 		// Source index is already complete for this fixture; exercise the transaction directly.
 		$this->assertTrue( yotm_job_update( $job['id'], array( 'phase' => 'regenerate' ) ) );
 		$worker = yotm_job_acquire_worker( $job['id'], array( 'running' ), array( 'regenerate' ) );
-		$item = yotm_job_claim_items( $worker, 1 )[0];
+		$item   = yotm_job_claim_items( $worker, 1 )[0];
 		$result = yotm_regenerate_force_attachment( $this->id, $item, $worker, false, array( 'scope_a' ) );
 		$this->assertSame( 'regenerated', $result['status'], $result['message'] );
-		$item = yotm_job_get_item_by_key( $job['id'], $item['item_key'] );
-		$journal = $item['payload']['regeneration_journal'];
+		$item             = yotm_job_get_item_by_key( $job['id'], $item['item_key'] );
+		$journal          = $item['payload']['regeneration_journal'];
 		$journal['phase'] = 'metadata_committed';
 		file_put_contents( $old_path, $old_bytes );
 		$this->assertTrue( yotm_regenerate_persist_journal( $item, $journal ) );

@@ -39,9 +39,15 @@ class YOTM_Job_Results_Test extends WP_UnitTestCase {
 	}
 
 	private function item( $job, $name, $status, $extra = array() ) {
-		$key = hash( 'sha256', $name );
+		$key    = hash( 'sha256', $name );
 		$before = yotm_job_get_by_id( $job['id'] );
-		yotm_job_update( $job['id'], array( 'status' => 'regenerate' === $job['type'] ? 'running' : 'scanning', 'phase' => 'regenerate' === $job['type'] ? 'regenerate' : 'metadata' ) );
+		yotm_job_update(
+			$job['id'],
+			array(
+				'status' => 'regenerate' === $job['type'] ? 'running' : 'scanning',
+				'phase'  => 'regenerate' === $job['type'] ? 'regenerate' : 'metadata',
+			)
+		);
 		$this->assertTrue(
 			yotm_job_add_item(
 				$job['id'],
@@ -56,7 +62,13 @@ class YOTM_Job_Results_Test extends WP_UnitTestCase {
 				$status
 			)
 		);
-		yotm_job_update( $job['id'], array( 'status' => $before['status'], 'phase' => $before['phase'] ) );
+		yotm_job_update(
+			$job['id'],
+			array(
+				'status' => $before['status'],
+				'phase'  => $before['phase'],
+			)
+		);
 		return $key;
 	}
 
@@ -67,6 +79,10 @@ class YOTM_Job_Results_Test extends WP_UnitTestCase {
 				'operation'      => 'check',
 				'selected_sizes' => array( 'thumbnail' ),
 				'sample'         => array( '/private/internal' ),
+				'orphan_summary' => array(
+					'unmapped_sample'         => array( '/private/internal/unmapped.jpg' ),
+					'skipped_original_sample' => array( '/private/internal/original.jpg' ),
+				),
 			)
 		);
 		$this->item(
@@ -213,5 +229,145 @@ class YOTM_Job_Results_Test extends WP_UnitTestCase {
 		$this->assertNotFalse( yotm_job_get_item_by_key( $new['id'], $key ) );
 		$this->assertFalse( yotm_job_get_item_by_key( $new['id'], hash( 'sha256', 'outside-selection' ) ) );
 		$this->assertSame( 'failed', yotm_job_get_item_by_key( $job['id'], $key )['status'] );
+	}
+
+	public function die_handler() {
+		return array( $this, 'capture_die' );
+	}
+
+	public function capture_die( $message = '' ) {
+		// phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Capture the exact AJAX response.
+		throw new RuntimeException( (string) $message );
+	}
+
+	private function ajax( $callback, $token, $nonce = null ) {
+		$_POST = array(
+			'token' => $token,
+			'nonce' => null === $nonce ? wp_create_nonce( 'yotm_prune_nonce' ) : $nonce,
+		);
+		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- Deliberate authenticated transport fixture.
+		$_REQUEST = $_POST;
+		ob_start();
+		try {
+			call_user_func( $callback );
+		} catch ( RuntimeException $error ) {
+			$body = ob_get_clean();
+			return '' === $body ? $error->getMessage() : json_decode( $body, true );
+		}
+		ob_end_clean();
+		$this->fail( 'The adapter did not terminate.' );
+	}
+
+	public function test_results_and_retry_adapters_require_capability_nonce_and_owner() {
+		$job    = $this->source();
+		$before = yotm_job_get_by_id( $job['id'] );
+		add_filter( 'wp_doing_ajax', '__return_true' );
+		add_filter( 'wp_die_ajax_handler', array( $this, 'die_handler' ) );
+		try {
+			foreach ( array( 'yotm_job_ajax_results', 'yotm_job_ajax_retry' ) as $callback ) {
+				wp_set_current_user( 0 );
+				$this->assertFalse( $this->ajax( $callback, $job['token'] )['success'] );
+				wp_set_current_user( $this->admin );
+				$this->assertSame( '-1', $this->ajax( $callback, $job['token'], 'invalid' ) );
+				wp_set_current_user( self::factory()->user->create( array( 'role' => 'administrator' ) ) );
+				$this->assertFalse( $this->ajax( $callback, $job['token'] )['success'] );
+			}
+		} finally {
+			remove_filter( 'wp_doing_ajax', '__return_true' );
+			remove_filter( 'wp_die_ajax_handler', array( $this, 'die_handler' ) );
+			$_POST    = array();
+			$_REQUEST = array();
+			wp_set_current_user( $this->admin );
+		}
+		$this->assertSame( $before, yotm_job_get_by_id( $job['id'] ) );
+	}
+
+	private function scan_prune( $token ) {
+		for ( $i = 0; $i < 60; ++$i ) {
+			$result = yotm_prune_scan_application( $token, 100 );
+			yotm_job_release_all_workers();
+			$this->assertTrue( $result['success'], wp_json_encode( $result ) );
+			if ( ! empty( $result['data']['scan_done'] ) ) {
+				return yotm_job_get( $token );
+			}
+		}
+		$this->fail( 'Prune did not reach review.' );
+	}
+
+	public function test_prune_retry_rebuilds_real_selected_file_evidence_and_requires_new_approval() {
+		require_once ABSPATH . 'wp-admin/includes/image.php';
+		delete_option( YOTM_MEDIA_SOURCE_DIRTY_OPTION );
+		$this->assertTrue( yotm_media_source_clear_index() );
+		$state = yotm_media_reference_index_state();
+		$this->assertTrue( yotm_media_reference_baseline_complete( $state['baseline_token'] ) );
+		$dir = trailingslashit( wp_get_upload_dir()['basedir'] ) . 'retry-real-' . wp_generate_uuid4();
+		wp_mkdir_p( $dir );
+		copy( DIR_TESTDATA . '/images/2004-07-22-DSC_0007.jpg', $dir . '/source.jpg' );
+		$id       = wp_insert_attachment(
+			array(
+				'post_mime_type' => 'image/jpeg',
+				'post_title'     => 'Selected retry source',
+			),
+			$dir . '/source.jpg'
+		);
+		$metadata = wp_generate_attachment_metadata( $id, $dir . '/source.jpg' );
+		wp_update_attachment_metadata( $id, $metadata );
+		$target        = wp_normalize_path( $dir . '/' . $metadata['sizes']['thumbnail']['file'] );
+		$other         = wp_normalize_path( $dir . '/' . $metadata['sizes']['medium']['file'] );
+		$original_hash = hash_file( 'sha256', $dir . '/source.jpg' );
+		$other_hash    = hash_file( 'sha256', $other );
+		try {
+			$keep     = array_values( array_diff( array_keys( yotm_get_registered_sizes() ), array( 'thumbnail', 'medium' ) ) );
+			$prepared = yotm_prune_prepare_application( $keep, array(), false );
+			$this->assertTrue( $prepared['success'], wp_json_encode( $prepared ) );
+			$source       = $this->scan_prune( $prepared['data']['token'] );
+			$this->jobs[] = $source['id'];
+			$rows         = yotm_job_get_item_rows_page( $source['id'], 1, 100 );
+			$this->assertCount( 2, $rows['items'] );
+			$key = hash( 'sha256', $target );
+			foreach ( $rows['items'] as $row ) {
+				yotm_job_update_item( $row['id'], $key === $row['item_key'] ? 'failed' : 'done', 'Fixture terminal outcome' );
+			}
+			yotm_job_update(
+				$source['id'],
+				array(
+					'status'    => 'completed',
+					'phase'     => 'completed',
+					'processed' => 2,
+					'succeeded' => 1,
+					'failed'    => 1,
+				)
+			);
+			$retry = yotm_job_retry_application( $source['token'], array( $key ) );
+			$this->assertTrue( $retry['success'], wp_json_encode( $retry ) );
+			$new          = $this->scan_prune( $retry['data']['token'] );
+			$this->jobs[] = $new['id'];
+			$this->assertSame( 1, $new['total'] );
+			$this->assertSame( 'awaiting_approval', $new['status'] );
+			$this->assertNotSame( $source['manifest_hash'], $new['manifest_hash'] );
+			$this->assertSame( $target, yotm_job_get_item_by_key( $new['id'], $key )['payload']['path'] );
+			$this->assertFalse( yotm_prune_delete_application( $new['token'], $new['manifest_hash'], 10 )['success'] );
+			$this->assertTrue( yotm_prune_approve_application( $new['token'], $new['manifest_hash'], true )['success'] );
+			$deleted = yotm_prune_delete_application( $new['token'], $new['manifest_hash'], 10 );
+			yotm_job_release_all_workers();
+			$this->assertTrue( $deleted['success'], wp_json_encode( $deleted ) );
+			$this->assertFileDoesNotExist( $target );
+			$this->assertSame( $other_hash, hash_file( 'sha256', $other ) );
+			$this->assertSame( $original_hash, hash_file( 'sha256', $dir . '/source.jpg' ) );
+			$current = wp_get_attachment_metadata( $id );
+			$this->assertArrayNotHasKey( 'thumbnail', $current['sizes'] );
+			$this->assertSame( $metadata['sizes']['medium'], $current['sizes']['medium'] );
+			$this->assertSame( 'failed', yotm_job_get_item_by_key( $source['id'], $key )['status'] );
+		} finally {
+			yotm_job_release_all_workers();
+			wp_delete_attachment( $id, true );
+			foreach ( glob( $dir . '/*' ) as $file ) {
+				if ( is_file( $file ) ) {
+					unlink( $file ); }
+			}
+			rmdir( $dir );
+			delete_option( YOTM_MEDIA_REFERENCE_STATE_OPTION );
+			delete_option( YOTM_MEDIA_SOURCE_DIRTY_OPTION );
+		}
 	}
 }

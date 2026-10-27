@@ -96,6 +96,7 @@
 
   function renderScanCoverage(data) {
     let html = '<p class="description">' + escapeHtml(t('recommendationEvidenceLimits', 'Content evidence samples show size-name hints in post content, not verified image usage. Policy protections are separate. Dynamic theme, plugin, custom-field and external usage is not observed.')) + '</p>';
+    html += '<p class="description">' + escapeHtml(t('recommendationSampleLimits', 'Up to five accessible content examples are shown per size. The scan covers IDs present when it began; new or changed content may be missed.')) + '</p>';
     const stats = data.statistics;
     if (!stats || stats.schema_version !== 1 || !stats.complete) {
       return html + '<p class="description">' + escapeHtml(t('recommendationLegacyStatistics', 'Unique file statistics are unavailable for this saved scan. Run a new scan; legacy footprint totals may count shared references more than once.')) + '</p>';

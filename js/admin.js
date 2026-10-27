@@ -335,7 +335,7 @@
       list.forEach(function(job){
         const progress = jobProgress(job);
         const statusClass = job.status === 'completed' ? 'yo-safe' : (job.status === 'cancelled' || job.status === 'expired' ? 'yo-warning' : 'yo-review-badge');
-        $body.append('<tr><td>' + escapeHtml(jobTypeLabel(job.type, (job.context || {}).operation)) + '</td><td><span class="yo-badge ' + statusClass + '">' + escapeHtml(jobStatusLabel(job.status)) + '</span></td><td>' + escapeHtml(job.processed || 0) + ' / ' + escapeHtml(job.total || 0) + ' (' + progress.toFixed(0) + '%)</td><td>' + escapeHtml(formatDate(job.updated_at)) + (' <button type="button" class="button-link yotm-health-view" data-token="' + escapeHtml(job.token) + '">' + escapeHtml(t('viewJob', 'View job')) + '</button>') + '</td></tr>');
+        $body.append('<tr><td>' + escapeHtml(jobTypeLabel(job.type, (job.context || {}).operation)) + '</td><td><span class="yo-badge ' + statusClass + '">' + escapeHtml(jobStatusLabel(job.status)) + '</span></td><td>' + escapeHtml(job.processed || 0) + ' / ' + escapeHtml(job.total_known === false ? '?' : (job.total || 0)) + (job.total_known === false ? '' : ' (' + progress.toFixed(0) + '%)') + ' ' + escapeHtml(job.type === 'prune' ? t('jobFiles', 'files') : (job.type === 'regenerate' ? t('jobImages', 'images') : t('jobScanRecords', 'scan records'))) + '</td><td>' + escapeHtml(formatDate(job.updated_at)) + (' <button type="button" class="button-link yotm-health-view" data-token="' + escapeHtml(job.token) + '">' + escapeHtml(t('viewJob', 'View job')) + '</button>') + '</td></tr>');
       });
     }
 
