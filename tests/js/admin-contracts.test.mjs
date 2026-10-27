@@ -1045,3 +1045,11 @@ test('only persisted cancellation recovery permits one bounded recovery request 
     assert.equal(actionCalls(h, recoveryAction).length, 1);
   }
 });
+
+test('saved-result deep links suppress stored and discovered automatic processing', () => {
+  const harness = createHarness({config: {resultToken: 'saved-result'}, storage: {yotm_job_42_prune: 'active-prune', yotm_job_42_recommendation: 'active-recommend'}});
+  loadAdmin(harness);
+  assert.equal(actionCalls(harness, 'yotm_job_status').length, 0);
+  actionCalls(harness, 'yotm_jobs_recent')[0].deferred.resolve({success: true, data: {jobs: [{token: 'discovered', type: 'prune', status: 'approved', processed: 0, total: 1}]}});
+  assert.deepEqual(harness.posts.map(post => post.payload.action), ['yotm_jobs_recent']);
+});

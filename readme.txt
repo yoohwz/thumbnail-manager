@@ -59,6 +59,14 @@ Recommendations are an informed starting point, not proof that a size is used or
 
 == Frequently Asked Questions ==
 
+= Can I use Thumbnail Manager with Media Optimizer? =
+
+With compatible versions active, Thumbnail Manager prevents Media Optimizer from automatically processing files during thumbnail transactions. After a completed Repair or Force regeneration job, open its saved result and choose “Create WebP/AVIF for completed thumbnails”. Media Optimizer previews the exact successful generated files and requires a separate Run action. This handoff excludes full-size originals and unrelated thumbnail sizes, even when original optimization is enabled in Media Optimizer.
+
+An unfinished Thumbnail Manager job blocks Media Optimizer writes. Complete or cancel the job before optimizing. Expired results, changed files and missing evidence require a new check; they never expand into a whole-library run. Older active Media Optimizer versions must be updated before Thumbnail Manager media operations can run together. Prune does not delete optimizer sidecars through this integration.
+
+
+
 = Can I regenerate thumbnails after changing image sizes? =
 
 Yes. **Check and repair missing thumbnails** first inspects the selected images and the sizes currently enabled in **Thumbnail Sizes**. Review the results, then choose **Repair missing thumbnails**. Repair uses the current full image, honors edits, and preserves existing thumbnails and unrelated metadata. Sizes that cannot be made without enlarging the source are not required. **Force Regenerate** rebuilds the selected attachments more comprehensively from an available original image source and follows the enabled-size policy.

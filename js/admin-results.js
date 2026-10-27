@@ -110,6 +110,7 @@
       }
     }
     if (['running', 'scanning', 'approved', 'deleting', 'awaiting_approval'].includes(job.status) && job.expires_at >= data.read_at) { html += '<p><button type="button" class="button" id="yotm_result_resume">' + text('resultResume', 'Continue active job') + '</button></p>'; }
+    if (data.optimizer_url && /^https?:\/\//i.test(data.optimizer_url)) { html += '<p><a class="button" href="' + esc(data.optimizer_url) + '">' + text('optimizerHandoff', 'Create WebP/AVIF for completed thumbnails') + '</a></p><p class="description">' + text('optimizerHandoffHint', 'Review the exact generated files in Media Optimizer before running. Original images and other thumbnail sizes are excluded.') + '</p>'; }
     html += resultNotes(data) + '<div id="yotm_result_message" class="yo-report-message" role="status"></div>';
     $report.html(html).removeClass('yo-hidden');
   }
@@ -208,4 +209,5 @@
   $report.on('click', '#yotm_result_close', closeReport);
   $('#yotm_regen_results, #yotm_recommend_results, #yotm_prune_results').on('click', '.yotm-open-report', function(){ open($(this).attr('data-token')); });
   window.YOTMResults = Object.freeze({open: open});
+  if (window.YOTM && window.YOTM.resultToken) { open(window.YOTM.resultToken); }
 })(jQuery, window.YOTMAdmin);

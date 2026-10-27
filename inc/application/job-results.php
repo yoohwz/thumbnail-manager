@@ -95,6 +95,14 @@ function yotm_job_results_application( $token, $page = 1, $filter = '' ) {
 	$data['read_at']        = gmdate( 'Y-m-d H:i:s' );
 	$data['complete']       = 'completed' === $job['status'] && ! $expired;
 	$data['can_retry']      = $can_retry;
+	$data['optimizer_url']  = yotm_optimizer_available() && $data['complete'] && 'regenerate' === $job['type'] && ( 'repair' === ( $job['payload']['operation'] ?? '' ) || ! empty( $job['payload']['force_all'] ) ) && $job['succeeded'] > 0 && ! yotm_job_has_terminal_recovery_evidence( $job['id'] )
+		? add_query_arg(
+			array(
+				'page'     => 'yoohw-media-optimizer',
+				'yotm_job' => $job['token'],
+			),
+			admin_url( 'upload.php' )
+		) : '';
 	$data['limitations']    = array(
 		__( 'Saved observations describe this run, not the current state of media. Opening this result starts no processing. Times are UTC.', 'thumbnail-manager' ),
 		__( 'Recent results are normally retained for seven days after completion or stopping; the saved deadline is shown. Export before that deadline to retain a copy.', 'thumbnail-manager' ),

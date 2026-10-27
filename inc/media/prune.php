@@ -2009,6 +2009,10 @@ function yotm_validate_prune_item_ownership( $item, $uploads_base ) {
  * @return array
  */
 function yotm_delete_prune_item( $item, $uploads_base ) {
+	$checkpoint = yotm_optimizer_checkpoint();
+	if ( is_wp_error( $checkpoint ) ) {
+		return $checkpoint;
+	}
 	$path = is_array( $item ) ? ( $item['path'] ?? '' ) : $item;
 	$path = yotm_normalize_filesystem_path( $path );
 
@@ -2157,6 +2161,10 @@ function yotm_delete_file_with_result( $path ) {
  * @return bool|WP_Error
  */
 function yotm_remove_attachment_size_metadata( $attachment_id, $size_name, $filename ) {
+	$checkpoint = yotm_optimizer_checkpoint();
+	if ( is_wp_error( $checkpoint ) ) {
+		return $checkpoint;
+	}
 	$rows = yotm_media_reference_raw_postmeta_rows( $attachment_id, '_wp_attachment_metadata' );
 	if ( is_wp_error( $rows ) ) {
 		return $rows;

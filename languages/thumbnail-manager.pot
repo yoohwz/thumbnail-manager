@@ -2934,3 +2934,31 @@ msgstr ""
 #: inc/admin/view.php:62
 msgid "Results"
 msgstr ""
+
+#: inc/admin/assets.php:98
+msgid "Create WebP/AVIF for completed thumbnails"
+msgstr ""
+
+#: inc/admin/assets.php:99
+msgid "Review the exact generated files in Media Optimizer before running. Original images and other thumbnail sizes are excluded."
+msgstr ""
+
+#: inc/media/optimizer-compatibility.php:44
+msgid "A Thumbnail Manager job is unfinished. Complete or cancel it before optimizing media."
+msgstr ""
+
+#: inc/media/optimizer-compatibility.php:68
+msgid "Update Media Optimizer before running Thumbnail Manager media operations with both plugins active."
+msgstr ""
+
+#: inc/media/optimizer-compatibility.php:107
+msgid "Use a completed, unexpired Repair or Force regeneration result without pending recovery. Run a new check if this result is no longer available."
+msgstr ""
+
+#: inc/media/optimizer-compatibility.php:116
+msgid "The selected successful thumbnail result is unavailable."
+msgstr ""
+
+#: inc/media/optimizer-compatibility.php:125
+msgid "Saved generated-file evidence is incomplete. Run a new check before optimizing these thumbnails."
+msgstr ""

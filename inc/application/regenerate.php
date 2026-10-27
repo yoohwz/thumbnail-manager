@@ -220,13 +220,29 @@ function yotm_regenerate_prepare_application( $scope, $subpath, $ids_raw, $force
 }
 
 /**
+ * Run the existing operation under optional optimizer exclusion.
+ *
+ * @param mixed $token Existing operation argument.
+ * @param mixed $batch Existing operation argument.
+ * @return mixed Existing operation result.
+ */
+function yotm_regenerate_batch_application( $token, $batch ) {
+	$result = yotm_with_optimizer_guard(
+		static function () use ( $token, $batch ) {
+			return yotm_regenerate_batch_application_owned( $token, $batch );
+		}
+	);
+	return is_wp_error( $result ) ? yotm_regenerate_application_error( array( 'msg' => $result->get_error_message() ), 409 ) : $result;
+}
+
+/**
  * Process a persistent regeneration job batch without transport concerns.
  *
  * @param string $token Job token.
  * @param int    $batch Batch size.
  * @return array{success:bool,data:mixed,status:int}
  */
-function yotm_regenerate_batch_application( $token, $batch ) {
+function yotm_regenerate_batch_application_owned( $token, $batch ) {
 	$token = sanitize_text_field( (string) $token );
 	$batch = max( 1, min( 100, absint( $batch ) ) );
 	$job   = yotm_job_get( $token );
@@ -792,6 +808,25 @@ function yotm_regenerate_recover_journal( &$item ) {
 }
 
 /**
+ * Run the existing operation under optional optimizer exclusion.
+ *
+ * @param mixed $attachment_id Existing operation argument.
+ * @param mixed $item Existing operation argument.
+ * @param mixed $worker Existing operation argument.
+ * @param mixed $repair Existing operation argument.
+ * @param mixed $selected_sizes Existing operation argument.
+ * @return mixed Existing operation result.
+ */
+function yotm_regenerate_force_attachment( $attachment_id, $item, $worker, $repair = false, $selected_sizes = null ) {
+	$result = yotm_with_optimizer_guard(
+		static function () use ( $attachment_id, $item, $worker, $repair, $selected_sizes ) {
+			return yotm_regenerate_force_attachment_owned( $attachment_id, $item, $worker, $repair, $selected_sizes );
+		}
+	);
+	return is_wp_error( $result ) ? yotm_regenerate_failure( $result, true ) : $result;
+}
+
+/**
  * Execute one claim-fenced force-regeneration transaction.
  *
  * @param int        $attachment_id Attachment ID.
@@ -801,7 +836,7 @@ function yotm_regenerate_recover_journal( &$item ) {
  * @param array|null $selected_sizes Optional job-local size scope.
  * @return array{status:string,message:string,retryable?:bool}
  */
-function yotm_regenerate_force_attachment( $attachment_id, $item, $worker, $repair = false, $selected_sizes = null ) {
+function yotm_regenerate_force_attachment_owned( $attachment_id, $item, $worker, $repair = false, $selected_sizes = null ) {
 	if ( empty( $item['id'] ) || ! yotm_job_refresh_worker( $worker ) || ! yotm_job_refresh_item_claim( $item ) ) {
 		return yotm_regenerate_failure( __( 'The regeneration claim is stale.', 'thumbnail-manager' ), true );
 	}

@@ -503,6 +503,26 @@ function yotm_job_get_active_for_current_user( $type ) {
 }
 
 /**
+ * Run the existing operation under optional optimizer exclusion.
+ *
+ * @param mixed $type Existing operation argument.
+ * @param mixed $payload Existing operation argument.
+ * @param mixed $args Existing operation argument.
+ * @return mixed Existing operation result.
+ */
+function yotm_job_create( $type, $payload = array(), $args = array() ) {
+	if ( ! in_array( $type, array( 'prune', 'regenerate' ), true ) ) {
+		return yotm_job_create_owned( $type, $payload, $args );
+	}
+	$result = yotm_with_optimizer_guard(
+		static function () use ( $type, $payload, $args ) {
+			return yotm_job_create_owned( $type, $payload, $args );
+		}
+	);
+	return $result;
+}
+
+/**
  * Create a persistent job and enforce the destructive-operation lock.
  *
  * @param string $type    Job type.
@@ -510,7 +530,7 @@ function yotm_job_get_active_for_current_user( $type ) {
  * @param array  $args    Job columns and options.
  * @return array|WP_Error
  */
-function yotm_job_create( $type, $payload = array(), $args = array() ) {
+function yotm_job_create_owned( $type, $payload = array(), $args = array() ) {
 	global $wpdb;
 
 	$ready = yotm_job_storage_ready();

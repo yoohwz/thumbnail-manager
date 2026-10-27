@@ -87,6 +87,7 @@ function yotm_admin_enqueue_assets( $hook ) {
 		array(
 			'ajaxurl'                  => admin_url( 'admin-ajax.php' ),
 			'nonce'                    => wp_create_nonce( 'yotm_prune_nonce' ),
+			'resultToken'              => isset( $_GET['yotm_result_token'] ) ? sanitize_text_field( wp_unslash( $_GET['yotm_result_token'] ) ) : '', // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only owned report; no processing.
 			'mediaSelection'           => yotm_admin_requested_media_selection(),
 			'siteId'                   => get_current_blog_id(),
 			'userId'                   => get_current_user_id(),
@@ -94,6 +95,8 @@ function yotm_admin_enqueue_assets( $hook ) {
 				? yotm_recommend_registered_sizes_signature( yotm_get_registered_sizes() )
 				: '',
 			'i18n'                     => array(
+				'optimizerHandoff'                => __( 'Create WebP/AVIF for completed thumbnails', 'thumbnail-manager' ),
+				'optimizerHandoffHint'            => __( 'Review the exact generated files in Media Optimizer before running. Original images and other thumbnail sizes are excluded.', 'thumbnail-manager' ),
 				'resultSavedUntil'                => __( 'Saved until (UTC):', 'thumbnail-manager' ),
 				'resultBack'                      => __( 'Back to tools', 'thumbnail-manager' ),
 				'resultInspectionDone'            => __( 'Inspection complete', 'thumbnail-manager' ),
