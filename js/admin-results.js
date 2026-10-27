@@ -33,7 +33,7 @@
       }).join('') + '</select></label>';
   }
   function metric(label, value, total, tone) {
-    return '<div class="yo-result-metric ' + (tone || '') + '"><dt>' + esc(label) + '</dt><dd>' + esc(value == null ? '—' : value) + (total === undefined ? '' : '<span> / ' + esc(total == null ? '?' : total) + '</span>') + '</dd></div>';
+    return '<div class="yo-result-metric ' + (tone || '') + '"><dt>' + esc(label.replace(/:$/, '')) + '</dt><dd>' + esc(value == null ? '—' : value) + (total === undefined ? '' : '<span> / ' + esc(total == null ? '?' : total) + '</span>') + '</dd></div>';
   }
   function scopeContent(context) {
     const sizes = Array.isArray(context.selected_sizes) ? context.selected_sizes : [];
@@ -81,9 +81,9 @@
     const job = data.job;
     const context = job.context || {};
     const operation = {check: t('jobThumbnailCheck', 'Check thumbnails'), repair: t('jobThumbnailRepair', 'Repair missing thumbnails'), force: t('runForceRegenerate', 'Force regeneration'), regenerate: t('jobRegenerate', 'Regenerate'), prune: t('jobPrune', 'Prune files'), recommendation: t('jobRecommendation', 'Recommendations')}[context.operation || (context.force_all ? 'force' : job.type)] || job.type;
-    let html = backButton() + '<div class="yo-report-heading"><div><p class="yo-report-kicker">' + text('resultTitle', 'Saved job results') + '</p><h2 id="yotm_report_heading">' + esc(operation) + badge(job.status) + '</h2><p class="yo-report-meta">' + text('resultUpdated', 'Updated (UTC):') + ' ' + esc(job.updated_at) + '</p></div>' + controls() + '</div>';
+    let html = backButton() + '<div class="yo-report-heading"><div><p class="yo-report-kicker">' + text('resultTitle', 'Saved job results') + '</p><h2 id="yotm_report_heading">' + esc(operation) + badge(job.status) + '</h2><p class="yo-report-meta">' + text('resultUpdated', 'Updated (UTC):') + ' ' + esc(job.updated_at) + '<span class="yo-report-retention">' + text('resultSavedUntil', 'Saved until (UTC):') + ' ' + esc(job.expires_at) + '</span></p></div>' + controls() + '</div>';
     html += scopeContent(context);
-    html += '<dl class="yo-report-metrics">' + metric(t('processed', 'Processed:'), job.processed, job.total_known === false ? null : job.total);
+    html += '<dl class="yo-report-metrics">' + metric(job.type === 'prune' ? t('resultFilesProcessed', 'Files processed') : (job.type === 'recommendation' ? t('resultRecordsScanned', 'Records scanned') : t('resultImagesProcessed', 'Images processed')), job.processed, job.total_known === false ? null : job.total);
     if (job.type !== 'recommendation') {
       html += metric(context.operation === 'check' ? t('resultInspected', 'Inspected successfully:') : t('resultSucceeded', 'Successful:'), job.succeeded) + metric(t('skipped', 'Skipped:'), job.skipped) + metric(t('failed', 'Failed:'), job.failed, undefined, job.failed ? 'has-errors' : '');
     }

@@ -14,11 +14,11 @@ function fixture(options = {}) {
     if (selector && typeof selector === 'object') { return selector; }
     if (!nodes.has(selector)) {
       const node = {
-        value: '', attributes: {}, content: '',
+        value: '', attributes: {}, content: '', classes: new Set(),
         on(event, match, handler) { handlers.set(event + ':' + match, handler); return node; },
         html(value) { if (value !== undefined) { node.content = value; } return node; },
         text(value) { if (value !== undefined) { node.content = value; } return node; },
-        removeClass() { return node; }, addClass() { return node; }, trigger() { return node; },
+        removeClass(name) { node.classes.delete(name); return node; }, addClass(name) { node.classes.add(name); return node; }, trigger() { return node; },
         prop(name, value) { if (value !== undefined) { node.attributes[name] = value; return node; } return node.attributes[name]; },
         val() { return node.value; }, attr(name) { return node.attributes[name]; }
       };
@@ -133,4 +133,50 @@ test('the action beside current results opens only the public saved report', () 
   button.attributes['data-token'] = 'source-token';
   harness.handlers.get('click:.yotm-open-report').call(button);
   assert.deepEqual(harness.calls.map(call => call.action), ['yotm_job_results']);
+});
+
+
+test('saved results use a focused view and closing it restores tools without processing', () => {
+  const harness = fixture();
+  harness.window.YOTMResults.open('source-token');
+  assert.ok(harness.nodes.get('.yotm-wrap').classes.has('yo-report-open'));
+  const html = harness.nodes.get('#yotm_job_report').content;
+  assert.match(html, /Back to tools/);
+  assert.match(html, /yo-report-metrics/);
+  assert.match(html, /Outcome &amp; next step/);
+  assert.match(html, /Coverage, dates &amp; retention/);
+  assert.doesNotMatch(html, /<details class="yo-report-notes" open/);
+  harness.handlers.get('click:#yotm_result_close')();
+  assert.ok(!harness.nodes.get('.yotm-wrap').classes.has('yo-report-open'));
+  assert.deepEqual(harness.calls.map(call => call.action), ['yotm_job_results']);
+});
+
+test('successful pages omit retry controls while unavailable results retain a way back', () => {
+  const healthy = fixture({respond(action, data, report) { const result = structuredClone(report); result.items[0].retryable = false; result.items[0].status = 'done'; result.items[0].health.status = 'healthy'; return {success: true, data: result}; }});
+  healthy.window.YOTMResults.open('source-token');
+  const html = healthy.nodes.get('#yotm_job_report').content;
+  assert.doesNotMatch(html, /id="yotm_result_retry"|type="checkbox"/);
+  const missing = fixture({respond() { return {success: false, data: {msg: 'Result unavailable'}}; }});
+  missing.window.YOTMResults.open('missing');
+  assert.match(missing.nodes.get('#yotm_job_report').content, /id="yotm_result_close"/);
+  missing.handlers.get('click:#yotm_result_close')();
+  assert.ok(!missing.nodes.get('.yotm-wrap').classes.has('yo-report-open'));
+});
+
+test('empty filters explain the view and selected-item feedback stays separate from the retry action', () => {
+  const empty = fixture({respond(action, data, report) { const result = structuredClone(report); result.items = []; result.total = 0; result.filter = data.filter || ''; return {success: true, data: result}; }});
+  empty.window.YOTMResults.open('source-token', 1, 'unsuccessful');
+  const html = empty.nodes.get('#yotm_job_report').content;
+  assert.match(html, /No items in this view/);
+  assert.match(html, /Choose another filter/);
+  assert.doesNotMatch(html, /<table/);
+  const selected = fixture();
+  selected.window.YOTMResults.open('source-token');
+  const checkbox = selected.$('#checkbox');
+  checkbox.value = 'a'.repeat(64);
+  checkbox.prop('checked', true);
+  selected.handlers.get('change:.yotm-result-select').call(checkbox);
+  assert.equal(selected.nodes.get('#yotm_result_selection_count').content, '1 / 100 selected');
+  assert.equal(selected.nodes.get('#yotm_result_retry').attributes.disabled, false);
+  assert.deepEqual(selected.calls.map(call => call.action), ['yotm_job_results']);
 });

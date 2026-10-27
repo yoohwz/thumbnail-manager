@@ -163,7 +163,7 @@
 
   function renderRecommendationReport(result) {
     const data = result || {};
-    return renderScanCoverage(data) + renderRecommendationTable(data.items);
+    return renderScanCoverage(data) + '<p class="yo-evidence-summary-note">' + escapeHtml(t('contentEvidenceScope', 'Content hints refer to size names, not a verified image. Policy protection is separate.')) + '</p>' + renderRecommendationTable(data.items);
   }
 
   window.YOTMRecommendationReport = renderRecommendationReport;

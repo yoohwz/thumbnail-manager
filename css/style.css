@@ -1056,3 +1056,10 @@ table.yo-sizes th {
 	.yo-recommendation-table > tbody > tr > td:nth-child(3) { grid-column: 1 / -1; grid-row: 2; }
 	.yo-recommendation-table > tbody > tr > td:last-child { grid-column: 1 / -1; }
 }
+.yo-evidence-group > strong { display: block; font-size: 12px; margin: 0 0 6px; }
+.yo-evidence-summary-note { color: var(--yotm-muted); font-size: 12px; margin: 0 0 12px; }
+@media screen and (max-width: 640px) {
+	.yo-results-table.has-selection > tbody > tr { grid-template-columns: 30px minmax(0, 1fr); column-gap: 10px; }
+	.yo-results-table .yo-result-identity, .yo-results-table .yo-result-state { width: auto; }
+}
+.yo-report-retention { display: block; margin-top: 4px; }
