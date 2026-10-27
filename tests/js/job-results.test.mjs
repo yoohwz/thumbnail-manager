@@ -42,6 +42,7 @@ function fixture(options = {}) {
       const response = options.respond ? options.respond(action, data, report) : {success: true, data: structuredClone(report)};
       return {done(callback) { callback(response); return this; }, fail() { return this; }};
     },
+    activateTab(tab) { calls.push({action: 'activate', tab}); },
     resumeWorkflow(type, token) { calls.push({action: 'resume', type, token}); },
     rememberJob(type, token) { calls.push({action: 'remember', type, token}); },
     loadRecentJobs() { calls.push({action: 'recent'}); }
@@ -89,6 +90,7 @@ test('retry sends only explicitly checked keys and starts the new token', () => 
   const resumes = harness.calls.filter(call => call.action === 'resume');
   assert.equal(resumes.length, 1);
   assert.equal(resumes[0].token, 'new-token');
+  assert.equal(harness.calls.find(call => call.action === 'activate').tab, 'regenerate');
   assert.ok(!harness.nodes.get('.yotm-wrap').classes.has('yo-report-open'));
   assert.ok(harness.nodes.get('#yotm_job_report').classes.has('yo-hidden'));
   assert.equal(harness.calls.filter(call => call.action === 'yotm_job_results').length, 1);
@@ -193,7 +195,8 @@ test('continuing an active job reveals its workflow controls for every job type'
     harness.handlers.get('click:#yotm_result_resume')();
     assert.ok(!harness.nodes.get('.yotm-wrap').classes.has('yo-report-open'));
     assert.ok(harness.nodes.get('#yotm_job_report').classes.has('yo-hidden'));
-    assert.deepEqual(harness.calls.map(call => call.action), ['yotm_job_results', 'resume']);
+    assert.deepEqual(harness.calls.map(call => call.action), ['yotm_job_results', 'activate', 'resume']);
+    assert.equal(harness.calls.at(-2).tab, type === 'recommendation' ? 'recommendations' : type);
     assert.equal(harness.calls.at(-1).token, 'source-token');
   }
 });

@@ -135,6 +135,11 @@
     $('.yotm-wrap').removeClass('yo-report-open');
     if (returnFocus && returnFocus.isConnected && typeof returnFocus.focus === 'function') { returnFocus.focus(); } else { $('#yotm_recent_jobs > summary').trigger('focus'); }
   }
+  function resumeFromReport(type, token) {
+    closeReport();
+    core.activateTab(type === 'recommendation' ? 'recommendations' : type);
+    core.resumeWorkflow(type, token);
+  }
   function exportReport() {
     if (!current || exporting) { return; }
     exporting = true;
@@ -192,13 +197,12 @@
       if (!response || !response.success || !response.data) { $('#yotm_result_message').html(core.htmlNotice('notice-error', core.responseError(response, t('resultRetryFailed', 'Could not prepare retry.')))); $('#yotm_result_retry').prop('disabled', false); return; }
       const data = response.data;
       core.rememberJob(source.type, data.token);
-      closeReport();
-      core.resumeWorkflow(source.type, data.token);
+      resumeFromReport(source.type, data.token);
       selected = new Set();
       core.loadRecentJobs();
     }).fail(function(xhr){ $('#yotm_result_message').html(core.htmlNotice('notice-error', core.responseError(xhr.responseJSON, t('resultRetryFailed', 'Could not prepare retry.')))); $('#yotm_result_retry').prop('disabled', false); });
   });
-  $report.on('click', '#yotm_result_resume', function(){ if (current) { closeReport(); core.resumeWorkflow(current.job.type, current.job.token); } });
+  $report.on('click', '#yotm_result_resume', function(){ if (current) { resumeFromReport(current.job.type, current.job.token); } });
   $report.on('click', '#yotm_result_export', exportReport);
   $report.on('click', '#yotm_result_refresh', function(){ if (current) { open(current.job.token, current.page, current.filter); } });
   $report.on('click', '#yotm_result_close', closeReport);
