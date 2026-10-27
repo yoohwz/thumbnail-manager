@@ -13,7 +13,9 @@ class YOTM_Stop_Job_Status_Test extends WP_UnitTestCase {
 
 	public function set_up() {
 		parent::set_up();
-		yotm_install_job_tables();
+		// Other storage tests exercise dropped tables and request-local readiness.
+		unset( $GLOBALS['yotm_job_storage_readiness'], $GLOBALS['yotm_media_source_last_error'] );
+		$this->assertTrue( yotm_run_job_table_migration() );
 		$this->administrator_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
 		wp_set_current_user( $this->administrator_id );
 		add_filter( 'wp_doing_ajax', '__return_true' );
