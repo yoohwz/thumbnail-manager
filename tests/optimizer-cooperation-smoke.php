@@ -55,6 +55,7 @@ $dir           = trailingslashit( wp_get_upload_dir()['basedir'] ) . 'yotm-optim
 $filter_hits   = 0;
 $loss_filter   = null;
 $commit_filter = null;
+$mutex_backup  = '';
 $child         = null;
 $other_user    = 0;
 $pipes         = array();
@@ -409,9 +410,52 @@ try {
 	$assert( yotm_job_get_item_by_key( $job['id'], hash( 'sha256', 'attachment:' . $fixture_id ) ) === $before_commit_item, 'Failed metadata commit must retain the unchanged persisted recovery journal.' );
 	$assert( $files( $dir ) === $before_commit_files, 'Lost metadata-commit ownership must not roll back or remove staged/live files.' );
 	$pass( 'token loss while final metadata write is refused blocks the second restore write and file rollback, retaining recovery evidence' );
+
+	// Replace only this scope's mutex pathname, then restore the exact original inode.
+	$mutex_backup       = $dir . '/owned-mutex-' . wp_generate_uuid4();
+	$mutex_identity     = lstat( $lock_path );
+	$before_mutex_files = $files( $dir );
+	$mutex_checks       = array();
+	try {
+		$mutex_guard = yotm_with_optimizer_guard(
+			static function () use ( $assert, $lock_path, $mutex_backup, $commit_journal, &$mutex_checks ) {
+				$assert( rename( $lock_path, $mutex_backup ), 'Could not move the owned mutex inode to its private fixture backup.' );
+				$assert( false !== file_put_contents( $lock_path, 'replacement-mutex-fixture' ), 'Could not create the replacement regular mutex inode.' );
+				$entry            = reset( $commit_journal['destinations'] );
+				$rollback_journal = $commit_journal;
+				foreach ( $rollback_journal['destinations'] as &$rollback_entry ) {
+					$rollback_entry['promoted'] = true;
+				}
+				unset( $rollback_entry );
+				$mutex_checks = array(
+					'checkpoint' => yotm_optimizer_checkpoint(),
+					'promotion'  => yotm_regenerate_promote_destination( $entry ),
+					'rollback'   => yotm_regenerate_rollback( $rollback_journal ),
+				);
+				return $mutex_checks;
+			}
+		);
+	} finally {
+		// The guard has closed its held descriptor before the original path is restored.
+		if ( is_file( $mutex_backup ) ) {
+			$assert( rename( $mutex_backup, $lock_path ), 'Could not restore the original mutex inode.' );
+		}
+		clearstatcache( true, $lock_path );
+	}//end try
+	$restored_identity = lstat( $lock_path );
+	$assert( is_wp_error( $mutex_guard ) && is_wp_error( $mutex_checks['checkpoint'] ) && false === $mutex_checks['promotion'] && false === $mutex_checks['rollback'], 'A replaced mutex inode must stop TM promotion, rollback and guard completion.' );
+	$assert( $mutex_identity['dev'] === $restored_identity['dev'] && $mutex_identity['ino'] === $restored_identity['ino'], 'Mutex restoration must retain the exact original device/inode.' );
+	$assert( $files( $dir ) === $before_mutex_files && get_post_meta( $fixture_id, '_wp_attachment_metadata', true ) === $metadata, 'Mutex inode loss changed source/stage bytes or metadata.' );
+	$assert( yotm_job_get_item_by_key( $job['id'], hash( 'sha256', 'attachment:' . $fixture_id ) ) === $before_commit_item, 'Mutex inode loss must preserve the exact persisted recovery journal.' );
+	$mutex_backup = '';
+	$pass( 'replaced mutex inode blocks TM promotion and rollback, preserves files/journal, and restores the exact original lock inode' );
 	echo 'PASS — ' . (int) $assertions . " runtime assertions; both current plugins active; real GD PNG/WebP path.\n";
 	echo "NOT RUN — browser HTTP/nonce/capability transport, multisite switch, hostile filesystem races, process death after promotion and full codec matrix; covered separately where applicable.\n";
 } finally {
+	// Restore the original shared mutex before any fixture cleanup on exceptional paths.
+	if ( '' !== $mutex_backup && is_file( $mutex_backup ) ) {
+		$assert( rename( $mutex_backup, $lock_path ), 'Exceptional cleanup could not restore the original mutex inode.' );
+	}
 	if ( is_resource( $child ) ) {
 		proc_terminate( $child, 9 );
 		foreach ( $pipes as $pipe ) {
