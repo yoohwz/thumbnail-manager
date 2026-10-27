@@ -8,7 +8,7 @@
 class YOTM_Stop_Job_Status_Test extends WP_UnitTestCase {
 
 	private $administrator_id;
-	private $job_ids = array();
+	private $job_ids     = array();
 	private $lock_result = '0';
 
 	public function set_up() {
@@ -39,6 +39,7 @@ class YOTM_Stop_Job_Status_Test extends WP_UnitTestCase {
 	}
 
 	public function capture_die( $message = '' ) {
+		// phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Capture the exact wp_die transport response in this test.
 		throw new RuntimeException( (string) $message );
 	}
 
@@ -81,7 +82,12 @@ class YOTM_Stop_Job_Status_Test extends WP_UnitTestCase {
 	}
 
 	public function test_stop_confirms_cancelled_state_and_retains_audit_without_private_payload() {
-		$job      = $this->create_job( array( 'base' => '/private/uploads', 'private_journal' => array( 'path' => '/private/staging' ) ) );
+		$job      = $this->create_job(
+			array(
+				'base'            => '/private/uploads',
+				'private_journal' => array( 'path' => '/private/staging' ),
+			)
+		);
 		$response = $this->ajax( 'yotm_job_ajax_cancel', $job['token'] );
 
 		$this->assertTrue( $response['success'] );
@@ -92,14 +98,24 @@ class YOTM_Stop_Job_Status_Test extends WP_UnitTestCase {
 		$this->assertStringNotContainsString( '/private/', wp_json_encode( $response ) );
 	}
 
-	public function test_terminal_completion_and_expiry_are_not_reported_as_cancelled() {
-		foreach ( array( 'completed', 'expired', 'cancelled' ) as $status ) {
+	public function test_terminal_completion_and_cancellation_are_reported_truthfully() {
+		foreach ( array( 'completed', 'cancelled' ) as $status ) {
 			$job      = $this->create_job( array(), $status );
 			$response = $this->ajax( 'yotm_job_ajax_cancel', $job['token'] );
 			$this->assertTrue( $response['success'] );
 			$this->assertSame( 'cancelled' === $status, $response['data']['cancelled'] );
 			$this->assertSame( $status, $response['data']['job']['status'] );
 		}
+	}
+
+	public function test_expired_job_remains_rejected_without_claiming_cancellation() {
+		$job      = $this->create_job( array(), 'expired' );
+		$response = $this->ajax( 'yotm_job_ajax_cancel', $job['token'] );
+
+		$this->assertFalse( $response['success'] );
+		$this->assertArrayNotHasKey( 'cancelled', $response['data'] );
+		$this->assertArrayNotHasKey( 'job', $response['data'] );
+		$this->assertSame( 'expired', yotm_job_get_by_id( $job['id'] )['status'] );
 	}
 
 	public function test_busy_stop_is_identifiable_and_does_not_claim_persisted_cancellation() {
@@ -135,7 +151,10 @@ class YOTM_Stop_Job_Status_Test extends WP_UnitTestCase {
 			yotm_job_add_item(
 				$job['id'],
 				hash( 'sha256', 'armed-repair' ),
-				array( 'attachment_id' => 42, 'regeneration_journal' => array( 'path' => '/private/staging' ) )
+				array(
+					'attachment_id'        => 42,
+					'regeneration_journal' => array( 'path' => '/private/staging' ),
+				)
 			)
 		);
 		$stop = $this->ajax( 'yotm_job_ajax_cancel', $job['token'] );
@@ -153,7 +172,12 @@ class YOTM_Stop_Job_Status_Test extends WP_UnitTestCase {
 	}
 
 	public function test_stop_and_status_reject_another_administrator_without_changing_the_job() {
-		$job = $this->create_job( array( 'recovery_only' => 1, 'recovery_terminal_status' => 'cancelled' ) );
+		$job = $this->create_job(
+			array(
+				'recovery_only'            => 1,
+				'recovery_terminal_status' => 'cancelled',
+			)
+		);
 		wp_set_current_user( self::factory()->user->create( array( 'role' => 'administrator' ) ) );
 
 		foreach ( array( 'yotm_job_ajax_cancel', 'yotm_job_ajax_status' ) as $callback ) {
