@@ -965,14 +965,15 @@ test('busy Stop keeps all workflows stopped while late batches, status and recen
     h.timers.splice(0).forEach(timer => timer.callback());
     assert.equal(actionCalls(h, 'yotm_job_cancel').length, 2);
     assert.equal(actionCalls(h, item.batch).length, 1);
-    actionCalls(h, 'yotm_job_cancel').at(-1).deferred.resolve({success: true, data: {job: {token: 'stopping-token', type: item.type, status: 'cancelled'}}});
+    actionCalls(h, 'yotm_job_cancel').at(-1).deferred.resolve({success: true, data: {job: {token: 'stopping-token', type: item.type, status: 'cancelled', processed: 20, total: 40, succeeded: 20, failed: 0, context: {operation: 'check'}}}});
+    if (item.type === 'regenerate') { assert.match(h.$(item.results).html(), /20 \/ 40/); }
     assert.equal(h.storage.has('yotm_job_42_' + item.type), false);
     assert.equal(h.storage.has('yotm_stop_42_0_stopping-token'), false);
   }
 });
 
 test('failed or malformed Stop never claims success or automatically resumes work, including reload', () => {
-  for (const failure of [{status: 0}, {status: 503}, {status: 403}, {status: 409, responseJSON: {data: {code: 'storage_failed'}}}, null]) {
+  for (const failure of [{status: 0}, {status: 404}, {status: 503}, {status: 403}, {status: 409, responseJSON: {data: {code: 'storage_failed'}}}, null]) {
     for (const item of stopCases) {
       const h = createHarness({config: {userId: 7}});
       loadAdmin(h);

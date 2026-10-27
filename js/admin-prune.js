@@ -613,7 +613,7 @@
         return;
       }
       $pruneResults.prepend(htmlNotice('notice-error', t('stopUnconfirmed', 'Stop has not been confirmed. Retry Stop job or reload this page to continue stopping; no new batch will be started.') + ' ' + responseError(stopRequest, t('unknownError', 'Unknown error'))));
-      clearPruneJob({keepResults: true, preserveJob: !isMissingJobStatus(stopRequest)});
+      clearPruneJob({keepResults: true, preserveJob: true});
     });
   }
 

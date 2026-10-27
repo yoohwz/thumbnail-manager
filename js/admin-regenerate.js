@@ -485,9 +485,11 @@
       if (regenToken !== token) {
         return;
       }
+      const job = response.data.job;
+      const context = job.context || {};
+      renderRegenState(Object.assign({}, job, {operation: context.operation, scope_label: context.scope_label, regenerated: job.succeeded || 0, skipped: Math.max(0, (job.processed || 0) - (job.succeeded || 0) - (job.failed || 0))}));
       $regenResults.prepend(htmlNotice('notice-warning', stopJobMessage(response)));
       clearRegenJob({keepResults: true});
-      const job = response.data.job;
       if (job.context && ['check', 'repair'].includes(job.context.operation)) { loadHealthResults(token, 1); }
       $regenResults.trigger('focus');
       loadRecentJobs();
@@ -496,7 +498,7 @@
         return;
       }
       $regenResults.prepend(htmlNotice('notice-error', t('stopUnconfirmed', 'Stop has not been confirmed. Retry Stop job or reload this page to continue stopping; no new batch will be started.') + ' ' + responseError(stopRequest, t('unknownError', 'Unknown error'))));
-      clearRegenJob({keepResults: true, preserveJob: !isMissingJobStatus(stopRequest)});
+      clearRegenJob({keepResults: true, preserveJob: true});
     });
   }
 

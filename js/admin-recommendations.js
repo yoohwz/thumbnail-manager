@@ -279,7 +279,7 @@
         return;
       }
       $recommendResults.prepend(htmlNotice('notice-error', t('stopUnconfirmed', 'Stop has not been confirmed. Retry Stop job or reload this page to continue stopping; no new batch will be started.') + ' ' + responseError(stopRequest, t('unknownError', 'Unknown error'))));
-      clearRecommendation({keepResults: true, preserveJob: !isMissingJobStatus(stopRequest)});
+      clearRecommendation({keepResults: true, preserveJob: true});
     });
   }
 
