@@ -271,9 +271,11 @@ function yotm_regenerate_batch_application( $token, $batch ) {
 		return yotm_regenerate_application_success( $response );
 	}
 	if ( 'selection' === $job['phase'] ) {
-		$selected = 'health_report_v1' === ( $job['payload']['selector'] ?? '' )
+		$selected = 'retry_selection_v1' === ( $job['payload']['selector'] ?? '' )
+			? yotm_job_retry_select_application( $job, $worker )
+			: ( 'health_report_v1' === ( $job['payload']['selector'] ?? '' )
 			? yotm_thumbnail_health_select_report_batch( $job, $worker )
-			: yotm_regenerate_select_folder_batch( $job, $worker, $batch );
+			: yotm_regenerate_select_folder_batch( $job, $worker, $batch ) );
 		if ( is_wp_error( $selected ) ) {
 			return yotm_regenerate_application_error( array( 'msg' => $selected->get_error_message() ), 503 );
 		}

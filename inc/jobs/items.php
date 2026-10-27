@@ -1203,3 +1203,39 @@ function yotm_job_has_terminal_recovery_evidence( $job_id ) {
 	);
 	return '' !== (string) $wpdb->last_error || (bool) $found;
 }
+
+/**
+ * Insert a queued selection item behind the exact worker and payload snapshot.
+ *
+ * @param array  $worker Current selection worker.
+ * @param string $item_key Stable selected identity.
+ * @param array  $payload Selected item data.
+ * @param array  $selection_payload Unchanged job selection, including selector.
+ * @return bool True only for a new insertion by the exact live worker.
+ */
+function yotm_job_worker_add_selection_item( $worker, $item_key, $payload, $selection_payload ) {
+	global $wpdb;
+	$tables = yotm_job_table_names();
+	$now    = gmdate( 'Y-m-d H:i:s' );
+	if ( ! preg_match( '/^[a-f0-9]{64}$/', (string) $item_key ) ) {
+		return false;
+	}
+	$sql = $wpdb->prepare(
+		"INSERT IGNORE INTO {$tables['items']} (job_id,item_key,status,payload,error,bytes,created_at,updated_at)
+		SELECT id,%s,'queued',%s,'',0,%s,%s FROM {$tables['jobs']}
+		WHERE id=%d AND status='running' AND phase='selection' AND BINARY payload=BINARY %s
+		AND worker_token=%s AND worker_generation=%d AND expires_at >= %s AND worker_lease_expires_at >= %s",
+		$item_key,
+		wp_json_encode( $payload ),
+		$now,
+		$now,
+		absint( $worker['job_id'] ?? 0 ),
+		wp_json_encode( $selection_payload ),
+		sanitize_text_field( $worker['token'] ?? '' ),
+		absint( $worker['generation'] ?? 0 ),
+		$now,
+		$now
+	);
+	// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Exact-worker insertion prepared above; plugin-owned tables.
+	return 1 === $wpdb->query( $sql );
+}

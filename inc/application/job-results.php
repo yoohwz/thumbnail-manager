@@ -169,15 +169,22 @@ function yotm_job_retry_application( $token, $keys ) {
 			'retry_of'       => $source['token'],
 			'scope'          => 'ids',
 			'scope_label'    => __( 'Selected unsuccessful images', 'thumbnail-manager' ),
-			'selector'       => 'attachment_id_v1',
+			'selector'       => 'retry_selection_v1',
 			'cursor_mode'    => 0,
-			'discovery_done' => 1,
-			'selection_done' => 1,
+			'discovery_done' => 0,
+			'selection_done' => 0,
 			'inspected_at'   => gmdate( 'Y-m-d H:i:s' ),
-			'scan_phase'     => $transaction ? 'source_index' : 'regenerate',
+			'scan_phase'     => $transaction ? 'source_index' : 'selection',
 		)
 	);
-	$job         = yotm_job_create(
+	foreach ( $rows as $row ) {
+		$item_payload = array( 'attachment_id' => absint( $row['payload']['attachment_id'] ?? 0 ) );
+		if ( isset( $row['payload']['selection_meta_id'] ) ) {
+			$item_payload['selection_meta_id'] = absint( $row['payload']['selection_meta_id'] );
+		}
+		$payload['retry_items'][ $row['item_key'] ] = $item_payload;
+	}
+	$job = yotm_job_create(
 		'regenerate',
 		$payload,
 		array(
@@ -191,20 +198,50 @@ function yotm_job_retry_application( $token, $keys ) {
 	if ( is_wp_error( $job ) ) {
 		return yotm_regenerate_application_error( array( 'msg' => $job->get_error_message() ), 409 );
 	}
-	foreach ( $rows as $row ) {
-		$item_payload = array( 'attachment_id' => absint( $row['payload']['attachment_id'] ?? 0 ) );
-		if ( isset( $row['payload']['selection_meta_id'] ) ) {
-			$item_payload['selection_meta_id'] = absint( $row['payload']['selection_meta_id'] );
-		}
-		if ( ! yotm_job_add_item( $job['id'], $row['item_key'], $item_payload ) ) {
-			yotm_job_delete( $job['id'] );
-			return yotm_regenerate_application_error( array( 'msg' => yotm_job_storage_error()->get_error_message() ), 503 );
-		}
-	}
 	return yotm_regenerate_application_success(
 		array(
 			'token' => $job['token'],
 			'type'  => $job['type'],
 		)
 	);
+}
+
+/**
+ * Materialize a fixed bounded retry selection before allowing execution.
+ *
+ * @param array $job Retry job with the server-derived selection snapshot.
+ * @param array $worker Current worker lease.
+ * @return array|WP_Error
+ */
+function yotm_job_retry_select_application( $job, $worker ) {
+	$payload = $job['payload'];
+	$items   = $payload['retry_items'] ?? array();
+	if ( 'retry_selection_v1' !== ( $payload['selector'] ?? '' ) || ! is_array( $items ) || empty( $items ) || count( $items ) > 100 ) {
+		return new WP_Error( 'yotm_retry_selection_invalid', __( 'The saved retry selection is unavailable. Stop this job and select unsuccessful items again.', 'thumbnail-manager' ) );
+	}
+	if ( ! yotm_job_refresh_worker( $worker ) ) {
+		return yotm_job_storage_error();
+	}
+	foreach ( $items as $key => $item_payload ) {
+		if ( ! yotm_job_worker_add_selection_item( $worker, $key, $item_payload, $payload ) ) {
+			$existing = yotm_job_get_item_by_key( $job['id'], $key );
+			if ( ! $existing || $existing['payload'] !== $item_payload ) {
+				return yotm_job_storage_error();
+			}
+		}
+	}
+	$payload['selection_done'] = 1;
+	$payload['discovery_done'] = 1;
+	$payload['scan_phase']     = 'regenerate';
+	unset( $payload['retry_items'] );
+	if ( ! yotm_job_worker_update(
+		$worker,
+		array(
+			'payload' => $payload,
+			'phase'   => 'regenerate',
+		)
+	) ) {
+		return yotm_job_storage_error();
+	}
+	return yotm_job_get_by_id( $job['id'] );
 }

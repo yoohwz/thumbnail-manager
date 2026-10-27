@@ -153,6 +153,12 @@ class YOTM_Job_Results_Test extends WP_UnitTestCase {
 		$this->assertSame( array( 'thumbnail' ), $new['payload']['selected_sizes'] );
 		$this->assertSame( 'attached_meta_v2', $new['payload']['source_selector'] );
 		$this->assertSame( 77, $new['payload']['selection_meta_max'] );
+		$this->assertSame( 'selection', $new['phase'] );
+		$this->assertSame( 0, yotm_job_count_items( $new['id'] ) );
+		$selection = yotm_regenerate_batch_application( $new['token'], 1 );
+		yotm_job_release_all_workers();
+		$this->assertTrue( $selection['success'], wp_json_encode( $selection ) );
+		$this->assertSame( 0, $selection['data']['processed'], 'Selection never executes media work in the same request.' );
 		$row = yotm_job_get_item_by_key( $new['id'], $key );
 		$this->assertSame(
 			array(
@@ -369,5 +375,62 @@ class YOTM_Job_Results_Test extends WP_UnitTestCase {
 			delete_option( YOTM_MEDIA_REFERENCE_STATE_OPTION );
 			delete_option( YOTM_MEDIA_SOURCE_DIRTY_OPTION );
 		}
+	}
+
+	public function test_retry_selection_replays_partial_materialization_and_rejects_stale_cancelled_or_expired_workers() {
+		$source = $this->source( 'regenerate', array( 'operation' => 'check' ) );
+		$keys   = array( $this->item( $source, 'retry-first', 'failed' ), $this->item( $source, 'retry-second', 'failed' ) );
+		$retry  = yotm_job_retry_application( $source['token'], $keys );
+		$this->assertTrue( $retry['success'] );
+		$job          = yotm_job_get( $retry['data']['token'] );
+		$this->jobs[] = $job['id'];
+		$this->assertSame( 'selection', $job['phase'] );
+		$this->assertSame( 0, yotm_job_count_items( $job['id'] ) );
+		$worker = yotm_job_acquire_worker( $job['id'], array( 'running' ), array( 'selection' ) );
+		$this->assertIsArray( $worker );
+		$first = $job['payload']['retry_items'][ $keys[0] ];
+		$this->assertTrue( yotm_job_worker_add_selection_item( $worker, $keys[0], $first, $job['payload'] ) );
+		yotm_job_release_worker( $worker );
+		$this->assertFalse( yotm_job_worker_add_selection_item( $worker, $keys[1], $first, $job['payload'] ), 'Released worker cannot append.' );
+		$replayed = yotm_regenerate_batch_application( $job['token'], 1 );
+		yotm_job_release_all_workers();
+		$this->assertTrue( $replayed['success'] );
+		$this->assertSame( 0, $replayed['data']['processed'] );
+		$this->assertSame( 2, yotm_job_count_items( $job['id'] ) );
+		$this->assertSame( 'regenerate', yotm_job_get_by_id( $job['id'] )['phase'] );
+		$this->assertArrayNotHasKey( 'retry_items', yotm_job_get_by_id( $job['id'] )['payload'] );
+		$this->assertFalse( yotm_job_worker_add_selection_item( $worker, hash( 'sha256', 'late' ), $first, $job['payload'] ) );
+		// Simulate authoritative terminal/expiry transitions before an old selection write.
+		yotm_job_update(
+			$job['id'],
+			array(
+				'phase'   => 'selection',
+				'payload' => $job['payload'],
+			)
+		);
+		$fresh = yotm_job_acquire_worker( $job['id'], array( 'running' ), array( 'selection' ) );
+		$this->assertIsArray( $fresh );
+		$changed_payload             = $job['payload'];
+		$changed_payload['selector'] = 'other_selection';
+		yotm_job_update( $job['id'], array( 'payload' => $changed_payload ) );
+		$this->assertFalse( yotm_job_worker_add_selection_item( $fresh, hash( 'sha256', 'changed-selector' ), $first, $job['payload'] ) );
+		yotm_job_update(
+			$job['id'],
+			array(
+				'payload' => $job['payload'],
+				'status'  => 'cancelled',
+			)
+		);
+		$this->assertFalse( yotm_job_worker_add_selection_item( $fresh, hash( 'sha256', 'cancelled' ), $first, $job['payload'] ) );
+		$this->assertWPError( yotm_job_retry_select_application( yotm_job_get_by_id( $job['id'] ), $fresh ) );
+		yotm_job_update(
+			$job['id'],
+			array(
+				'status'     => 'running',
+				'expires_at' => gmdate( 'Y-m-d H:i:s', time() - 60 ),
+			)
+		);
+		$this->assertFalse( yotm_job_worker_add_selection_item( $fresh, hash( 'sha256', 'expired' ), $first, $job['payload'] ) );
+		$this->assertSame( 2, yotm_job_count_items( $job['id'] ) );
 	}
 }

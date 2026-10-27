@@ -2785,3 +2785,6 @@ msgstr ""
 
 msgid "View results / download report"
 msgstr ""
+
+msgid "The saved retry selection is unavailable. Stop this job and select unsuccessful items again."
+msgstr ""
