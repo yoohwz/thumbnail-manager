@@ -2451,3 +2451,19 @@ msgstr ""
 #: inc/upload-subpaths.php:64
 msgid "— %s"
 msgstr ""
+
+#: inc/admin/assets.php
+msgid "Waiting for the preparation request to finish so its job can be stopped. If interrupted, reload this page to find and stop it."
+msgstr ""
+
+#: inc/admin/assets.php
+msgid "Stop has not been confirmed. Retry Stop job or reload this page to continue stopping; no new batch will be started."
+msgstr ""
+
+#: inc/admin/assets.php
+msgid "The job completed before it could be stopped. Review its results."
+msgstr ""
+
+#: inc/admin/assets.php
+msgid "The job has expired. No new work will be started."
+msgstr ""

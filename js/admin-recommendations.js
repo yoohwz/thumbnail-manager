@@ -13,6 +13,9 @@
   const getJobStatus = core.getJobStatus;
   const htmlNotice = core.htmlNotice;
   const isMissingJobStatus = core.isMissingJobStatus;
+  const isJobStopping = core.isJobStopping;
+  const stopPreparation = core.stopPreparation;
+  const stopJobMessage = core.stopJobMessage;
   const loadRecentJobs = core.loadRecentJobs;
   const registerWorkflow = core.registerWorkflow;
   const rememberJob = core.rememberJob;
@@ -22,6 +25,7 @@
 
   let recommendToken = '';
   let recommendRunning = false;
+  let prepareRequest = 0;
   let recommendationApplyItems = [];
   let recommendationCanApply = false;
   const $recommendProg = $('#yotm_recommend_progress');
@@ -123,11 +127,11 @@
 
   function recommendationBatch() {
     const token = recommendToken;
-    if (!token || !recommendRunning) {
+    if (!token || !recommendRunning || isJobStopping(token)) {
       return;
     }
     request('yotm_recommend_batch', {token: token, batch: 100}).done(function(response){
-      if (token !== recommendToken || !recommendRunning) {
+      if (token !== recommendToken || !recommendRunning || isJobStopping(token)) {
         return;
       }
       if (!response || !response.success || !response.data) {
@@ -145,7 +149,7 @@
       const label = data.phase === 'content' ? t('scanningContentReferences', 'Scanning content references…') : t('scanningAttachmentMetadata', 'Scanning attachment metadata…');
       recommendationProgress(data.percent || 0, label + ' ' + data.processed + ' / ' + data.total);
       if (!data.done) {
-        window.setTimeout(recommendationBatch, parseInt(data.retry_after_ms || 120, 10));
+        window.setTimeout(function(){ if (token === recommendToken && !isJobStopping(token)) { recommendationBatch(); } }, parseInt(data.retry_after_ms || 120, 10));
         return;
       }
       renderRecommendationResult(data.result || {});
@@ -153,7 +157,7 @@
       $recommendResults.trigger('focus');
       loadRecentJobs();
     }).fail(function(){
-      if (token !== recommendToken) {
+      if (token !== recommendToken || isJobStopping(token)) {
         return;
       }
       $recommendResults.html(htmlNotice('notice-error', t('networkRecommendationScan', 'Network error during recommendation scan.') + ' ' + t('resumeAfterNetworkError', 'Reload this page to resume it.')));
@@ -165,6 +169,8 @@
     if (recommendRunning || recommendToken) {
       return;
     }
+    stopPreparation('recommendation', false);
+    const requestId = ++prepareRequest;
     recommendRunning = true;
     recommendationCanApply = false;
     recommendationApplyItems = [];
@@ -174,6 +180,16 @@
     $('#yotm_apply_recommendations, #yotm_recommend_go_prune').addClass('yo-hidden');
     recommendationProgress(1, t('scanningMediaUsage', 'Scanning media usage…'));
     request('yotm_recommend_prepare').done(function(response){
+      if (requestId !== prepareRequest || !recommendRunning) {
+        const lateToken = response && response.data && (response.data.token || response.data.resume_token);
+        if (lateToken && lateToken !== recommendToken) {
+          if (!recommendToken) { stopRecommendation(lateToken); }
+          else { cancelJob(lateToken).always(loadRecentJobs); }
+        } else if (response && !response.success) {
+          stopPreparation('recommendation', false);
+        }
+        return;
+      }
       if (!response || !response.success || !response.data) {
         const resumeToken = response && response.data ? response.data.resume_token : '';
         if (resumeToken) {
@@ -189,22 +205,28 @@
       recommendationBatch();
       loadRecentJobs();
     }).fail(function(){
+      if (requestId !== prepareRequest || !recommendRunning) { return; }
       $recommendResults.html(htmlNotice('notice-error', t('networkRecommendationScan', 'Network error during recommendation scan.')));
       clearRecommendation({preserveJob: !!recommendToken});
     });
   }
 
   function resumeRecommendation(token) {
+    if (token && isJobStopping(token, 'recommendation')) {
+      stopRecommendation(token);
+      return;
+    }
     if (!token || (recommendToken === token && recommendRunning)) {
       return;
     }
+    ++prepareRequest;
     recommendToken = token;
     recommendRunning = true;
     rememberJob('recommendation', token);
     $recommendRun.prop('disabled', true);
     $recommendCancel.removeClass('yo-hidden');
     getJobStatus(token).done(function(response){
-      if (recommendToken !== token) {
+      if (recommendToken !== token || isJobStopping(token)) {
         return;
       }
       if (!response || !response.success || !response.data) {
@@ -218,7 +240,7 @@
         clearRecommendation();
       }
     }).fail(function(statusRequest){
-      if (recommendToken !== token) {
+      if (recommendToken !== token || isJobStopping(token)) {
         return;
       }
       clearRecommendation({preserveJob: !isMissingJobStatus(statusRequest)});
@@ -226,31 +248,42 @@
   }
 
   $recommendRun.on('click', prepareRecommendation);
-  $recommendCancel.on('click', function(){
-    if (!recommendToken) {
-      clearRecommendation();
+  function stopRecommendation(token) {
+    token = token || recommendToken;
+    ++prepareRequest;
+    recommendRunning = false;
+    if (!token) {
+      stopPreparation('recommendation', true);
+      clearRecommendation({keepResults: true});
+      $recommendRun.prop('disabled', true);
+      $recommendResults.prepend(htmlNotice('notice-info', t('stopAwaitingPrepare', 'Waiting for the preparation request to finish so its job can be stopped. If interrupted, reload this page to find and stop it.')));
       return;
     }
-    const token = recommendToken;
-    recommendRunning = false;
-    $recommendCancel.prop('disabled', true);
+    recommendToken = token;
+    rememberJob('recommendation', token);
+    $recommendRun.prop('disabled', true);
+    $recommendCancel.removeClass('yo-hidden').prop('disabled', true);
     $recommendStat.show().text(t('stopping', 'Stopping after the current batch…'));
-    cancelJob(token).done(function(){
+    cancelJob(token).done(function(response){
       if (recommendToken !== token) {
         return;
       }
-      $recommendResults.prepend(htmlNotice('notice-warning', t('jobStopped', 'Job stopped. Completed work was not rolled back, and the audit record was retained.')));
-      clearRecommendation();
+      $recommendResults.prepend(htmlNotice('notice-warning', stopJobMessage(response)));
+      clearRecommendation({keepResults: true});
+      const job = response.data.job;
+      if (job.status === 'completed' && job.context && job.context.result) { renderRecommendationResult(job.context.result); }
       $recommendResults.trigger('focus');
       loadRecentJobs();
-    }).fail(function(){
+    }).fail(function(stopRequest){
       if (recommendToken !== token) {
         return;
       }
-      recommendRunning = true;
-      $recommendCancel.prop('disabled', false);
+      $recommendResults.prepend(htmlNotice('notice-error', t('stopUnconfirmed', 'Stop has not been confirmed. Retry Stop job or reload this page to continue stopping; no new batch will be started.') + ' ' + responseError(stopRequest, t('unknownError', 'Unknown error'))));
+      clearRecommendation({keepResults: true, preserveJob: true});
     });
-  });
+  }
+
+  $recommendCancel.on('click', function(){ stopRecommendation(); });
 
   $('#yotm_apply_recommendations').on('click', function(){
     if (!recommendationCanApply) {
@@ -272,6 +305,7 @@
 
   registerWorkflow('recommendation', {
     isActive: function(){ return !!recommendToken; },
+    stop: stopRecommendation,
     resume: resumeRecommendation
   });
 })(jQuery, window.YOTMAdmin);

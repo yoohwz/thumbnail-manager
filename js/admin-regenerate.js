@@ -14,6 +14,9 @@
   const getJobStatus = core.getJobStatus;
   const htmlNotice = core.htmlNotice;
   const isMissingJobStatus = core.isMissingJobStatus;
+  const isJobStopping = core.isJobStopping;
+  const stopPreparation = core.stopPreparation;
+  const stopJobMessage = core.stopJobMessage;
   const loadRecentJobs = core.loadRecentJobs;
   const registerWorkflow = core.registerWorkflow;
   const rememberJob = core.rememberJob;
@@ -253,11 +256,11 @@
 
   function regenerateBatch() {
     const token = regenToken;
-    if (!token || !regenRunning) {
+    if (!token || !regenRunning || isJobStopping(token)) {
       return;
     }
     request('yotm_regenerate_batch', {token: token, batch: 20}).done(function(response){
-      if (token !== regenToken || !regenRunning) {
+      if (token !== regenToken || !regenRunning || isJobStopping(token)) {
         return;
       }
       if (!response || !response.success || !response.data) {
@@ -284,7 +287,7 @@
       regenProgress(data.percent || 0, label, discovering || data.phase === 'source_index' || data.phase === 'selection');
       renderRegenState(data);
       if (!data.done) {
-        window.setTimeout(regenerateBatch, parseInt(data.retry_after_ms || 120, 10));
+        window.setTimeout(function(){ if (token === regenToken && !isJobStopping(token)) { regenerateBatch(); } }, parseInt(data.retry_after_ms || 120, 10));
         return;
       }
       const completedToken = regenToken;
@@ -302,7 +305,7 @@
       $regenResults.trigger('focus');
       loadRecentJobs();
     }).fail(function(){
-      if (token !== regenToken) {
+      if (token !== regenToken || isJobStopping(token)) {
         return;
       }
       $regenResults.prepend(htmlNotice('notice-error', t('networkRegenerateBatch', 'Network error during regenerate batch.') + ' ' + t('resumeAfterNetworkError', 'Reload this page to resume it.')));
@@ -325,6 +328,7 @@
       return;
     }
     regenRunning = true;
+    stopPreparation('regenerate', false);
     const requestId = ++prepareRequest;
     reportToken = '';
     resultsToken = '';
@@ -348,8 +352,12 @@
     }
     request('yotm_regenerate_prepare', payload).done(function(response){
       if (requestId !== prepareRequest || !regenRunning) {
-        if (response && response.success && response.data && response.data.token && response.data.token !== regenToken) {
-          cancelJob(response.data.token).always(loadRecentJobs);
+        const lateToken = response && response.data && (response.data.token || response.data.resume_token);
+        if (lateToken && lateToken !== regenToken) {
+          if (!regenToken) { stopRegenerate(lateToken); }
+          else { cancelJob(lateToken, function(job){ return request('yotm_regenerate_batch', {token: job.token, batch: 1}); }).always(loadRecentJobs); }
+        } else if (response && !response.success) {
+          stopPreparation('regenerate', false);
         }
         return;
       }
@@ -383,6 +391,10 @@
   }
 
   function resumeRegenerate(token) {
+    if (token && isJobStopping(token, 'regenerate')) {
+      stopRegenerate(token);
+      return;
+    }
     if (!token || (regenToken === token && regenRunning)) {
       return;
     }
@@ -401,7 +413,7 @@
     $regenCancel.removeClass('yo-hidden');
     $regenResults.html(htmlNotice('notice-info', t('resumeAvailable', 'An unfinished job was found. Resuming it now…')));
     getJobStatus(token).done(function(response){
-      if (regenToken !== token) {
+      if (regenToken !== token || isJobStopping(token)) {
         return;
       }
       if (response && response.success && response.data && response.data.status === 'running') {
@@ -422,7 +434,7 @@
         }
       }
     }).fail(function(statusRequest){
-      if (regenToken !== token) {
+      if (regenToken !== token || isJobStopping(token)) {
         return;
       }
       clearRegenJob({keepResults: true, preserveJob: !isMissingJobStatus(statusRequest)});
@@ -452,37 +464,51 @@
   $('input[name="yotm_regen_scope"]').on('change', toggleRegenScopeFields);
   $('input[name="yotm_regen_mode"]').on('change', toggleRegenModeNote);
   $regenRun.on('click', function(){ prepareRegenerate(); });
-  $regenCancel.on('click', function(){
-    if (!regenToken) {
-      ++prepareRequest;
+  function stopRegenerate(token) {
+    token = token || regenToken;
+    ++prepareRequest;
+    regenRunning = false;
+    if (!token) {
+      stopPreparation('regenerate', true);
       clearRegenJob({keepResults: true});
+      $regenRun.prop('disabled', true);
+      $regenResults.prepend(htmlNotice('notice-info', t('stopAwaitingPrepare', 'Waiting for the preparation request to finish so its job can be stopped. If interrupted, reload this page to find and stop it.')));
       return;
     }
-    const token = regenToken;
-    regenRunning = false;
-    $regenCancel.prop('disabled', true);
+    regenToken = token;
+    rememberJob('regenerate', token);
+    lockRegenControls(true);
+    $regenRun.prop('disabled', true);
+    $regenCancel.removeClass('yo-hidden').prop('disabled', true);
     $regenStat.show().text(t('stopping', 'Stopping after the current batch…'));
-    cancelJob(token).done(function(){
+    cancelJob(token, function(job){ return request('yotm_regenerate_batch', {token: job.token, batch: 1}); }).done(function(response){
       if (regenToken !== token) {
         return;
       }
-      $regenResults.prepend(htmlNotice('notice-warning', t('jobStopped', 'Job stopped. Completed work was not rolled back, and the audit record was retained.')));
+      const job = response.data.job;
+      const context = job.context || {};
+      renderRegenState(Object.assign({}, job, {operation: context.operation, scope_label: context.scope_label, regenerated: job.succeeded || 0, skipped: Math.max(0, (job.processed || 0) - (job.succeeded || 0) - (job.failed || 0))}));
+      $regenResults.prepend(htmlNotice('notice-warning', stopJobMessage(response)));
       clearRegenJob({keepResults: true});
+      if (job.context && ['check', 'repair'].includes(job.context.operation)) { loadHealthResults(token, 1); }
       $regenResults.trigger('focus');
       loadRecentJobs();
     }).fail(function(stopRequest){
       if (regenToken !== token) {
         return;
       }
-      $regenResults.prepend(htmlNotice('notice-warning', responseError(stopRequest && stopRequest.responseJSON, t('stopping', 'Stopping after the current batch…')) + ' ' + t('resumeAfterNetworkError', 'The job is still saved. Reload this page to resume it.')));
+      $regenResults.prepend(htmlNotice('notice-error', t('stopUnconfirmed', 'Stop has not been confirmed. Retry Stop job or reload this page to continue stopping; no new batch will be started.') + ' ' + responseError(stopRequest, t('unknownError', 'Unknown error'))));
       clearRegenJob({keepResults: true, preserveJob: true});
     });
-  });
+  }
+
+  $regenCancel.on('click', function(){ stopRegenerate(); });
 
   toggleRegenScopeFields();
   toggleRegenModeNote();
   registerWorkflow('regenerate', {
     isActive: function(){ return !!regenToken; },
+    stop: stopRegenerate,
     prepare: prepareRegenerate,
     resume: resumeRegenerate
   });

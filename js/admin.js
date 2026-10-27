@@ -9,6 +9,9 @@
   const activeStatuses = ['scanning', 'running', 'awaiting_approval', 'approved', 'deleting'];
   const workflowTypes = new Set(['prune', 'regenerate', 'recommendation']);
   const workflows = Object.create(null);
+  const stoppedTokens = new Set();
+  const stopRequests = new Map();
+  const terminalStatuses = ['cancelled', 'completed', 'expired'];
 
   function t(key, fallback) {
     return i18n[key] || fallback;
@@ -106,8 +109,120 @@
     return $.post(ajaxurl, Object.assign({}, data || {}, {action: action, nonce: nonce}));
   }
 
-  function cancelJob(token) {
-    return request('yotm_job_cancel', {token: token});
+  function stopStorageKey(token) {
+    return 'yotm_stop_' + siteId + '_' + (config.userId || 0) + '_' + token;
+  }
+
+  function stopPreparation(type, pending) {
+    const key = stopStorageKey('prepare_' + type);
+    try {
+      if (pending) { window.localStorage.setItem(key, '1'); }
+      else { window.localStorage.removeItem(key); }
+    } catch (error) {}
+  }
+
+  function isJobStopping(token, type) {
+    if (stoppedTokens.has(token)) {
+      return true;
+    }
+    try {
+      return !!window.localStorage.getItem(stopStorageKey(token)) || !!(type && window.localStorage.getItem(stopStorageKey('prepare_' + type)));
+    } catch (error) {
+      return false;
+    }
+  }
+
+  function stopJobMessage(response) {
+    const status = response.data.job.status;
+    if (status === 'completed') {
+      return t('jobCompletedBeforeStop', 'The job completed before it could be stopped. Review its results.');
+    }
+    if (status === 'expired') {
+      return t('jobExpiredBeforeStop', 'The job has expired. No new work will be started.');
+    }
+    return t('jobStopped', 'Job stopped. Completed work was not rolled back, and the audit record was retained.');
+  }
+
+  function cancelJob(token, recover) {
+    stoppedTokens.add(token);
+    try {
+      window.localStorage.setItem(stopStorageKey(token), '1');
+    } catch (error) {}
+    if (stopRequests.has(token)) {
+      return stopRequests.get(token);
+    }
+    const result = $.Deferred();
+    const promise = result.promise();
+    stopRequests.set(token, promise);
+
+    function fail(response) {
+      stopRequests.delete(token);
+      result.reject(response);
+    }
+
+    function finish(job) {
+      try {
+        window.localStorage.removeItem(stopStorageKey(token));
+      } catch (error) {}
+      stopPreparation(job.type, false);
+      stopRequests.delete(token);
+      result.resolve({success: true, data: {cancelled: job.status === 'cancelled', job: job}});
+    }
+
+    function retry() {
+      window.setTimeout(attempt, 250);
+    }
+
+    function inspect() {
+      getJobStatus(token).done(function(response){
+        const job = response && response.success && response.data;
+        if (!job || job.token !== token) {
+          fail(response);
+          return;
+        }
+        if (terminalStatuses.includes(job.status)) {
+          finish(job);
+          return;
+        }
+        const context = job.context || {};
+        if (context.recovery_only && context.recovery_terminal_status === 'cancelled') {
+          if (typeof recover !== 'function') {
+            fail(response);
+            return;
+          }
+          // Only the server's persisted recovery-only state permits this request.
+          recover(job).done(function(recovered){
+            if (!recovered || !recovered.success) {
+              fail(recovered);
+              return;
+            }
+            retry();
+          }).fail(fail);
+        } else {
+          retry();
+        }
+      }).fail(fail);
+    }
+
+    function attempt() {
+      request('yotm_job_cancel', {token: token}).done(function(response){
+        const job = response && response.success && response.data && response.data.job;
+        if (job && job.token === token && terminalStatuses.includes(job.status)) {
+          finish(job);
+        } else {
+          fail(response);
+        }
+      }).fail(function(response){
+        const data = response && response.responseJSON && response.responseJSON.data;
+        if (response && response.status === 409 && data && data.code === 'yotm_job_cancel_busy') {
+          inspect();
+        } else {
+          fail(response);
+        }
+      });
+    }
+    attempt();
+    return promise;
   }
 
   function getJobStatus(token) {
@@ -133,7 +248,11 @@
     if (!token || !workflow || (typeof workflow.isActive === 'function' && workflow.isActive())) {
       return false;
     }
-    workflow.resume(token);
+    if (isJobStopping(token, type) && typeof workflow.stop === 'function') {
+      workflow.stop(token);
+    } else {
+      workflow.resume(token);
+    }
     return true;
   }
 
@@ -251,7 +370,7 @@
   });
 
   function resumeDiscoveredJob(job) {
-    if (!job) {
+    if (!job || isJobStopping(job.token)) {
       return false;
     }
     return resumeWorkflow(job.type, job.token);
@@ -305,6 +424,9 @@
     getJobStatus: getJobStatus,
     htmlNotice: htmlNotice,
     isMissingJobStatus: isMissingJobStatus,
+    isJobStopping: isJobStopping,
+    stopPreparation: stopPreparation,
+    stopJobMessage: stopJobMessage,
     jobProgress: jobProgress,
     loadRecentJobs: loadRecentJobs,
     recallJob: recallJob,

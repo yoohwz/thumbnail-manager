@@ -82,6 +82,7 @@ function yotm_admin_enqueue_assets( $hook ) {
 			'nonce'                    => wp_create_nonce( 'yotm_prune_nonce' ),
 			'mediaSelection'           => yotm_admin_requested_media_selection(),
 			'siteId'                   => get_current_blog_id(),
+			'userId'                   => get_current_user_id(),
 			'registeredSizesSignature' => function_exists( 'yotm_recommend_registered_sizes_signature' )
 				? yotm_recommend_registered_sizes_signature( yotm_get_registered_sizes() )
 				: '',
@@ -225,6 +226,10 @@ function yotm_admin_enqueue_assets( $hook ) {
 				'scanningAttachmentMetadata'      => __( 'Scanning attachment metadata…', 'thumbnail-manager' ),
 				'scanningContentReferences'       => __( 'Scanning content references…', 'thumbnail-manager' ),
 				'jobStopped'                      => __( 'Job stopped. Completed work was not rolled back, and the audit record was retained.', 'thumbnail-manager' ),
+				'stopUnconfirmed'                 => __( 'Stop has not been confirmed. Retry Stop job or reload this page to continue stopping; no new batch will be started.', 'thumbnail-manager' ),
+				'stopAwaitingPrepare'             => __( 'Waiting for the preparation request to finish so its job can be stopped. If interrupted, reload this page to find and stop it.', 'thumbnail-manager' ),
+				'jobCompletedBeforeStop'          => __( 'The job completed before it could be stopped. Review its results.', 'thumbnail-manager' ),
+				'jobExpiredBeforeStop'            => __( 'The job has expired. No new work will be started.', 'thumbnail-manager' ),
 				'stopping'                        => __( 'Stopping after the current batch…', 'thumbnail-manager' ),
 				'activeJob'                       => __( 'Active job', 'thumbnail-manager' ),
 				'viewJob'                         => __( 'View job', 'thumbnail-manager' ),
