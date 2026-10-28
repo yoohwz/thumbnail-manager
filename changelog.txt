@@ -1,8 +1,25 @@
 === Thumbnail Manager Changelog ===
 
-This file contains the complete release history for Thumbnail Manager.
+This file contains the complete release history and pending changes for Thumbnail Manager.
 
 == Changelog ==
+
+= Unreleased =
+
+Changes merged since 1.5.1; the next version and release date have not been assigned.
+
+* Added Media Library image selection and Check thumbnails actions, with per-image and per-size results and explicit repair of missing enabled thumbnails.
+* Added per-job thumbnail size selection for checking, repair and regeneration without changing future-upload settings or touching unrelated sizes.
+* Added linked content examples to Recommendations, separating size-name hints from attachment evidence and protected-size policies, with scan coverage and limitations.
+* Clarified statistics for images, generated metadata entries and checked files; deduplicated checked bytes by canonical path and exposed missing, unreadable and unverified entries.
+* Unified saved results and recent-job history for checks, repair, regeneration, Recommendations and Prune, with scope, outcomes, next actions and retention information.
+* Added selected retries for eligible unsuccessful items from finished jobs, preserving completed work and requiring a fresh preview and approval for Prune retries.
+* Added downloadable JSON reports with saved scope, outcomes, error reasons and incomplete-data warnings.
+* Added optional Media Optimizer coordination: prevent automatic optimization during thumbnail changes and preview exact successful Repair or Force-generated files before explicitly creating WebP/AVIF sidecars.
+* Added a separate reviewed cleanup handoff after Prune for unchanged sidecars with verifiable Optimizer ownership, and freshness warnings after source optimization or restore attempts.
+* Added the Media Optimizer introduction tab with installation, activation and compatibility guidance.
+* Improved responsive scope controls, evidence, result details and action alignment; Stop now waits for confirmed cancellation without resuming work.
+* Fixed regeneration preparation errors so server guidance, including companion compatibility failures, is shown instead of a generic network error.
 
 = 1.5.1 (Aug 30, 2026) =
 * Fixed regeneration so future uploads, Generate Missing Sizes Only, Force Regenerate, and Save + Regenerate consistently honor the sizes enabled in Thumbnail Sizes

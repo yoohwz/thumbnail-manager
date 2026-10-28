@@ -25,8 +25,9 @@ Large operations run as persistent, bounded jobs. They continue in batches, surv
 * Explicitly repair only missing sizes while preserving existing thumbnail files and the current full image.
 * Select images using the native Media Library picker, individual Check thumbnails links, or the Media Library list-view bulk action.
 * Regenerate all media, current-year images, one uploads folder, or specific image attachments.
+* Choose all enabled sizes or a custom set of enabled sizes for a single check, repair or regeneration job without changing future-upload settings.
 * Review conservative keep recommendations with explicit evidence and confidence based on protected size policies, attachment metadata, and common content references.
-* Resume or cancel persistent jobs and review recent job results and per-item errors.
+* Resume or cancel persistent jobs, reopen recent results, filter unsuccessful items, retry eligible selected items and download JSON reports.
 
 = Review-first cleanup =
 
@@ -52,7 +53,7 @@ Recommendations are an informed starting point, not proof that a size is used or
 
 1. Install the plugin through the WordPress Plugins screen, or upload it to `/wp-content/plugins/thumbnail-manager/`.
 2. Activate Thumbnail Manager.
-3. Go to **Tools > Thumbnail Manager**.
+3. Go to **Tools > Thumbnails**.
 4. Run Recommendations and review the result for your theme and plugins.
 5. Configure future Thumbnail Sizes before regenerating or cleaning files.
 6. Back up the uploads directory before approving cleanup on a production site.
@@ -69,13 +70,11 @@ An unfinished Thumbnail Manager job blocks Media Optimizer writes. Complete or c
 
 Source optimization and restore attempts in Media Optimizer also mark older thumbnail observations and Recommendations for a fresh check. This is conservative: a partial or no-change attempt can still trigger the warning. Saved outcomes are retained; no thumbnails are regenerated automatically. Older results without a source revision snapshot disclose that freshness cannot be confirmed.
 
-
-
 = Can I regenerate thumbnails after changing image sizes? =
 
 Yes. **Check and repair missing thumbnails** first inspects the selected images and the sizes currently enabled in **Thumbnail Sizes**. Review the results, then choose **Repair missing thumbnails**. Repair uses the current full image, honors edits, and preserves existing thumbnails and unrelated metadata. Sizes that cannot be made without enlarging the source are not required. **Force Regenerate** rebuilds the selected attachments more comprehensively from an available original image source and follows the enabled-size policy.
 
-Regenerate can process all media, current-year images, one uploads folder, or specific image attachments. Choose the narrowest useful scope before starting a large job.
+Regenerate can process all media, current-year images, one uploads folder, or specific image attachments. Choose the narrowest useful scope before starting a large job. Under **Thumbnail sizes for this job**, leave **All enabled sizes** selected for the default behavior, or choose one or more enabled sizes. The job selection does not change future-upload settings. Images and sizes outside the selected scope are preserved; sizes disabled or unregistered later are not recreated.
 
 = How do I check and repair selected images? =
 
@@ -86,6 +85,30 @@ Choose **Check thumbnails**, review the per-image and per-size results, then exp
 Checks cover currently enabled registered thumbnail sizes and local upload files. A present file is not a full corruption audit, and the report does not verify frontend pages, external references or CDN copies. Disabled and historical unregistered sizes are preserved and are not recreated. Missing original/full files, missing or malformed complete attachment metadata, unsupported formats and unsafe paths require the suggested manual action; the plugin cannot reconstruct a lost original. An occupied, unreferenced destination is preserved rather than overwritten.
 
 Jobs continue only while the administration page sends batches. After a network interruption or page reload, return to the plugin page to resume the saved active job. Stopping keeps completed work and its audit record; in-flight transactions may need recovery before stopping finishes. After expiry or after resolving a blocked source/storage issue, run a new check. Result retention is temporary, not a permanent media audit.
+
+= What evidence do Recommendations show? =
+
+Recommendations distinguish protected-size policies, recorded attachment metadata and size-name hints found in post content. Content examples link to related posts when accessible so you can check the reference. A size-name hint such as an image class or a stored size setting does not prove that a particular attachment or file is in use. Examples are limited to five posts per size and are not an exhaustive reference list.
+
+Review the reported scan coverage and confidence. Theme templates, custom code, external content, page-builder storage outside the scanned post content and frontend/CDN delivery are not fully inspected. Missing evidence is not proof that a size can be disabled or deleted.
+
+= What do the image, thumbnail and storage counts mean? =
+
+Recommendation statistics separate scanned image attachments, generated size entries recorded in metadata and local files actually checked. The checked-byte total counts each verified canonical file path once, even when metadata references it more than once. Different hard-link paths are not identified as the same physical storage allocation.
+
+These observations cover registered-size metadata during the scan, not all files under uploads or a live filesystem snapshot. Missing files, unreadable files and entries that cannot be verified are reported separately. Per-size savings and Prune candidate bytes are estimates; recorded bytes freed describe the completed deletion work. Review the displayed coverage and limitations before treating a figure as a whole-library total.
+
+= How can I retry unsuccessful items? =
+
+Open a finished job from **Recent jobs**, filter its unsuccessful items and review the reason and suggested action. Resolve source, permission or storage issues, select eligible items and choose **Retry selected items in a new job**. The new job rechecks current conditions and leaves completed items and the original result unchanged. Some skipped items, such as sizes not needed for the source dimensions, require no action.
+
+Resume continues a valid active job; retry starts a separate job from selected unsuccessful items in an available finished or stopped result. Expired results and items with pending media-recovery evidence cannot start a fresh retry. A Prune retry prepares a new preview and requires fresh approval before deletion.
+
+= Can I reopen or export job results? =
+
+Use **Recent jobs** to reopen checks, repairs, regeneration, Recommendations and Prune results. Viewing a saved result does not run the job. Results show the selected scope, outcome counts, item details where available, error reasons, suggested next steps, timestamps and the saved retention deadline. Finished or stopped results are normally retained for seven days; retention is temporary, not a permanent audit archive.
+
+Choose **Download JSON report** from the result view to keep a basic report or send it to support. Export reads the same saved result pages used by the interface. An active job can change during export, so use a finished job for a stable report. Partial, expired or older results may have limited details; their limitations are disclosed. If the saved data is no longer available, run a new check or scan for current evidence.
 
 = Can it clean unused generated thumbnails? =
 
@@ -124,6 +147,23 @@ No. It changes which registered sizes WordPress generates for future uploads and
 Deactivation clears Thumbnail Manager's scheduled cleanup task but retains settings, job history, recovery evidence, and media-reference data. Deleting the plugin files intentionally retains the same database state and does not delete attachment metadata, uploads, generated thumbnails, or recovery files. This retained state may be reused after reinstall, subject to the plugin's normal expiry, ownership, and authorization checks. Remove retained database data separately only if your site's privacy and recovery requirements allow it.
 
 == Changelog ==
+
+= Unreleased =
+
+Changes merged since 1.5.1; the next version and release date have not been assigned.
+
+* Added Media Library image selection and Check thumbnails actions, with per-image and per-size results and explicit repair of missing enabled thumbnails.
+* Added per-job thumbnail size selection for checking, repair and regeneration without changing future-upload settings or touching unrelated sizes.
+* Added linked content examples to Recommendations, separating size-name hints from attachment evidence and protected-size policies, with scan coverage and limitations.
+* Clarified statistics for images, generated metadata entries and checked files; deduplicated checked bytes by canonical path and exposed missing, unreadable and unverified entries.
+* Unified saved results and recent-job history for checks, repair, regeneration, Recommendations and Prune, with scope, outcomes, next actions and retention information.
+* Added selected retries for eligible unsuccessful items from finished jobs, preserving completed work and requiring a fresh preview and approval for Prune retries.
+* Added downloadable JSON reports with saved scope, outcomes, error reasons and incomplete-data warnings.
+* Added optional Media Optimizer coordination: prevent automatic optimization during thumbnail changes and preview exact successful Repair or Force-generated files before explicitly creating WebP/AVIF sidecars.
+* Added a separate reviewed cleanup handoff after Prune for unchanged sidecars with verifiable Optimizer ownership, and freshness warnings after source optimization or restore attempts.
+* Added the Media Optimizer introduction tab with installation, activation and compatibility guidance.
+* Improved responsive scope controls, evidence, result details and action alignment; Stop now waits for confirmed cancellation without resuming work.
+* Fixed regeneration preparation errors so server guidance, including companion compatibility failures, is shown instead of a generic network error.
 
 = 1.5.1 (Aug 30, 2026) =
 
