@@ -61,6 +61,8 @@ Recommendations are an informed starting point, not proof that a size is used or
 
 = Can I use Thumbnail Manager with Media Optimizer? =
 
+The **Media Optimizer** tab introduces the free companion, shows its installation and compatibility state, and links to the standard WordPress screens to review installation or activation. Opening the tab does not install, activate or start processing media.
+
 With compatible versions active, Thumbnail Manager prevents Media Optimizer from automatically processing files during thumbnail transactions. After a completed Repair or Force regeneration job, open its saved result and choose “Create WebP/AVIF for completed thumbnails”. Media Optimizer previews the exact successful generated files and requires a separate Run action. This handoff excludes full-size originals and unrelated thumbnail sizes, even when original optimization is enabled in Media Optimizer.
 
 An unfinished Thumbnail Manager job blocks Media Optimizer writes. Complete or cancel the job before optimizing. Expired results, changed files and missing evidence require a new check; they never expand into a whole-library run. Older active Media Optimizer versions must be updated before Thumbnail Manager media operations can run together. Prune itself continues to preserve optimizer sidecars. After a completed Prune, choose “Review leftover WebP/AVIF sidecars” in its saved result. Media Optimizer prepares a separate preview and approval for each page of up to 100 deleted thumbnail files, then deletes at most eight verified sidecars per explicit batch. Only unchanged sidecars with recorded Optimizer ownership can qualify; legacy, referenced, replaced or unverifiable files remain preserved. Opening the preview never approves or deletes files.

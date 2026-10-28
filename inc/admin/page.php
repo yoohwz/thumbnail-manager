@@ -45,6 +45,66 @@ function yotm_admin_handle_size_management_request() {
 }
 
 /**
+ * Read the optional companion's state and link to native WordPress screens.
+ * Viewing the introduction never installs, activates or processes anything.
+ *
+ * @return array
+ */
+function yotm_admin_optimizer_introduction() {
+	require_once ABSPATH . 'wp-admin/includes/plugin.php';
+	$plugin    = 'yoohw-media-optimizer/yoohw-media-optimizer.php';
+	$installed = file_exists( WP_PLUGIN_DIR . '/' . $plugin );
+	$active    = class_exists( 'YoOhw_Media_Optimizer', false ) || ( $installed && is_plugin_active( $plugin ) );
+	$ready     = $active && yotm_optimizer_available();
+	$state     = $ready ? 'ready' : ( $active ? 'update' : ( $installed ? 'inactive' : 'missing' ) );
+	$directory = 'https://wordpress.org/plugins/yoohw-media-optimizer/';
+	$action    = array(
+		'url'   => $directory,
+		'label' => __( 'View on WordPress.org', 'thumbnail-manager' ),
+	);
+	if ( $ready ) {
+		$action = array(
+			'url'   => admin_url( 'upload.php?page=yoohw-media-optimizer' ),
+			'label' => __( 'Open Media Optimizer', 'thumbnail-manager' ),
+		);
+	} elseif ( $active && current_user_can( 'activate_plugins' ) ) {
+		$action = array(
+			'url'   => self_admin_url( 'plugins.php' ),
+			'label' => __( 'Manage plugin updates', 'thumbnail-manager' ),
+		);
+	} elseif ( $installed && current_user_can( 'activate_plugin', $plugin ) ) {
+		$action = array(
+			'url'   => self_admin_url( 'plugins.php' ),
+			'label' => __( 'Review and activate in Plugins', 'thumbnail-manager' ),
+		);
+	} elseif ( ! $installed && current_user_can( 'install_plugins' ) ) {
+		$action = array(
+			'url'   => add_query_arg(
+				array(
+					'tab'    => 'plugin-information',
+					'plugin' => 'yoohw-media-optimizer',
+				),
+				is_multisite() ? network_admin_url( 'plugin-install.php' ) : admin_url( 'plugin-install.php' )
+			),
+			'label' => __( 'View plugin and install', 'thumbnail-manager' ),
+		);
+	}//end if
+	$labels = array(
+		'ready'    => __( 'Active · Ready to work together', 'thumbnail-manager' ),
+		'update'   => __( 'Active · Compatibility update needed', 'thumbnail-manager' ),
+		'inactive' => __( 'Installed · Not active', 'thumbnail-manager' ),
+		'missing'  => __( 'Not installed', 'thumbnail-manager' ),
+	);
+	return array(
+		'state'      => $state,
+		'status'     => $labels[ $state ],
+		'action'     => $action,
+		'can_manage' => current_user_can( 'install_plugins' ) || current_user_can( 'activate_plugin', $plugin ),
+		'cleanup'    => $ready && defined( 'YoOhw_Media_Optimizer::THUMBNAIL_MANAGER_CLEANUP_API' ) && 1 === YoOhw_Media_Optimizer::THUMBNAIL_MANAGER_CLEANUP_API,
+	);
+}
+
+/**
  * Build the presentation data for the administration page.
  *
  * @param array|null $size_outcome Optional Size Management outcome.
@@ -108,6 +168,7 @@ function yotm_admin_build_page_view_model( $size_outcome = null ) {
 	}
 
 	return array(
+		'optimizer_introduction'    => yotm_admin_optimizer_introduction(),
 		'base'                      => $base,
 		'sizes'                     => $sizes,
 		'subpaths'                  => $subpaths,
