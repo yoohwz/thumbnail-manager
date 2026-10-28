@@ -404,11 +404,11 @@
       renderRegenState(response.data);
       regenerateBatch();
       loadRecentJobs();
-    }).fail(function(){
+    }).fail(function(xhr){
       if (requestId !== prepareRequest || !regenRunning) {
         return;
       }
-      $regenResults.html(htmlNotice('notice-error', t('networkRegeneratePrepare', 'Network error during regenerate prepare.')));
+      $regenResults.html(htmlNotice('notice-error', responseError(xhr, t('networkRegeneratePrepare', 'Network error during regenerate prepare.'))));
       clearRegenJob({keepResults: true, preserveJob: !!regenToken});
     });
   }

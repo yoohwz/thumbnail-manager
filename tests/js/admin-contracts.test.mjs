@@ -773,6 +773,55 @@ test('Regenerate module preserves terminal, empty, and network-retry state trans
   assert.match(retry.cache.get('#yotm_regen_results').html(), /Reload this page to resume it/);
 });
 
+test('Regenerate preparation shows HTTP rejection guidance and unlocks an explicit retry without starting a batch', () => {
+  for (const status of [400, 403, 409, 503]) {
+    const message = status === 409
+      ? 'Update Media Optimizer before running Thumbnail Manager media operations with both plugins active.'
+      : 'Preparation rejected: resolve the reported problem.';
+    const harness = createHarness({responses: {
+      yotm_regenerate_prepare: {kind: 'fail', value: {status, responseJSON: {success: false, data: {msg: message}}}}
+    }});
+    loadAdmin(harness);
+    invokeHandler(harness, '#yotm_regen_run');
+    const html = harness.cache.get('#yotm_regen_results').html();
+    assert.ok(html.includes(message));
+    assert.doesNotMatch(html, /Network error/);
+    assert.equal(actionCalls(harness, 'yotm_regenerate_batch').length, 0);
+    assert.equal(harness.cache.get('#yotm_regen_run').elements[0].disabled, false);
+    assert.equal(harness.storage.has('yotm_job_42_regenerate'), false);
+    invokeHandler(harness, '#yotm_regen_run');
+    assert.equal(actionCalls(harness, 'yotm_regenerate_prepare').length, 2);
+  }
+});
+
+test('Regenerate preparation retains offline fallback and identifies non-JSON HTTP failures without rendering their body', () => {
+  for (const status of [0, 500]) {
+    const harness = createHarness({responses: {
+      yotm_regenerate_prepare: {kind: 'fail', value: {status, responseText: '<script>server error</script>'}}
+    }});
+    loadAdmin(harness);
+    invokeHandler(harness, '#yotm_regen_run');
+    const html = harness.cache.get('#yotm_regen_results').html();
+    assert.ok(html.includes('Network error during regenerate prepare.' + (status ? ' (HTTP 500)' : '')));
+    assert.doesNotMatch(html, /<script>|server error/);
+    assert.equal(actionCalls(harness, 'yotm_regenerate_batch').length, 0);
+    assert.equal(harness.cache.get('#yotm_regen_run').elements[0].disabled, false);
+  }
+});
+
+test('a late preparation rejection cannot replace pending Stop guidance or start media processing', () => {
+  const harness = createHarness();
+  loadAdmin(harness);
+  invokeHandler(harness, '#yotm_regen_run');
+  const prepare = actionCalls(harness, 'yotm_regenerate_prepare')[0];
+  invokeHandler(harness, '#yotm_regen_cancel');
+  const stopped = harness.cache.get('#yotm_regen_results').html();
+  prepare.deferred.reject({status: 409, responseJSON: {data: {msg: 'Late rejected preparation'}}});
+  assert.equal(harness.cache.get('#yotm_regen_results').html(), stopped);
+  assert.equal(actionCalls(harness, 'yotm_regenerate_batch').length, 0);
+  assert.equal(harness.cache.get('#yotm_regen_run').elements[0].disabled, true);
+});
+
 test('Recommendations module preserves terminal, empty, and network-retry state transitions', () => {
   const terminal = createHarness({
     config: {registeredSizesSignature: 'sizes-signature'},
