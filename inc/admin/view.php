@@ -23,6 +23,7 @@ function yotm_render_admin_view( $view ) {
 	$default_keep              = $view['default_keep'];
 	$sizes_saved_notice        = $view['sizes_saved_notice'];
 	$run_regenerate_after_save = $view['run_regenerate_after_save'];
+	$optimizer                 = $view['optimizer_introduction'];
 	?>
 	<div class="wrap yotm-wrap">
 		<h1><?php echo esc_html__( 'Thumbnail Management', 'thumbnail-manager' ); ?></h1>
@@ -82,6 +83,9 @@ function yotm_render_admin_view( $view ) {
 				</button>
 				<button type="button" class="yo-tab" data-tab="sizes" id="yotm_tab_sizes" role="tab" tabindex="-1" aria-controls="yotm_panel_sizes" aria-selected="false">
 					<?php echo esc_html__( 'Thumbnail Sizes', 'thumbnail-manager' ); ?>
+				</button>
+				<button type="button" class="yo-tab" data-tab="optimizer" id="yotm_tab_optimizer" role="tab" tabindex="-1" aria-controls="yotm_panel_optimizer" aria-selected="false">
+					<?php echo esc_html__( 'Media Optimizer', 'thumbnail-manager' ); ?>
 				</button>
 			</div>
 
@@ -666,6 +670,45 @@ function yotm_render_admin_view( $view ) {
 					</button>
 				</div>
 			</form>
+		</div>
+
+		<div class="yo-panel" id="yotm_panel_optimizer" role="tabpanel" aria-labelledby="yotm_tab_optimizer" hidden>
+			<div class="yo-optimizer-intro">
+				<div class="yo-optimizer-overview">
+					<p class="yo-optimizer-eyebrow"><?php echo esc_html__( 'Free companion plugin', 'thumbnail-manager' ); ?></p>
+					<h2><?php echo esc_html__( 'Give your thumbnails a modern format.', 'thumbnail-manager' ); ?></h2>
+					<p class="yo-optimizer-lead"><?php echo esc_html__( 'Thumbnail Manager helps you choose and maintain the right thumbnail sizes. Media Optimizer adds WebP and AVIF copies and helps you check how they are delivered to visitors.', 'thumbnail-manager' ); ?></p>
+					<p><?php echo esc_html__( 'Images are processed on your server, without paid API credits. AVIF availability depends on your server’s image tools.', 'thumbnail-manager' ); ?></p>
+					<div class="yo-optimizer-actions">
+						<a class="button button-primary" href="<?php echo esc_url( $optimizer['action']['url'] ); ?>"><?php echo esc_html( $optimizer['action']['label'] ); ?></a>
+						<a href="https://docs.yoohw.com/category/media-optimizer/" target="_blank" rel="noopener noreferrer"><?php echo esc_html__( 'Read the guide', 'thumbnail-manager' ); ?><span class="screen-reader-text"> <?php echo esc_html__( '(opens in a new tab)', 'thumbnail-manager' ); ?></span></a>
+					</div>
+					<p class="yo-optimizer-status"><span class="dashicons <?php echo 'ready' === $optimizer['state'] ? 'dashicons-yes-alt' : 'dashicons-info-outline'; ?>" aria-hidden="true"></span><strong><?php echo esc_html( $optimizer['status'] ); ?></strong></p>
+					<?php if ( 'ready' !== $optimizer['state'] ) : ?>
+						<p class="description"><?php echo esc_html__( 'Coordinated jobs require a compatible Media Optimizer build. Older active builds must be updated or deactivated before Thumbnail Manager can process media.', 'thumbnail-manager' ); ?></p>
+					<?php endif; ?>
+					<?php if ( ! $optimizer['can_manage'] && 'ready' !== $optimizer['state'] ) : ?>
+						<p class="description"><?php echo esc_html__( 'Ask your site or network administrator to install or activate the plugin.', 'thumbnail-manager' ); ?></p>
+					<?php endif; ?>
+				</div>
+				<ul class="yo-optimizer-benefits">
+					<li><h3><?php echo esc_html__( 'Create WebP and AVIF copies', 'thumbnail-manager' ); ?></h3><p><?php echo esc_html__( 'Generate modern formats for original uploads and WordPress thumbnail sizes, then review coverage in the Media Library.', 'thumbnail-manager' ); ?></p></li>
+					<li><h3><?php echo esc_html__( 'Keep originals under your control', 'thumbnail-manager' ); ?></h3><p><?php echo esc_html__( 'Originals stay unchanged by default. Optional JPEG and PNG optimization requires backups and provides restore tools.', 'thumbnail-manager' ); ?></p></li>
+					<li><h3><?php echo esc_html__( 'Check delivery before enabling it', 'thumbnail-manager' ); ?></h3><p><?php echo esc_html__( 'Use Delivery Assistant to test modern image access before changing frontend delivery.', 'thumbnail-manager' ); ?></p></li>
+				</ul>
+			</div>
+			<div class="yo-optimizer-workflow">
+				<h3><?php echo esc_html__( 'How the two plugins work together', 'thumbnail-manager' ); ?></h3>
+				<ol>
+					<li><strong><?php echo esc_html__( 'Choose your thumbnail scope', 'thumbnail-manager' ); ?></strong><p><?php echo esc_html__( 'Check, repair or regenerate selected images and sizes in Thumbnail Manager.', 'thumbnail-manager' ); ?></p></li>
+					<li><strong><?php echo esc_html__( 'Review the successful results', 'thumbnail-manager' ); ?></strong><p><?php echo esc_html__( 'With compatible versions active, open the saved Repair or Force regeneration result to hand its exact generated files to Media Optimizer.', 'thumbnail-manager' ); ?></p></li>
+					<li><strong><?php echo esc_html__( 'Run the next step explicitly', 'thumbnail-manager' ); ?></strong><p><?php echo esc_html__( 'Review the selected files in Media Optimizer before running. Original images and other thumbnail sizes stay outside that handoff.', 'thumbnail-manager' ); ?></p></li>
+				</ol>
+				<?php if ( $optimizer['cleanup'] ) : ?>
+					<p class="description"><?php echo esc_html__( 'After Prune, its saved result also offers a separate preview and approval for leftover sidecars whose Optimizer ownership can be verified.', 'thumbnail-manager' ); ?></p>
+				<?php endif; ?>
+				<p class="description"><?php echo esc_html__( 'Thumbnail Manager remains usable on its own. Opening this tab starts no installation, activation or media processing.', 'thumbnail-manager' ); ?></p>
+			</div>
 		</div>
 	</div>
 	<?php

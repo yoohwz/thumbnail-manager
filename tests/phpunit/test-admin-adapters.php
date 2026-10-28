@@ -121,6 +121,10 @@ class YOTM_Admin_Adapters_Test extends WP_UnitTestCase {
 
 		foreach ( array(
 			'id="yotm_tabs"',
+			'id="yotm_tab_optimizer"',
+			'aria-controls="yotm_panel_optimizer"',
+			'id="yotm_panel_optimizer"',
+			'aria-labelledby="yotm_tab_optimizer" hidden',
 			'role="tablist"',
 			'role="tabpanel"',
 			'id="yotm_active_job"',
@@ -130,6 +134,29 @@ class YOTM_Admin_Adapters_Test extends WP_UnitTestCase {
 			'name="yotm_enable_sizes[]"',
 		) as $needle ) {
 			$this->assertStringContainsString( $needle, $html );
+		}
+	}
+
+	/**
+	 * The invitation is read-only and delegates installation to WordPress.
+	 */
+	public function test_optimizer_introduction_does_not_install_or_activate_a_plugin() {
+		$before = get_option( 'active_plugins' );
+		$intro  = yotm_admin_optimizer_introduction();
+		$this->assertSame( $before, get_option( 'active_plugins' ) );
+		$this->assertContains( $intro['state'], array( 'missing', 'inactive', 'update', 'ready' ) );
+		$this->assertStringNotContainsString( 'action=install-plugin', $intro['action']['url'] );
+		$this->assertStringNotContainsString( 'action=activate', $intro['action']['url'] );
+		if ( 'missing' === $intro['state'] && current_user_can( 'install_plugins' ) ) {
+			$this->assertStringContainsString( 'plugin-install.php', $intro['action']['url'] );
+			$this->assertStringContainsString( 'tab=plugin-information', $intro['action']['url'] );
+			$this->assertStringContainsString( 'plugin=yoohw-media-optimizer', $intro['action']['url'] );
+		}
+		wp_set_current_user( self::factory()->user->create( array( 'role' => 'editor' ) ) );
+		$restricted = yotm_admin_optimizer_introduction();
+		$this->assertFalse( $restricted['can_manage'] );
+		if ( 'ready' !== $restricted['state'] ) {
+			$this->assertSame( 'https://wordpress.org/plugins/yoohw-media-optimizer/', $restricted['action']['url'] );
 		}
 	}
 
