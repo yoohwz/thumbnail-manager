@@ -1,12 +1,10 @@
 === Thumbnail Manager Changelog ===
 
-This file contains the complete release history and pending changes for Thumbnail Manager.
+This file contains the complete release history for Thumbnail Manager.
 
 == Changelog ==
 
-= Unreleased =
-
-Changes merged since 1.5.1; the next version and release date have not been assigned.
+= 1.6.0 (Oct 28, 2026) =
 
 * Added Media Library image selection and Check thumbnails actions, with per-image and per-size results and explicit repair of missing enabled thumbnails.
 * Added per-job thumbnail size selection for checking, repair and regeneration without changing future-upload settings or touching unrelated sizes.

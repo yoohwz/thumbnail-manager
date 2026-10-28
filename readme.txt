@@ -4,7 +4,7 @@ Tags: thumbnails, regenerate thumbnails, media library, image sizes, cleanup
 Requires at least: 6.3
 Tested up to: 7.0
 Requires PHP: 7.4
-Stable tag: 1.5.1
+Stable tag: 1.6.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -148,9 +148,7 @@ Deactivation clears Thumbnail Manager's scheduled cleanup task but retains setti
 
 == Changelog ==
 
-= Unreleased =
-
-Changes merged since 1.5.1; the next version and release date have not been assigned.
+= 1.6.0 (Oct 28, 2026) =
 
 * Added Media Library image selection and Check thumbnails actions, with per-image and per-size results and explicit repair of missing enabled thumbnails.
 * Added per-job thumbnail size selection for checking, repair and regeneration without changing future-upload settings or touching unrelated sizes.
@@ -165,18 +163,13 @@ Changes merged since 1.5.1; the next version and release date have not been assi
 * Improved responsive scope controls, evidence, result details and action alignment; Stop now waits for confirmed cancellation without resuming work.
 * Fixed regeneration preparation errors so server guidance, including companion compatibility failures, is shown instead of a generic network error.
 
-= 1.5.1 (Aug 30, 2026) =
-
-* Fixed regeneration so future uploads, Generate Missing Sizes Only, Force Regenerate, and Save + Regenerate consistently honor the sizes enabled in Thumbnail Sizes
-* Added review-first cleanup for verified disk-only thumbnails from currently disabled sizes, plus a separate conservative opt-in for historical sizes that are no longer registered
-* Fixed WebP/AVIF Force Regenerate cleanup so the exact obsolete metadata-backed JPEG/PNG derivative is removed after a successful replacement while unrelated files and sidecars remain protected
-* Hardened historical Prune resume and replay handling, including partial evidence cleanup and legitimate no-op database updates
-* Improved Prune scan errors so server/application failures are distinguished from network loss while the persistent job remains available to reload and resume
-* Improved the Prune Files size table layout and marked WordPress core image sizes with the WordPress icon
-
 See `changelog.txt` for the complete release history.
 
 == Upgrade Notice ==
+
+= 1.6.0 =
+
+Adds selected-image thumbnail checks and repair, per-job size scope, clearer Recommendations and statistics, saved results with retries and JSON export, and optional Media Optimizer coordination. Update both plugins to compatible versions before using coordinated jobs.
 
 = 1.5.1 =
 
