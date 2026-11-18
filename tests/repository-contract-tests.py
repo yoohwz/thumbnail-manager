@@ -160,8 +160,8 @@ for path, guidance in (
 for needle in (
     "ChatGPT is not a required participant",
     "Human retains product acceptance",
-    "gpt-6.1-sol",
-    "gpt-6-astra",
+    "gpt-6.2-sol",
+    "gpt-6.2-astra",
 ):
     if needle not in agents:
         fail(f"AGENTS.md is missing autonomous workflow guidance: {needle}")
